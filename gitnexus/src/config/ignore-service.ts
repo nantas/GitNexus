@@ -145,6 +145,9 @@ const IGNORED_EXTENSIONS = new Set([
     // Misc binary
     '.bin', '.dat', '.data', '.raw',
     '.iso', '.img', '.dmg',
+
+    // Unity metadata assets
+    '.meta',
 ]);
 
 // Files to ignore by exact name
@@ -236,4 +239,3 @@ export const shouldIgnorePath = (filePath: string): boolean => {
 
   return false;
 }
-

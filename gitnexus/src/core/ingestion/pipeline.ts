@@ -12,6 +12,7 @@ import { PipelineProgress, PipelineResult } from '../../types/pipeline.js';
 import { walkRepositoryPaths, readFileContents } from './filesystem-walker.js';
 import { getLanguageFromFilename } from './utils.js';
 import { createWorkerPool, WorkerPool } from './workers/worker-pool.js';
+import path from 'path';
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -26,7 +27,10 @@ const AST_CACHE_CAP = 50;
 
 export const runPipelineFromRepo = async (
   repoPath: string,
-  onProgress: (progress: PipelineProgress) => void
+  onProgress: (progress: PipelineProgress) => void,
+  options?: {
+    includeExtensions?: string[];
+  },
 ): Promise<PipelineResult> => {
   const graph = createKnowledgeGraph();
   const symbolTable = createSymbolTable();
@@ -57,7 +61,17 @@ export const runPipelineFromRepo = async (
       });
     });
 
-    const totalFiles = scannedFiles.length;
+    const includeExtensions = new Set(
+      (options?.includeExtensions || [])
+        .map(ext => ext.trim().toLowerCase())
+        .filter(Boolean)
+        .map(ext => (ext.startsWith('.') ? ext : `.${ext}`)),
+    );
+    const extensionFiltered = includeExtensions.size > 0
+      ? scannedFiles.filter(f => includeExtensions.has(path.extname(f.path).toLowerCase()))
+      : scannedFiles;
+
+    const totalFiles = extensionFiltered.length;
 
     onProgress({
       phase: 'extracting',
@@ -74,7 +88,7 @@ export const runPipelineFromRepo = async (
       stats: { filesProcessed: 0, totalFiles, nodesCreated: graph.nodeCount },
     });
 
-    const allPaths = scannedFiles.map(f => f.path);
+    const allPaths = extensionFiltered.map(f => f.path);
     processStructure(graph, allPaths);
 
     onProgress({
@@ -88,7 +102,7 @@ export const runPipelineFromRepo = async (
     // Group parseable files into byte-budget chunks so only ~20MB of source
     // is in memory at a time. Each chunk is: read → parse → extract → free.
 
-    const parseableScanned = scannedFiles.filter(f => getLanguageFromFilename(f.path));
+    const parseableScanned = extensionFiltered.filter(f => getLanguageFromFilename(f.path));
     const totalParseable = parseableScanned.length;
 
     // Build byte-budget chunks

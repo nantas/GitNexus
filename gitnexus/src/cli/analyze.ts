@@ -45,6 +45,7 @@ function ensureHeap(): boolean {
 export interface AnalyzeOptions {
   force?: boolean;
   embeddings?: boolean;
+  extensions?: string;
 }
 
 /** Threshold: auto-skip embeddings for repos with more nodes than this */
@@ -74,6 +75,12 @@ export const analyzeCommand = async (
 
   console.log('\n  GitNexus Analyzer\n');
 
+  const includeExtensions = (options?.extensions || '')
+    .split(',')
+    .map(ext => ext.trim().toLowerCase())
+    .filter(Boolean)
+    .map(ext => (ext.startsWith('.') ? ext : `.${ext}`));
+
   let repoPath: string;
   if (inputPath) {
     repoPath = path.resolve(inputPath);
@@ -97,7 +104,7 @@ export const analyzeCommand = async (
   const currentCommit = getCurrentCommit(repoPath);
   const existingMeta = await loadMeta(storagePath);
 
-  if (existingMeta && !options?.force && existingMeta.lastCommit === currentCommit) {
+  if (existingMeta && !options?.force && existingMeta.lastCommit === currentCommit && includeExtensions.length === 0) {
     console.log('  Already up to date\n');
     return;
   }
@@ -184,11 +191,15 @@ export const analyzeCommand = async (
   }
 
   // ── Phase 1: Full Pipeline (0–60%) ─────────────────────────────────
-  const pipelineResult = await runPipelineFromRepo(repoPath, (progress) => {
-    const phaseLabel = PHASE_LABELS[progress.phase] || progress.phase;
-    const scaled = Math.round(progress.percent * 0.6);
-    updateBar(scaled, phaseLabel);
-  });
+  const pipelineResult = await runPipelineFromRepo(
+    repoPath,
+    (progress) => {
+      const phaseLabel = PHASE_LABELS[progress.phase] || progress.phase;
+      const scaled = Math.round(progress.percent * 0.6);
+      updateBar(scaled, phaseLabel);
+    },
+    { includeExtensions },
+  );
 
   // ── Phase 2: KuzuDB (60–85%) ──────────────────────────────────────
   updateBar(60, 'Loading into KuzuDB...');
@@ -336,6 +347,9 @@ export const analyzeCommand = async (
   console.log(`\n  Repository indexed successfully (${totalTime}s)${embeddingsCached ? ` [${cachedEmbeddings.length} embeddings cached]` : ''}\n`);
   console.log(`  ${stats.nodes.toLocaleString()} nodes | ${stats.edges.toLocaleString()} edges | ${pipelineResult.communityResult?.stats.totalCommunities || 0} clusters | ${pipelineResult.processResult?.stats.totalProcesses || 0} flows`);
   console.log(`  KuzuDB ${kuzuTime}s | FTS ${ftsTime}s | Embeddings ${embeddingSkipped ? embeddingSkipReason : embeddingTime + 's'}`);
+  if (includeExtensions.length > 0) {
+    console.log(`  File filter: ${includeExtensions.join(', ')}`);
+  }
   console.log(`  ${repoPath}`);
 
   if (aiContext.files.length > 0) {

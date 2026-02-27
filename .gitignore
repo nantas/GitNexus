@@ -37,10 +37,6 @@ coverage/
 .vercel
 
 
-
-
-
-
 .env*.local
 .gitnexus
 .claude/settings.local.json
@@ -56,3 +52,6 @@ repomix-output*
 
 # Design docs (local only)
 docs/plans/
+
+# obsidian
+.obsidian
