@@ -58,28 +58,6 @@ function getRowValue<T = any>(row: any, key: string, index: number): T | undefin
   return row[index] as T | undefined;
 }
 
-function getRowType(
-  row: any,
-  opts: {
-    typeKey?: string;
-    typeIndex?: number;
-    idKey?: string;
-    idIndex?: number;
-  } = {},
-): string | undefined {
-  const {
-    typeKey = 'type',
-    typeIndex = 2,
-    idKey = 'id',
-    idIndex = 0,
-  } = opts;
-  const explicit = getRowValue<any>(row, typeKey, typeIndex);
-  if (typeof explicit === 'string' && explicit.trim().length > 0) return explicit;
-  const inferred = inferTypeFromId(getRowValue<any>(row, idKey, idIndex));
-  if (inferred && VALID_NODE_LABELS.has(inferred)) return inferred;
-  return inferred;
-}
-
 export interface CodebaseContext {
   projectName: string;
   stats: {
