@@ -43,6 +43,7 @@ coverage/
 
 # Claude Code worktrees
 .claude/worktrees/
+.worktrees/
 
 # Assets (screenshots, images)
 assets/
