@@ -7,6 +7,12 @@ export function buildSymbolRows(candidates: any[], selectedUids: string[], optio
   const minSelected = options.minSelected ?? 20;
   const maxSelected = options.maxSelected ?? 20;
 
+  for (const [key, value] of [['minSelected', minSelected], ['maxSelected', maxSelected]] as const) {
+    if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+      throw new Error(`${key} must be a finite non-negative integer, got ${value}`);
+    }
+  }
+
   if (minSelected > maxSelected) {
     throw new Error(`invalid selected symbol range: minSelected (${minSelected}) exceeds maxSelected (${maxSelected})`);
   }
