@@ -43,3 +43,10 @@ Run type: first full real-repo run for P0-T2
 2. Re-generate `tasks.jsonl` queries/targets from confirmed resolvable symbol names and UIDs.
 3. Keep thresholds unchanged for now; run one calibrated full benchmark after dataset correction.
 4. After calibrated run, classify residual failures by `query/context/impact` and adjust thresholds only with evidence.
+
+## 6) P0-T2 Verification Checklist
+
+1. Full run executed: `YES` (`npm run benchmark:neonspark:full` executed; command exit `1` with benchmark gate `FAIL`, acceptable for first real-repo run).
+2. Reports archived: `YES` (`docs/reports/2026-03-02-neonspark-v1-benchmark-report.json` and `docs/reports/2026-03-02-neonspark-v1-benchmark-summary.md` exist).
+3. Reproducibility commands documented: `YES` (`docs/2026-03-02-neonspark-benchmark-usage.md` documents analyze + alias + scope + benchmark + archive flow).
+4. First-run failures categorized: `YES` (`tool-error`, `missing-required-hit`, `insufficient-result-count` documented above and in report `triage`).

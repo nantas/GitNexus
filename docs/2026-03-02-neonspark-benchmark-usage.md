@@ -2,29 +2,24 @@
 
 Run from repo root: `/Users/nantasmac/projects/agentic/GitNexus`.
 
-## 1) Sync fixture
+## 1) Analyze repo root with scoped scan (no fixture git init needed)
 
 ```bash
 cd gitnexus
 npm run build
-node dist/benchmark/neonspark-sync.js /Volumes/Shuttle/unity-projects/neonspark ../benchmarks/fixtures/neonspark-v1-subset ../benchmarks/unity-baseline/neonspark-v1/sync-manifest.txt
+node dist/cli/index.js analyze --force --extensions .cs /Volumes/Shuttle/unity-projects/neonspark \
+  --repo-alias neonspark-v1-subset \
+  --scope-manifest ../benchmarks/unity-baseline/neonspark-v1/sync-manifest.txt
 ```
 
-## 2) Analyze fixture
-
-```bash
-cd gitnexus
-node dist/cli/index.js analyze --force --extensions .cs ../benchmarks/fixtures/neonspark-v1-subset
-```
-
-## 3) Extract candidates
+## 2) Extract candidates
 
 ```bash
 cd gitnexus
 node dist/benchmark/neonspark-candidates.js neonspark-v1-subset ../benchmarks/unity-baseline/neonspark-v1/symbols.candidates.jsonl
 ```
 
-## 4) Materialize selected symbols
+## 3) Materialize selected symbols
 
 ```bash
 cd gitnexus
@@ -32,14 +27,14 @@ cd gitnexus
 node dist/benchmark/neonspark-materialize.js ../benchmarks/unity-baseline/neonspark-v1/symbols.candidates.jsonl ../benchmarks/unity-baseline/neonspark-v1/symbols.selected.txt ../benchmarks/unity-baseline/neonspark-v1/symbols.jsonl
 ```
 
-## 5) Run full benchmark
+## 4) Run full benchmark
 
 ```bash
 cd gitnexus
 npm run benchmark:neonspark:full
 ```
 
-## 6) Archive report artifacts
+## 5) Archive report artifacts
 
 ```bash
 cd gitnexus
