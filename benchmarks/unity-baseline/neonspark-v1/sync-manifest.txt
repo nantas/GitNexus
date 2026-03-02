@@ -1,0 +1,4 @@
+# main gameplay
+Assets/NEON/Code
+Packages/com.veewo.*
+Packages/com.neonspark.*
