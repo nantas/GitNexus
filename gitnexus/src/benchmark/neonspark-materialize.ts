@@ -50,6 +50,9 @@ export interface MaterializeCliArgs extends Required<BuildSymbolRowsOptions> {
 }
 
 function parseNonNegativeInteger(value: string, flagName: string): number {
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`${flagName} must be a finite non-negative integer, got ${value}`);
+  }
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
     throw new Error(`${flagName} must be a finite non-negative integer, got ${value}`);

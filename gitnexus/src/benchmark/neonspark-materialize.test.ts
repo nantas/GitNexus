@@ -102,6 +102,29 @@ test('parseMaterializeCliArgs rejects invalid CLI flags and values', () => {
     () => parseMaterializeCliArgs(['candidates.jsonl', 'selected.txt', 'symbols.jsonl', '--unknown', '1']),
     /unknown option/i,
   );
+  assert.throws(
+    () => parseMaterializeCliArgs(['candidates.jsonl', 'selected.txt', 'symbols.jsonl', '--min-selected', '']),
+    /non-negative integer/i,
+  );
+  assert.throws(
+    () => parseMaterializeCliArgs(['candidates.jsonl', 'selected.txt', 'symbols.jsonl', '--min-selected', '   ']),
+    /non-negative integer/i,
+  );
+  assert.throws(
+    () => parseMaterializeCliArgs(['candidates.jsonl', 'selected.txt', 'symbols.jsonl', '--min-selected', '1e2']),
+    /non-negative integer/i,
+  );
+  assert.throws(
+    () => parseMaterializeCliArgs(['candidates.jsonl', 'selected.txt', 'symbols.jsonl', '--min-selected', '0x10']),
+    /non-negative integer/i,
+  );
+});
+
+test('parseMaterializeCliArgs rejects minSelected greater than maxSelected', () => {
+  assert.throws(
+    () => parseMaterializeCliArgs(['candidates.jsonl', 'selected.txt', 'symbols.jsonl', '--min-selected', '60', '--max-selected', '40']),
+    /invalid selected symbol range/i,
+  );
 });
 
 test('mainMaterializeCli reads candidates and selected files and writes symbols jsonl', async () => {

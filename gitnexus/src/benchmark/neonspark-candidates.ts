@@ -80,6 +80,8 @@ export interface CandidatesCliArgs {
   outFile: string;
 }
 
+export type ExtractCandidatesFn = (repoName: string, outFile: string) => Promise<number>;
+
 export function parseCandidatesCliArgs(argv: string[]): CandidatesCliArgs {
   if (argv.length !== 2) {
     throw new Error('usage: node dist/benchmark/neonspark-candidates.js <repoName> <outFile>');
@@ -88,9 +90,12 @@ export function parseCandidatesCliArgs(argv: string[]): CandidatesCliArgs {
   return { repoName, outFile };
 }
 
-export async function mainCandidatesCli(argv: string[] = process.argv.slice(2)): Promise<number> {
+export async function mainCandidatesCli(
+  argv: string[] = process.argv.slice(2),
+  runExtract: ExtractCandidatesFn = extractCandidates,
+): Promise<number> {
   const { repoName, outFile } = parseCandidatesCliArgs(argv);
-  const written = await extractCandidates(repoName, outFile);
+  const written = await runExtract(repoName, outFile);
   return written;
 }
 
