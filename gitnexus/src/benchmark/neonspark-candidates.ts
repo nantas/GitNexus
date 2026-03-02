@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { listRegisteredRepos } from '../storage/repo-manager.js';
 import { closeKuzu, executeQuery, initKuzu } from '../mcp/core/kuzu-adapter.js';
 
@@ -72,4 +73,34 @@ export async function extractCandidates(repoName: string, outFile: string): Prom
   } finally {
     await closeKuzu(repoName);
   }
+}
+
+export interface CandidatesCliArgs {
+  repoName: string;
+  outFile: string;
+}
+
+export function parseCandidatesCliArgs(argv: string[]): CandidatesCliArgs {
+  if (argv.length !== 2) {
+    throw new Error('usage: node dist/benchmark/neonspark-candidates.js <repoName> <outFile>');
+  }
+  const [repoName, outFile] = argv;
+  return { repoName, outFile };
+}
+
+export async function mainCandidatesCli(argv: string[] = process.argv.slice(2)): Promise<number> {
+  const { repoName, outFile } = parseCandidatesCliArgs(argv);
+  const written = await extractCandidates(repoName, outFile);
+  return written;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  mainCandidatesCli()
+    .then((written) => {
+      console.log(`wrote ${written} candidate rows`);
+    })
+    .catch((error: any) => {
+      console.error(String(error?.message || error));
+      process.exitCode = 1;
+    });
 }

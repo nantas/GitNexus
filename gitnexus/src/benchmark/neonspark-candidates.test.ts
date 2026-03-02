@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filterNeonsparkPaths, toCandidateRow } from './neonspark-candidates.js';
+import { filterNeonsparkPaths, parseCandidatesCliArgs, toCandidateRow } from './neonspark-candidates.js';
 
 test('filterNeonsparkPaths keeps code and allowed package prefixes', () => {
   const rows = [
@@ -24,4 +24,15 @@ test('toCandidateRow normalizes required fields', () => {
   });
   assert.equal(row.symbol_name, 'Tick');
   assert.equal(row.start_line, 11);
+});
+
+test('parseCandidatesCliArgs parses repoName and outFile', () => {
+  const parsed = parseCandidatesCliArgs(['neonspark-v1', '/tmp/candidates.jsonl']);
+  assert.equal(parsed.repoName, 'neonspark-v1');
+  assert.equal(parsed.outFile, '/tmp/candidates.jsonl');
+});
+
+test('parseCandidatesCliArgs rejects missing required args', () => {
+  assert.throws(() => parseCandidatesCliArgs(['neonspark-v1']), /usage/i);
+  assert.throws(() => parseCandidatesCliArgs([]), /usage/i);
 });
