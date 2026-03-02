@@ -1,7 +1,7 @@
 # NeonSpark v2 MCP Explainability Sampling Report
 
-Date: 2026-03-02  
-Dataset: `benchmarks/unity-baseline/neonspark-v2/tasks.jsonl`  
+Date: 2026-03-02
+Dataset: `benchmarks/unity-baseline/neonspark-v2/tasks.jsonl`
 Target repo alias: `neonspark-v1-subset`
 
 ## 1) Sampling Scope
