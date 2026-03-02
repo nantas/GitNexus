@@ -13,5 +13,6 @@ test('package scripts include neonspark benchmark commands', async () => {
   const raw = await fs.readFile('package.json', 'utf-8');
   const pkg = JSON.parse(raw) as { scripts?: Record<string, string> };
   const scripts = pkg.scripts || {};
-  assert.ok(scripts['benchmark:neonspark:full']);
+  assert.ok(scripts['benchmark:neonspark:v2:full']);
+  assert.ok(scripts['benchmark:neonspark:v2:quick']);
 });

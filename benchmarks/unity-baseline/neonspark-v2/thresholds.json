@@ -1,0 +1,15 @@
+{
+  "query": {
+    "precisionMin": 0.9,
+    "recallMin": 0.85
+  },
+  "contextImpact": {
+    "f1Min": 0.65
+  },
+  "smoke": {
+    "passRateMin": 1
+  },
+  "performance": {
+    "analyzeTimeRegressionMaxPct": 15
+  }
+}

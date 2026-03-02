@@ -43,7 +43,9 @@
     "benchmark:quick": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/v1 --profile quick --target-path ../benchmarks/fixtures/unity-mini",
     "benchmark:full": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/v1 --profile full --target-path ../benchmarks/fixtures/unity-mini",
     "benchmark:neonspark:full": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/neonspark-v1 --profile full --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v1/sync-manifest.txt",
-    "benchmark:neonspark:quick": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/neonspark-v1 --profile quick --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v1/sync-manifest.txt"
+    "benchmark:neonspark:quick": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/neonspark-v1 --profile quick --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v1/sync-manifest.txt",
+    "benchmark:neonspark:v2:full": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/neonspark-v2 --profile full --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
+    "benchmark:neonspark:v2:quick": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/neonspark-v2 --profile quick --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",
