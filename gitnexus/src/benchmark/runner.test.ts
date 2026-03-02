@@ -26,8 +26,21 @@ test('resolveBenchmarkRepoName uses target basename when no repo input exists', 
   assert.equal(resolved, 'neonspark');
 });
 
-test('hasRequiredHitFuzzy allows name-based match when uid is not present', () => {
+test('hasRequiredHitFuzzy does not treat wrong same-name uid as a required hit for uid expectations', () => {
   const expected = 'Class:Assets/NEON/Code/Game/LootSystem/LootManager.cs:LootManager';
+  const hitUids = ['Class:Assets/NEON/Code/Game/LootSystem/LootDropRecorder.cs:LootManager'];
+  const matched = hasRequiredHitFuzzy(expected, hitUids, ['LootManager']);
+  assert.equal(matched, false);
+});
+
+test('hasRequiredHitFuzzy accepts correct uid for required hit', () => {
+  const expected = 'Class:Assets/NEON/Code/Game/LootSystem/LootManager.cs:LootManager';
+  const hitUids = ['class:assets/neon/code/game/lootsystem/lootmanager.cs:lootmanager'];
+  assert.equal(hasRequiredHitFuzzy(expected, hitUids, []), true);
+});
+
+test('hasRequiredHitFuzzy keeps legacy name fallback for non-uid expectations', () => {
+  const expected = 'LootManager';
   const matched = hasRequiredHitFuzzy(expected, [], ['LootManager']);
   assert.equal(matched, true);
 });

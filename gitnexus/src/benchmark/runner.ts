@@ -124,13 +124,22 @@ function extractHits(result: any): { uids: string[]; names: string[] } {
 
 export function hasRequiredHitFuzzy(expectedUid: string, hitUids: string[], hitNames: string[]): boolean {
   const expectedNorm = normalize(expectedUid);
+  const expectedLooksLikeUid = expectedUid.includes(':');
+
+  if (expectedLooksLikeUid) {
+    for (const uid of hitUids) {
+      const n = normalize(uid);
+      if (n === expectedNorm || n.endsWith(expectedNorm) || expectedNorm.endsWith(n)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   const expectedSym = expectedName(expectedUid);
 
   for (const uid of hitUids) {
     const n = normalize(uid);
-    if (n === expectedNorm || n.endsWith(expectedNorm) || expectedNorm.endsWith(n)) {
-      return true;
-    }
     if (expectedSym && n.includes(expectedSym)) {
       return true;
     }
