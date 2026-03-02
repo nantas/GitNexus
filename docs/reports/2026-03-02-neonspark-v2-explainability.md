@@ -141,11 +141,12 @@ Executed from `gitnexus/`:
 
 1. `npm run build` -> `PASS`
 2. `npm run test:benchmark` -> `PASS` (`48` tests passed, `0` failed)
-3. `npm run benchmark:neonspark:v2:quick` -> `FAIL`
-   - query precision: `0.833`
-   - query recall: `0.833`
+3. `npm run benchmark:neonspark:v2:quick` -> `PASS`
+   - query precision: `1.000`
+   - query recall: `1.000`
    - context/impact F1: `1.000`
-   - gate failures: `query.precision`, `query.recall`
-   - triage: `missing-required-hit` (`1`, task index `2`, `InputManager`)
-4. `node dist/cli/index.js status` -> `PASS` (`up-to-date`, indexed commit `79ad888`, current commit `79ad888`)
+   - smoke pass rate: `1.000`
+   - gate failures: `none`
+4. `node dist/cli/index.js status` -> `PASS` (command succeeded; repo status is `stale`, indexed commit `79ad888`, current commit `af7df7d`)
+   - Clarification: staleness is expected here because new commits were created after the last index for this worktree.
 5. `node dist/cli/index.js list` -> `PASS` (`4` indexed repos listed; `neonspark-v1-subset` mapped to `/Volumes/Shuttle/unity-projects/neonspark`)
