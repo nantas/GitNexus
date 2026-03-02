@@ -41,7 +41,9 @@
     "prepare": "npm run build",
     "test:benchmark": "npm run build && node --test dist/benchmark/*.test.js dist/cli/*.test.js",
     "benchmark:quick": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/v1 --profile quick --target-path ../benchmarks/fixtures/unity-mini",
-    "benchmark:full": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/v1 --profile full --target-path ../benchmarks/fixtures/unity-mini"
+    "benchmark:full": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/v1 --profile full --target-path ../benchmarks/fixtures/unity-mini",
+    "benchmark:neonspark:full": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/neonspark-v1 --profile full --target-path ../benchmarks/fixtures/neonspark-v1-subset",
+    "benchmark:neonspark:quick": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/neonspark-v1 --profile quick --target-path ../benchmarks/fixtures/neonspark-v1-subset"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",
