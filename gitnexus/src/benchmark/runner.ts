@@ -122,7 +122,7 @@ function extractHits(result: any): { uids: string[]; names: string[] } {
   return { uids: [...uids], names: [...names] };
 }
 
-function hasExpectedHit(expectedUid: string, hitUids: string[], hitNames: string[]): boolean {
+export function hasRequiredHitFuzzy(expectedUid: string, hitUids: string[], hitNames: string[]): boolean {
   const expectedNorm = normalize(expectedUid);
   const expectedSym = expectedName(expectedUid);
 
@@ -144,6 +144,11 @@ function hasExpectedHit(expectedUid: string, hitUids: string[], hitNames: string
   }
 
   return false;
+}
+
+export function hasForbiddenUidHitStrict(forbiddenUid: string, hitUids: string[]): boolean {
+  const forbiddenNorm = normalize(forbiddenUid);
+  return hitUids.some((uid) => normalize(uid) === forbiddenNorm);
 }
 
 function mapToolInput(task: TaskCase, repo?: string): Record<string, unknown> {
@@ -215,7 +220,7 @@ async function evaluateTask(
 
     let truePositive = 0;
     for (const expected of task.must_hit_uids) {
-      if (hasExpectedHit(expected, hits.uids, hits.names)) {
+      if (hasRequiredHitFuzzy(expected, hits.uids, hits.names)) {
         truePositive += 1;
       } else {
         failures.push({ kind: 'missing-required-hit', taskIndex: index, detail: expected });
@@ -223,7 +228,7 @@ async function evaluateTask(
     }
 
     for (const forbidden of task.must_not_hit_uids) {
-      if (hasExpectedHit(forbidden, hits.uids, hits.names)) {
+      if (hasForbiddenUidHitStrict(forbidden, hits.uids)) {
         failures.push({ kind: 'forbidden-hit-present', taskIndex: index, detail: forbidden });
       }
     }

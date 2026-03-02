@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveBenchmarkRepoName } from './runner.js';
+import { hasForbiddenUidHitStrict, hasRequiredHitFuzzy, resolveBenchmarkRepoName } from './runner.js';
 
 test('resolveBenchmarkRepoName prefers explicit repo', () => {
   const resolved = resolveBenchmarkRepoName({
@@ -24,4 +24,22 @@ test('resolveBenchmarkRepoName uses target basename when no repo input exists', 
     targetPath: '/Volumes/Shuttle/unity-projects/neonspark',
   });
   assert.equal(resolved, 'neonspark');
+});
+
+test('hasRequiredHitFuzzy allows name-based match when uid is not present', () => {
+  const expected = 'Class:Assets/NEON/Code/Game/LootSystem/LootManager.cs:LootManager';
+  const matched = hasRequiredHitFuzzy(expected, [], ['LootManager']);
+  assert.equal(matched, true);
+});
+
+test('hasForbiddenUidHitStrict ignores same-name symbol with different uid', () => {
+  const forbidden = 'Class:Assets/NEON/Code/Game/LootSystem/LootManager.cs:LootManager';
+  const hitUids = ['Class:Assets/NEON/Code/Game/LootSystem/LootDropRecorder.cs:LootManager'];
+  assert.equal(hasForbiddenUidHitStrict(forbidden, hitUids), false);
+});
+
+test('hasForbiddenUidHitStrict matches only exact normalized uid', () => {
+  const forbidden = 'Class:Assets/NEON/Code/Game/LootSystem/LootManager.cs:LootManager';
+  const hitUids = ['  class:assets/neon/code/game/lootsystem/lootmanager.cs:lootmanager  '];
+  assert.equal(hasForbiddenUidHitStrict(forbidden, hitUids), true);
 });
