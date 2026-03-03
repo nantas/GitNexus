@@ -56,12 +56,24 @@ export async function benchmarkAgentContextCommand(
     if (!options.targetPath) {
       throw new Error('targetPath is required unless skipAnalyze is true');
     }
-    await analyze(path.resolve(options.targetPath), {
+    const analyzePath = path.resolve(options.targetPath);
+    const analyzeOptions = {
       extensions: options.extensions || '.cs',
       repoAlias: options.repoAlias,
       scopeManifest: options.scopeManifest,
       scopePrefix: options.scopePrefix,
-    });
+    };
+
+    try {
+      await analyze(analyzePath, analyzeOptions);
+    } catch (error: any) {
+      const message = String(error?.message || error);
+      if (!message.includes('analyze failed: null')) {
+        throw error;
+      }
+      // Retry once for transient child-process exits (observed as code=null).
+      await analyze(analyzePath, analyzeOptions);
+    }
   }
 
   const datasetRoot = path.resolve(dataset);

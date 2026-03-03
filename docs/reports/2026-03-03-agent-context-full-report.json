@@ -1,0 +1,2378 @@
+{
+  "generatedAt": "2026-03-03T03:56:19.867Z",
+  "pass": false,
+  "failures": [
+    "scenario.minionsmanager-refactor-context.coverage",
+    "scenario.mainuimanager-refactor-context.coverage",
+    "scenario.mirrornetmgr-refactor-context.coverage",
+    "suite.coverage"
+  ],
+  "metrics": {
+    "avgCoverage": 0.611111111111111,
+    "avgToolCalls": 3,
+    "mandatoryTargetPassRate": 1
+  },
+  "scenarios": [
+    {
+      "scenarioId": "minionsmanager-refactor-context",
+      "targetUid": "Class:Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs:MinionsManager",
+      "toolCalls": 3,
+      "coverage": 0.6666666666666666,
+      "checks": [
+        {
+          "id": "T",
+          "pass": true
+        },
+        {
+          "id": "U",
+          "pass": true
+        },
+        {
+          "id": "D",
+          "pass": true
+        },
+        {
+          "id": "B",
+          "pass": false,
+          "detail": "impacted count 0 < 20"
+        },
+        {
+          "id": "I",
+          "pass": false,
+          "detail": "internal anchors matched 0 < 2"
+        },
+        {
+          "id": "E",
+          "pass": true
+        }
+      ],
+      "gatePass": false,
+      "stepOutputs": [
+        {
+          "tool": "query",
+          "input": {
+            "query": "MinionsManager",
+            "repo": "neonspark-v1-subset"
+          },
+          "output": {
+            "processes": [],
+            "process_symbols": [],
+            "definitions": [
+              {
+                "id": "Class:Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs:MinionsManager",
+                "name": "MinionsManager",
+                "type": "Class",
+                "filePath": "Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs",
+                "startLine": 25,
+                "endLine": 25
+              },
+              {
+                "id": "Property:Assets/NEON/Code/Game/Actors/FollowingMinionActor.cs:MinionsManager",
+                "name": "MinionsManager",
+                "type": "Property",
+                "filePath": "Assets/NEON/Code/Game/Actors/FollowingMinionActor.cs",
+                "startLine": 249,
+                "endLine": 249
+              }
+            ]
+          }
+        },
+        {
+          "tool": "context",
+          "input": {
+            "uid": "Class:Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs:MinionsManager",
+            "repo": "neonspark-v1-subset"
+          },
+          "output": {
+            "status": "found",
+            "symbol": {
+              "uid": "Class:Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs:MinionsManager",
+              "name": "MinionsManager",
+              "kind": "Class",
+              "filePath": "Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs",
+              "startLine": 25,
+              "endLine": 25
+            },
+            "incoming": {
+              "calls": [
+                {
+                  "uid": "File:Assets/NEON/Code/Game/Interactibles/EggTimeMachine.cs",
+                  "name": "EggTimeMachine.cs",
+                  "filePath": "Assets/NEON/Code/Game/Interactibles/EggTimeMachine.cs",
+                  "kind": "File"
+                },
+                {
+                  "uid": "File:Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs",
+                  "name": "MinionsManager.cs",
+                  "filePath": "Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs",
+                  "kind": "File"
+                },
+                {
+                  "uid": "File:Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs",
+                  "name": "MinionsManager.cs",
+                  "filePath": "Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs",
+                  "kind": "File"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/RespawnMonsRingDamage.cs:OnMonsterKilled",
+                  "name": "OnMonsterKilled",
+                  "filePath": "Assets/NEON/Code/Game/RespawnMonsRingDamage.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/ReflectEnemyBullet.cs:ReflectRoutine",
+                  "name": "ReflectRoutine",
+                  "filePath": "Assets/NEON/Code/Game/ReflectEnemyBullet.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/MorphCatToMinion.cs:Update",
+                  "name": "Update",
+                  "filePath": "Assets/NEON/Code/Game/MorphCatToMinion.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/MinionCatMover.cs:UpdateTarget",
+                  "name": "UpdateTarget",
+                  "filePath": "Assets/NEON/Code/Game/MinionCatMover.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/VeewoUI/OptionScreen/OptionVideoScreen.cs:EggLimitClick",
+                  "name": "EggLimitClick",
+                  "filePath": "Assets/NEON/Code/VeewoUI/OptionScreen/OptionVideoScreen.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/VeewoUI/OptionScreen/OptionVideoScreen.cs:EggLimitSet",
+                  "name": "EggLimitSet",
+                  "filePath": "Assets/NEON/Code/VeewoUI/OptionScreen/OptionVideoScreen.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Abilities/Ability.RefreshLoot.cs:IgnoreSpawnLoot",
+                  "name": "IgnoreSpawnLoot",
+                  "filePath": "Assets/NEON/Code/Game/Abilities/Ability.RefreshLoot.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Abstract/MinionHearts.cs:Die",
+                  "name": "Die",
+                  "filePath": "Assets/NEON/Code/Game/Abstract/MinionHearts.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Actors/RotMinionActor.cs:Start",
+                  "name": "Start",
+                  "filePath": "Assets/NEON/Code/Game/Actors/RotMinionActor.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Actors/RotMinionActor.cs:Start",
+                  "name": "Start",
+                  "filePath": "Assets/NEON/Code/Game/Actors/RotMinionActor.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Actors/MinionActor.cs:ChangeUpgradeMinion",
+                  "name": "ChangeUpgradeMinion",
+                  "filePath": "Assets/NEON/Code/Game/Actors/MinionActor.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Actors/EggMinionActor.cs:SetCanHatching",
+                  "name": "SetCanHatching",
+                  "filePath": "Assets/NEON/Code/Game/Actors/EggMinionActor.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Actors/EggMinionActor.cs:OnTriggerEnter2D",
+                  "name": "OnTriggerEnter2D",
+                  "filePath": "Assets/NEON/Code/Game/Actors/EggMinionActor.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Actors/EggMinionActor.cs:OnTriggerEnter2D",
+                  "name": "OnTriggerEnter2D",
+                  "filePath": "Assets/NEON/Code/Game/Actors/EggMinionActor.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Actors/CoutureMachineActor.cs:ResetAppearance",
+                  "name": "ResetAppearance",
+                  "filePath": "Assets/NEON/Code/Game/Actors/CoutureMachineActor.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/UseManaLootPowerUp.cs:OnUse",
+                  "name": "OnUse",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/UseManaLootPowerUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/UseManaGraphPowerUp.cs:OnManaChanged",
+                  "name": "OnManaChanged",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/UseManaGraphPowerUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/UseLootPowerUp.cs:GetContent",
+                  "name": "GetContent",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/UseLootPowerUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/UseLootPowerUp.cs:OnUse",
+                  "name": "OnUse",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/UseLootPowerUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/UseAndPickUpKeyPowerUp.cs:UnLockSpawnSprite",
+                  "name": "UnLockSpawnSprite",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/UseAndPickUpKeyPowerUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/UnLockRuneMarkPowerUp.cs:UnLockSpawnObs",
+                  "name": "UnLockSpawnObs",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/UnLockRuneMarkPowerUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/UnLockPowerUp.cs:AddDefaultPowerup",
+                  "name": "AddDefaultPowerup",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/UnLockPowerUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/UnLockOpenChestPowerUp.cs:UnLockGetLoot",
+                  "name": "UnLockGetLoot",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/UnLockOpenChestPowerUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/UnLockLootPowerUp.cs:UnLockGetLoot",
+                  "name": "UnLockGetLoot",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/UnLockLootPowerUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/UnLockGetPetPowerUp.cs:UnLockGetLoot",
+                  "name": "UnLockGetLoot",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/UnLockGetPetPowerUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/UnLockGetPetPowerUp.cs:OnUseKey",
+                  "name": "OnUseKey",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/UnLockGetPetPowerUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/UnLockGetEggPowerUp.cs:OnDropsPickedUp",
+                  "name": "OnDropsPickedUp",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/UnLockGetEggPowerUp.cs",
+                  "kind": "Method"
+                }
+              ]
+            },
+            "outgoing": {
+              "calls": [
+                {
+                  "uid": "Method:Assets/NEON/Code/AutoDictBinding/NEONPlayerStateDictValuesExtension.cs:SetPlayerStateInt",
+                  "name": "SetPlayerStateInt",
+                  "filePath": "Assets/NEON/Code/AutoDictBinding/NEONPlayerStateDictValuesExtension.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/AutoDictBinding/NEONPlayerStateDictValuesExtension.cs:AddPlayerStateInt",
+                  "name": "AddPlayerStateInt",
+                  "filePath": "Assets/NEON/Code/AutoDictBinding/NEONPlayerStateDictValuesExtension.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/AutoDictBinding/NEONPlayerStateDictValuesExtension.cs:AddPlayerStateInt",
+                  "name": "AddPlayerStateInt",
+                  "filePath": "Assets/NEON/Code/AutoDictBinding/NEONPlayerStateDictValuesExtension.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/AutoDictBinding/NEONPlayerStateDictValuesExtension.cs:AddPlayerStateInt",
+                  "name": "AddPlayerStateInt",
+                  "filePath": "Assets/NEON/Code/AutoDictBinding/NEONPlayerStateDictValuesExtension.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/AutoDictBinding/NEONPlayerStateDictValuesExtension.cs:AddPlayerStateInt",
+                  "name": "AddPlayerStateInt",
+                  "filePath": "Assets/NEON/Code/AutoDictBinding/NEONPlayerStateDictValuesExtension.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/SpriteGuard.cs:SetPlayerActor",
+                  "name": "SetPlayerActor",
+                  "filePath": "Assets/NEON/Code/Game/SpriteGuard.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/SpriteGuard.cs:SetPlayerActor",
+                  "name": "SetPlayerActor",
+                  "filePath": "Assets/NEON/Code/Game/SpriteGuard.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/ChickenHoldable.cs:IsLucky",
+                  "name": "IsLucky",
+                  "filePath": "Assets/NEON/Code/Game/ChickenHoldable.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs:Raise",
+                  "name": "Raise",
+                  "filePath": "Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs:Raise",
+                  "name": "Raise",
+                  "filePath": "Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs:Raise",
+                  "name": "Raise",
+                  "filePath": "Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Actors/MinionActor.cs:RefreshArt",
+                  "name": "RefreshArt",
+                  "filePath": "Assets/NEON/Code/Game/Actors/MinionActor.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Actors/MinionActor.cs:PlayDieState",
+                  "name": "PlayDieState",
+                  "filePath": "Assets/NEON/Code/Game/Actors/MinionActor.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/PowerUps/WonderVesDoublePowerUp.cs:RevokePickup",
+                  "name": "RevokePickup",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/WonderVesDoublePowerUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/NetworkHierarchyBus.cs:Unregister",
+                  "name": "Unregister",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/NetworkHierarchyBus.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonPlayer/NetPlayer.PickUp.cs:SyncQuickPickUp",
+                  "name": "SyncQuickPickUp",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonPlayer/NetPlayer.PickUp.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonPlayer/NetPlayer.MinionActor.cs:CmdSetMinionActorActive",
+                  "name": "CmdSetMinionActorActive",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonPlayer/NetPlayer.MinionActor.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Framework/SaveData/SaveDataService.cs:CompareTo",
+                  "name": "CompareTo",
+                  "filePath": "Assets/NEON/Code/Framework/SaveData/SaveDataService.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Framework/SaveData/SaveDataService.cs:CompareTo",
+                  "name": "CompareTo",
+                  "filePath": "Assets/NEON/Code/Framework/SaveData/SaveDataService.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Framework/SaveData/SaveDataService.cs:CompareTo",
+                  "name": "CompareTo",
+                  "filePath": "Assets/NEON/Code/Framework/SaveData/SaveDataService.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Framework/AssetData/AssetRefList.cs:AddRange",
+                  "name": "AddRange",
+                  "filePath": "Assets/NEON/Code/Framework/AssetData/AssetRefList.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Framework/AssetData/AssetRefList.cs:AddRange",
+                  "name": "AddRange",
+                  "filePath": "Assets/NEON/Code/Framework/AssetData/AssetRefList.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Framework/AssetData/AssetRefList.cs:RemoveAll",
+                  "name": "RemoveAll",
+                  "filePath": "Assets/NEON/Code/Framework/AssetData/AssetRefList.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Framework/GameData/GameDataSingle.cs:GameDataSingleMaxValueAssign",
+                  "name": "GameDataSingleMaxValueAssign",
+                  "filePath": "Assets/NEON/Code/Framework/GameData/GameDataSingle.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Framework/GameData/GameData.cs:GameDataMaxValueAssign",
+                  "name": "GameDataMaxValueAssign",
+                  "filePath": "Assets/NEON/Code/Framework/GameData/GameData.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Managers/PlayerState/NEONPlayerState.cs:SendPlayerState",
+                  "name": "SendPlayerState",
+                  "filePath": "Assets/NEON/Code/Game/Managers/PlayerState/NEONPlayerState.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/Managers/PlayerState/NEONPlayerState.cs:SendPlayerState",
+                  "name": "SendPlayerState",
+                  "filePath": "Assets/NEON/Code/Game/Managers/PlayerState/NEONPlayerState.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Property:Assets/NEON/Code/Framework/Attri.cs:Min",
+                  "name": "Min",
+                  "filePath": "Assets/NEON/Code/Framework/Attri.cs",
+                  "kind": "Property"
+                },
+                {
+                  "uid": "Function:Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs:GetPriority",
+                  "name": "GetPriority",
+                  "filePath": "Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs",
+                  "kind": "Function"
+                }
+              ],
+              "imports": [
+                {
+                  "uid": "File:Assets/NEON/Code/Framework/GameData/GameData.cs",
+                  "name": "GameData.cs",
+                  "filePath": "Assets/NEON/Code/Framework/GameData/GameData.cs",
+                  "kind": "File"
+                }
+              ]
+            },
+            "processes": [
+              {
+                "id": "proc_114_ongui",
+                "name": "OnGUI → GetFirstHatchEgg",
+                "step_index": 5,
+                "step_count": 5
+              },
+              {
+                "id": "proc_142_getandsetminionactor",
+                "name": "GetAndSetMinionActor → Add",
+                "step_index": 2,
+                "step_count": 5
+              }
+            ]
+          }
+        },
+        {
+          "tool": "impact",
+          "input": {
+            "target": "MinionsManager",
+            "uid": "Class:Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs:MinionsManager",
+            "direction": "upstream",
+            "repo": "neonspark-v1-subset"
+          },
+          "output": {
+            "status": "ambiguous",
+            "message": "Found 2 symbols matching 'MinionsManager'. Use target_uid or file_path to disambiguate.",
+            "candidates": [
+              {
+                "uid": "Property:Assets/NEON/Code/Game/Actors/FollowingMinionActor.cs:MinionsManager",
+                "name": "MinionsManager",
+                "kind": "Property",
+                "filePath": "Assets/NEON/Code/Game/Actors/FollowingMinionActor.cs",
+                "line": 249
+              },
+              {
+                "uid": "Class:Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs:MinionsManager",
+                "name": "MinionsManager",
+                "kind": "Class",
+                "filePath": "Assets/NEON/Code/Game/AllMinionManager/MinionsManager.cs",
+                "line": 25
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "scenarioId": "mainuimanager-refactor-context",
+      "targetUid": "Class:Assets/NEON/Code/VeewoUI/MainUIManager.cs:MainUIManager",
+      "toolCalls": 3,
+      "coverage": 0.5,
+      "checks": [
+        {
+          "id": "T",
+          "pass": true
+        },
+        {
+          "id": "U",
+          "pass": false,
+          "detail": "incoming refs 3 < 8"
+        },
+        {
+          "id": "D",
+          "pass": false,
+          "detail": "outgoing refs 1 < 8"
+        },
+        {
+          "id": "B",
+          "pass": true
+        },
+        {
+          "id": "I",
+          "pass": false,
+          "detail": "internal anchors matched 0 < 2"
+        },
+        {
+          "id": "E",
+          "pass": true
+        }
+      ],
+      "gatePass": false,
+      "stepOutputs": [
+        {
+          "tool": "query",
+          "input": {
+            "query": "MainUIManager",
+            "repo": "neonspark-v1-subset"
+          },
+          "output": {
+            "processes": [],
+            "process_symbols": [],
+            "definitions": [
+              {
+                "id": "Class:Assets/NEON/Code/VeewoUI/MainUIManager.cs:MainUIManager",
+                "name": "MainUIManager",
+                "type": "Class",
+                "filePath": "Assets/NEON/Code/VeewoUI/MainUIManager.cs",
+                "startLine": 35,
+                "endLine": 35,
+                "module": "VeewoUI"
+              },
+              {
+                "id": "Method:Assets/NEON/Code/VeewoUI/InteractScreenManager.cs:FindMainUIManagers",
+                "name": "FindMainUIManagers",
+                "type": "Method",
+                "filePath": "Assets/NEON/Code/VeewoUI/InteractScreenManager.cs",
+                "startLine": 35,
+                "endLine": 35
+              },
+              {
+                "id": "Method:Assets/NEON/Code/VeewoUI/GlobalUIScreenManager.cs:FindMainUIManagers",
+                "name": "FindMainUIManagers",
+                "type": "Method",
+                "filePath": "Assets/NEON/Code/VeewoUI/GlobalUIScreenManager.cs",
+                "startLine": 35,
+                "endLine": 35
+              }
+            ]
+          }
+        },
+        {
+          "tool": "context",
+          "input": {
+            "uid": "Class:Assets/NEON/Code/VeewoUI/MainUIManager.cs:MainUIManager",
+            "repo": "neonspark-v1-subset"
+          },
+          "output": {
+            "status": "found",
+            "symbol": {
+              "uid": "Class:Assets/NEON/Code/VeewoUI/MainUIManager.cs:MainUIManager",
+              "name": "MainUIManager",
+              "kind": "Class",
+              "filePath": "Assets/NEON/Code/VeewoUI/MainUIManager.cs",
+              "startLine": 35,
+              "endLine": 35
+            },
+            "incoming": {
+              "extends": [
+                {
+                  "uid": "Class:Assets/NEON/Code/VeewoUI/MainMenuScreen/MainMenuNoticeScreen.cs:MainMenuNoticeScreen",
+                  "name": "MainMenuNoticeScreen",
+                  "filePath": "Assets/NEON/Code/VeewoUI/MainMenuScreen/MainMenuNoticeScreen.cs",
+                  "kind": "Class"
+                },
+                {
+                  "uid": "Class:Assets/NEON/Code/VeewoUI/BarScreen/BattleScreen.cs:BattleScreen",
+                  "name": "BattleScreen",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/BattleScreen.cs",
+                  "kind": "Class"
+                },
+                {
+                  "uid": "Class:Assets/NEON/Code/VeewoUI/BarScreen/BarScreen.cs:BarScreen",
+                  "name": "BarScreen",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/BarScreen.cs",
+                  "kind": "Class"
+                }
+              ]
+            },
+            "outgoing": {
+              "extends": [
+                {
+                  "uid": "Class:Assets/NEON/Code/VeewoUI/UiToolkitUIManager.cs:UiToolkitUIManager",
+                  "name": "UiToolkitUIManager",
+                  "filePath": "Assets/NEON/Code/VeewoUI/UiToolkitUIManager.cs",
+                  "kind": "Class"
+                }
+              ]
+            },
+            "processes": [
+              {
+                "id": "proc_239_repairconfirm",
+                "name": "RepairConfirm → GenerateSerializedData",
+                "step_index": 1,
+                "step_count": 4
+              },
+              {
+                "id": "proc_240_repairconfirm",
+                "name": "RepairConfirm → CmdNetworkDestroy",
+                "step_index": 1,
+                "step_count": 4
+              },
+              {
+                "id": "proc_241_repairconfirm",
+                "name": "RepairConfirm → RpcDestroySoulSprite",
+                "step_index": 1,
+                "step_count": 4
+              }
+            ]
+          }
+        },
+        {
+          "tool": "impact",
+          "input": {
+            "target": "MainUIManager",
+            "uid": "Class:Assets/NEON/Code/VeewoUI/MainUIManager.cs:MainUIManager",
+            "direction": "upstream",
+            "repo": "neonspark-v1-subset"
+          },
+          "output": {
+            "target": {
+              "id": "Class:Assets/NEON/Code/VeewoUI/MainUIManager.cs:MainUIManager",
+              "name": "MainUIManager",
+              "type": "Class",
+              "filePath": "Assets/NEON/Code/VeewoUI/MainUIManager.cs"
+            },
+            "direction": "upstream",
+            "impactedCount": 96,
+            "risk": "CRITICAL",
+            "summary": {
+              "direct": 36,
+              "processes_affected": 20,
+              "modules_affected": 20
+            },
+            "affected_processes": [
+              {
+                "name": "OnTriggerEnter2D → RefreshDamage",
+                "hits": 3,
+                "step_count": 6
+              },
+              {
+                "name": "OnTriggerEnter2D → AddAttributes",
+                "hits": 2,
+                "step_count": 6
+              },
+              {
+                "name": "GameOptionListInit → ProcessEvent",
+                "hits": 2,
+                "step_count": 4
+              },
+              {
+                "name": "OnTriggerEnter2D → SetupCallbacks",
+                "hits": 2,
+                "step_count": 7
+              },
+              {
+                "name": "OnClientPickItUp → GetRarity",
+                "hits": 1,
+                "step_count": 7
+              },
+              {
+                "name": "OnClientPickItUp → Log",
+                "hits": 1,
+                "step_count": 7
+              },
+              {
+                "name": "Update → Realtime",
+                "hits": 1,
+                "step_count": 6
+              },
+              {
+                "name": "Update → FindAction",
+                "hits": 1,
+                "step_count": 4
+              },
+              {
+                "name": "OnGUI → SetDizzy",
+                "hits": 1,
+                "step_count": 5
+              },
+              {
+                "name": "OnGUI → Log",
+                "hits": 1,
+                "step_count": 5
+              },
+              {
+                "name": "OnClientPickItUp → ChangePosture",
+                "hits": 1,
+                "step_count": 8
+              },
+              {
+                "name": "OnClientPickItUp → SetHold",
+                "hits": 1,
+                "step_count": 8
+              },
+              {
+                "name": "OnClientPickItUp → DoEatPickup",
+                "hits": 1,
+                "step_count": 8
+              },
+              {
+                "name": "OnClientPickItUp → RefreshIconCache",
+                "hits": 1,
+                "step_count": 7
+              },
+              {
+                "name": "OnGUI → AddLog",
+                "hits": 1,
+                "step_count": 4
+              },
+              {
+                "name": "OnClientPickItUp → SerializeRuntimeStats",
+                "hits": 1,
+                "step_count": 7
+              },
+              {
+                "name": "OnGUI → SetLife",
+                "hits": 1,
+                "step_count": 5
+              },
+              {
+                "name": "OnClientPickItUp → OnSpawnGps",
+                "hits": 1,
+                "step_count": 5
+              },
+              {
+                "name": "OnGUI → SetDirty",
+                "hits": 1,
+                "step_count": 4
+              },
+              {
+                "name": "OnClientPickItUp → SetPlayerActor",
+                "hits": 1,
+                "step_count": 8
+              }
+            ],
+            "affected_modules": [
+              {
+                "name": "Panels",
+                "hits": 7,
+                "impact": "direct"
+              },
+              {
+                "name": "VeewoUI",
+                "hits": 6,
+                "impact": "direct"
+              },
+              {
+                "name": "Editor",
+                "hits": 4,
+                "impact": "direct"
+              },
+              {
+                "name": "Achievement",
+                "hits": 3,
+                "impact": "indirect"
+              },
+              {
+                "name": "NeonPlayer",
+                "hits": 3,
+                "impact": "indirect"
+              },
+              {
+                "name": "GamePlay",
+                "hits": 3,
+                "impact": "direct"
+              },
+              {
+                "name": "SaveData",
+                "hits": 3,
+                "impact": "indirect"
+              },
+              {
+                "name": "OptionScreen",
+                "hits": 3,
+                "impact": "direct"
+              },
+              {
+                "name": "Combo",
+                "hits": 2,
+                "impact": "indirect"
+              },
+              {
+                "name": "BarScreen",
+                "hits": 2,
+                "impact": "indirect"
+              },
+              {
+                "name": "PlayerActor",
+                "hits": 1,
+                "impact": "indirect"
+              },
+              {
+                "name": "Components",
+                "hits": 1,
+                "impact": "direct"
+              },
+              {
+                "name": "Tools",
+                "hits": 1,
+                "impact": "direct"
+              },
+              {
+                "name": "Game",
+                "hits": 1,
+                "impact": "indirect"
+              },
+              {
+                "name": "Chests",
+                "hits": 1,
+                "impact": "indirect"
+              },
+              {
+                "name": "EndScreen",
+                "hits": 1,
+                "impact": "indirect"
+              },
+              {
+                "name": "Monument",
+                "hits": 1,
+                "impact": "indirect"
+              },
+              {
+                "name": "NetworkBehavior",
+                "hits": 1,
+                "impact": "indirect"
+              },
+              {
+                "name": "PlayerState",
+                "hits": 1,
+                "impact": "indirect"
+              },
+              {
+                "name": "Machines",
+                "hits": 1,
+                "impact": "indirect"
+              }
+            ],
+            "byDepth": {
+              "1": [
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Editor/ShowCollidersInScene.cs:OnGUI",
+                  "name": "OnGUI",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/ShowCollidersInScene.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Editor/ScriptPrefabFinderEditor.cs:DrawResults",
+                  "name": "DrawResults",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/ScriptPrefabFinderEditor.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Editor/NullReferenceComponentsCheck.cs:OnGUI",
+                  "name": "OnGUI",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/NullReferenceComponentsCheck.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Packages/com.veewo.veenode/Veewo/Graph/Editor/VeeGraphEditorTools.cs:DrawHeader",
+                  "name": "DrawHeader",
+                  "type": "Method",
+                  "filePath": "Packages/com.veewo.veenode/Veewo/Graph/Editor/VeeGraphEditorTools.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Packages/com.veewo.veenode/Veewo/Graph/Editor/ObjectCreator.cs:OnGUI",
+                  "name": "OnGUI",
+                  "type": "Method",
+                  "filePath": "Packages/com.veewo.veenode/Veewo/Graph/Editor/ObjectCreator.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/OptionScreen/OptionGameScreen.cs:InitLanguage",
+                  "name": "InitLanguage",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/OptionScreen/OptionGameScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/OptionScreen/OptionGameScreen.cs:LanguageConfirm",
+                  "name": "LanguageConfirm",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/OptionScreen/OptionGameScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/ModeSelectScreen.cs:OpenScreen",
+                  "name": "OpenScreen",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/ModeSelectScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/EvolutionScreen.cs:OpenScreen",
+                  "name": "OpenScreen",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/EvolutionScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/BattleScreen.cs:OnHideWindow",
+                  "name": "OnHideWindow",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/BattleScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/BarScreen.cs:ScreenTransitionToModeSelect",
+                  "name": "ScreenTransitionToModeSelect",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/BarScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/BarHomePage.cs:MenuClick",
+                  "name": "MenuClick",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/BarHomePage.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/Online/OnlineHomePage.cs:SetActiveOnlineUIEvent",
+                  "name": "SetActiveOnlineUIEvent",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/Online/OnlineHomePage.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/Online/OnlineHomePage.cs:OnOpenScreen",
+                  "name": "OnOpenScreen",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/Online/OnlineHomePage.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/Notice/NoticeScreen.cs:OpenScreen",
+                  "name": "OpenScreen",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/Notice/NoticeScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Framework/GamePlay/GameplayEffectContainer.cs:RefreshDamage",
+                  "name": "RefreshDamage",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Framework/GamePlay/GameplayEffectContainer.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Editor/Shared/PrefabSearchUtility.cs:DrawPrefabList",
+                  "name": "DrawPrefabList",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/Shared/PrefabSearchUtility.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/Achievement/AchievementScreen.cs:OpenScreen",
+                  "name": "OpenScreen",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/Achievement/AchievementScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/UI/Pause/System/MenuEventListener.cs:Resume",
+                  "name": "Resume",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/UI/Pause/System/MenuEventListener.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/UI/Pause/Controls/UIConfirmCloseListener.cs:OnBack",
+                  "name": "OnBack",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/UI/Pause/Controls/UIConfirmCloseListener.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Editor/Affixes/Components/TagImportWindow.cs:OnGUI",
+                  "name": "OnGUI",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/Affixes/Components/TagImportWindow.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Editor/Affixes/Panels/TagManagerPanel.cs:DrawFilterBar",
+                  "name": "DrawFilterBar",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/Affixes/Panels/TagManagerPanel.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Editor/Affixes/Panels/BatchWeaponTagWeightPanel.cs:DrawWeaponList",
+                  "name": "DrawWeaponList",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/Affixes/Panels/BatchWeaponTagWeightPanel.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Editor/Affixes/Panels/BatchStatsOperationsPanel.cs:DrawTargetOptions",
+                  "name": "DrawTargetOptions",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/Affixes/Panels/BatchStatsOperationsPanel.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Editor/Affixes/Panels/BatchStatsOperationsPanel.cs:DrawGraphSelectionSection",
+                  "name": "DrawGraphSelectionSection",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/Affixes/Panels/BatchStatsOperationsPanel.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Editor/Tools/AnimatorOptimizerWindow.cs:OnGUI",
+                  "name": "OnGUI",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/Tools/AnimatorOptimizerWindow.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Game/Editor/RumbleTester.cs:OnGUI",
+                  "name": "OnGUI",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/Editor/RumbleTester.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Packages/com.neonspark.inspector-navigator/Editor/HistoryPreferences.cs:CreateProvider",
+                  "name": "CreateProvider",
+                  "type": "Method",
+                  "filePath": "Packages/com.neonspark.inspector-navigator/Editor/HistoryPreferences.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/MenuScreen.cs:HideRedDot",
+                  "name": "HideRedDot",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/MenuScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/InteractScreenManager.cs:OpenScreen",
+                  "name": "OpenScreen",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/InteractScreenManager.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/GlobalUIScreenManager.cs:OpenScreen",
+                  "name": "OpenScreen",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/GlobalUIScreenManager.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Editor/WaveManagerFinderEditor.cs:DrawResultsSection",
+                  "name": "DrawResultsSection",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/WaveManagerFinderEditor.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Method:Assets/NEON/Code/Editor/PlotDialogueTable/Google/Editor/GoogleDataContainerEditor.cs:DrawGUI",
+                  "name": "DrawGUI",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/PlotDialogueTable/Google/Editor/GoogleDataContainerEditor.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 1,
+                  "id": "Class:Assets/NEON/Code/VeewoUI/MainMenuScreen/MainMenuNoticeScreen.cs:MainMenuNoticeScreen",
+                  "name": "MainMenuNoticeScreen",
+                  "type": "Class",
+                  "filePath": "Assets/NEON/Code/VeewoUI/MainMenuScreen/MainMenuNoticeScreen.cs",
+                  "relationType": "EXTENDS",
+                  "confidence": 1
+                },
+                {
+                  "depth": 1,
+                  "id": "Class:Assets/NEON/Code/VeewoUI/BarScreen/BattleScreen.cs:BattleScreen",
+                  "name": "BattleScreen",
+                  "type": "Class",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/BattleScreen.cs",
+                  "relationType": "EXTENDS",
+                  "confidence": 1
+                },
+                {
+                  "depth": 1,
+                  "id": "Class:Assets/NEON/Code/VeewoUI/BarScreen/BarScreen.cs:BarScreen",
+                  "name": "BarScreen",
+                  "type": "Class",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/BarScreen.cs",
+                  "relationType": "EXTENDS",
+                  "confidence": 1
+                }
+              ],
+              "2": [
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/Editor/ScriptPrefabFinderEditor.cs:OnGUI",
+                  "name": "OnGUI",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/ScriptPrefabFinderEditor.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Packages/com.veewo.veenode/Veewo/Graph/Editor/VeeGraphEditorTools.cs:OnGUI",
+                  "name": "OnGUI",
+                  "type": "Method",
+                  "filePath": "Packages/com.veewo.veenode/Veewo/Graph/Editor/VeeGraphEditorTools.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/OptionScreen/OptionGameScreen.cs:GameOptionListInit",
+                  "name": "GameOptionListInit",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/OptionScreen/OptionGameScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/OptionScreen/OptionGameScreen.cs:OnLanguageConfirm",
+                  "name": "OnLanguageConfirm",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/OptionScreen/OptionGameScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/EndScreen/EndScreen.cs:ClickControl",
+                  "name": "ClickControl",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/EndScreen/EndScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/EvolutionScreen.cs:InnateUnLock",
+                  "name": "InnateUnLock",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/EvolutionScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/BarScreen.cs:OnModeIconClick",
+                  "name": "OnModeIconClick",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/BarScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/BarScreen.cs:ModeIconClickEvent",
+                  "name": "ModeIconClickEvent",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/BarScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/BarHomePage.cs:MenuButtonClick",
+                  "name": "MenuButtonClick",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/BarHomePage.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/BarHomePage.cs:Update",
+                  "name": "Update",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/BarHomePage.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/Online/OnlineHomePage.cs:OpenScreen",
+                  "name": "OpenScreen",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/Online/OnlineHomePage.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/Notice/NoticeScreen.cs:ShowScreen",
+                  "name": "ShowScreen",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/Notice/NoticeScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/UI/Combo/ItemCombiner.cs:LongPressInteract",
+                  "name": "LongPressInteract",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/UI/Combo/ItemCombiner.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/Framework/SaveData/SettingsService.cs:Load",
+                  "name": "Load",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Framework/SaveData/SettingsService.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/Framework/GamePlay/GameplayEffectContainer.cs:AddEffect",
+                  "name": "AddEffect",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Framework/GamePlay/GameplayEffectContainer.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/Framework/GamePlay/GameplayEffectContainer.cs:FixedUpdate",
+                  "name": "FixedUpdate",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Framework/GamePlay/GameplayEffectContainer.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/Achievement/AchievementScreen.Reward.cs:GetReward",
+                  "name": "GetReward",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/Achievement/AchievementScreen.Reward.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/Achievement/AchievementScreen.Reward.cs:ClaimAll",
+                  "name": "ClaimAll",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/Achievement/AchievementScreen.Reward.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/Editor/Affixes/Panels/TagManagerPanel.cs:Draw",
+                  "name": "Draw",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/Affixes/Panels/TagManagerPanel.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/Editor/Affixes/Panels/BatchWeaponTagWeightPanel.cs:DrawWeaponSelectionSection",
+                  "name": "DrawWeaponSelectionSection",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/Affixes/Panels/BatchWeaponTagWeightPanel.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/Editor/Affixes/Panels/BatchStatsOperationsPanel.cs:Draw",
+                  "name": "Draw",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/Affixes/Panels/BatchStatsOperationsPanel.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/Game/GameModes/BarMode/BarMode.cs:UpdateEliteBossScreen",
+                  "name": "UpdateEliteBossScreen",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/GameModes/BarMode/BarMode.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/Game/Interactibles/BarMailMachine.cs:Interact",
+                  "name": "Interact",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/Interactibles/BarMailMachine.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/InteractOpenUI.cs:Interact",
+                  "name": "Interact",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/InteractOpenUI.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/Editor/WaveManagerFinderEditor.cs:OnGUI",
+                  "name": "OnGUI",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/WaveManagerFinderEditor.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Method:Assets/NEON/Code/Editor/PlotDialogueTable/Google/Editor/GoogleDataContainerEditor.cs:OnInspectorGUI",
+                  "name": "OnInspectorGUI",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/PlotDialogueTable/Google/Editor/GoogleDataContainerEditor.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 2,
+                  "id": "Class:Assets/NEON/Code/VeewoUI/BarScreen/CustomMadeManager.cs:CustomMadeManager",
+                  "name": "CustomMadeManager",
+                  "type": "Class",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/CustomMadeManager.cs",
+                  "relationType": "EXTENDS",
+                  "confidence": 1
+                },
+                {
+                  "depth": 2,
+                  "id": "Class:Assets/NEON/Code/VeewoUI/BarScreen/Online/OnlineMatchRoom.cs:OnlineMatchRoom",
+                  "name": "OnlineMatchRoom",
+                  "type": "Class",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/Online/OnlineMatchRoom.cs",
+                  "relationType": "EXTENDS",
+                  "confidence": 1
+                }
+              ],
+              "3": [
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/EndScreen/EndScreen.cs:ClickButton",
+                  "name": "ClickButton",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/EndScreen/EndScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/EndScreen/EndScreen.cs:InteractClick",
+                  "name": "InteractClick",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/EndScreen/EndScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/EvolutionScreen.cs:OnMouseUp",
+                  "name": "OnMouseUp",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/EvolutionScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/EvolutionScreen.cs:LongPressTicker",
+                  "name": "LongPressTicker",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/EvolutionScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/EvolutionScreen.cs:OnCompleteLongPressAction",
+                  "name": "OnCompleteLongPressAction",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/EvolutionScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/NetworkCode/NeonPlayer/NetPlayer.PickUp.cs:OnClientPickItUp",
+                  "name": "OnClientPickItUp",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonPlayer/NetPlayer.PickUp.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/NetworkCode/NeonPlayer/NetPlayer.MinionActor.cs:RpcMinionRelive",
+                  "name": "RpcMinionRelive",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonPlayer/NetPlayer.MinionActor.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/PowerUps/ExplosionAdditionLaunchPowerUp.cs:SpawnExplosion",
+                  "name": "SpawnExplosion",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/ExplosionAdditionLaunchPowerUp.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/PowerUps/BombDespawnAdditionLaunchPowerUp.cs:RescueHajibao",
+                  "name": "RescueHajibao",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/BombDespawnAdditionLaunchPowerUp.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/PowerUps/AllHajibaoAutoWakeUpPowerUp.cs:AutoReviveCoroutine",
+                  "name": "AutoReviveCoroutine",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/AllHajibaoAutoWakeUpPowerUp.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Framework/GamePlay/GameplayExtension.cs:AddGameplayEffect",
+                  "name": "AddGameplayEffect",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Framework/GamePlay/GameplayExtension.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/Achievement/AchievementScreen.cs:ClickSlot",
+                  "name": "ClickSlot",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/Achievement/AchievementScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/Achievement/AchievementScreen.cs:OnConfirm",
+                  "name": "OnConfirm",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/Achievement/AchievementScreen.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/VeewoUI/BarScreen/Achievement/AchievementScreen.Reward.cs:ClaimAllClick",
+                  "name": "ClaimAllClick",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/Achievement/AchievementScreen.Reward.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Framework/GamePlay/Editor/EffectContainerEditor.cs:OnInspectorGUI",
+                  "name": "OnInspectorGUI",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Framework/GamePlay/Editor/EffectContainerEditor.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.5
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Editor/Affixes/Panels/BatchWeaponTagWeightPanel.cs:Draw",
+                  "name": "Draw",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Editor/Affixes/Panels/BatchWeaponTagWeightPanel.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.85
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/SpecialRoom/MarioRoom/MarioTriggerEvent.cs:OnTriggerEnter2D",
+                  "name": "OnTriggerEnter2D",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/SpecialRoom/MarioRoom/MarioTriggerEvent.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/NetworkBehavior/FoxTailsManager.cs:OnHajibaoSuckedIn",
+                  "name": "OnHajibaoSuckedIn",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/NetworkBehavior/FoxTailsManager.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/Monument/MonumentObject.cs:DropBase",
+                  "name": "DropBase",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/Monument/MonumentObject.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.UseSkillSmashdown.cs:EnterBattleModeSmashDownRoutine",
+                  "name": "EnterBattleModeSmashDownRoutine",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.UseSkillSmashdown.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.FixedUpdate.cs:ProcessInteractables",
+                  "name": "ProcessInteractables",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.FixedUpdate.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.FixedUpdate.cs:CheckInteractable",
+                  "name": "CheckInteractable",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.FixedUpdate.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/Interactibles/UseEggTimeMachine.cs:Interacting",
+                  "name": "Interacting",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/Interactibles/UseEggTimeMachine.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/PowerUps/Skills/SecSkillHajibaoExitWeakPowerUp.cs:SkillRoutine",
+                  "name": "SkillRoutine",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/Skills/SecSkillHajibaoExitWeakPowerUp.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/PowerUps/Explosion/ExplosionReviveHajibaoPowerUp.cs:SpawnExplosion",
+                  "name": "SpawnExplosion",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/Explosion/ExplosionReviveHajibaoPowerUp.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/PowerUps/Chests/StoneChest.cs:Bombed",
+                  "name": "Bombed",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/Chests/StoneChest.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/PowerUps/Chests/GiftChest.cs:Bombed",
+                  "name": "Bombed",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/Chests/GiftChest.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/PowerUps/Chests/ElementChest.cs:Unlock",
+                  "name": "Unlock",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/Chests/ElementChest.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/PowerUps/Chests/DeathChest.cs:Bombed",
+                  "name": "Bombed",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/Chests/DeathChest.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Game/PowerUps/Chests/CurseChest.cs:Bombed",
+                  "name": "Bombed",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Game/PowerUps/Chests/CurseChest.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.3
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Framework/Global.cs:InitGlobal",
+                  "name": "InitGlobal",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Framework/Global.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.9
+                },
+                {
+                  "depth": 3,
+                  "id": "Method:Assets/NEON/Code/Framework/Global.cs:Start",
+                  "name": "Start",
+                  "type": "Method",
+                  "filePath": "Assets/NEON/Code/Framework/Global.cs",
+                  "relationType": "CALLS",
+                  "confidence": 0.9
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "scenarioId": "mirrornetmgr-refactor-context",
+      "targetUid": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:MirrorNetMgr",
+      "toolCalls": 3,
+      "coverage": 0.6666666666666666,
+      "checks": [
+        {
+          "id": "T",
+          "pass": true
+        },
+        {
+          "id": "U",
+          "pass": true
+        },
+        {
+          "id": "D",
+          "pass": true
+        },
+        {
+          "id": "B",
+          "pass": false,
+          "detail": "impacted count 0 < 10"
+        },
+        {
+          "id": "I",
+          "pass": false,
+          "detail": "internal anchors matched 0 < 2"
+        },
+        {
+          "id": "E",
+          "pass": true
+        }
+      ],
+      "gatePass": false,
+      "stepOutputs": [
+        {
+          "tool": "query",
+          "input": {
+            "query": "MirrorNetMgr",
+            "repo": "neonspark-v1-subset"
+          },
+          "output": {
+            "processes": [],
+            "process_symbols": [],
+            "definitions": [
+              {
+                "id": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "type": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                "startLine": 33,
+                "endLine": 33
+              },
+              {
+                "id": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.TimeOut.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "type": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.TimeOut.cs",
+                "startLine": 8,
+                "endLine": 8
+              },
+              {
+                "id": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.Reconnect.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "type": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.Reconnect.cs",
+                "startLine": 36,
+                "endLine": 36
+              },
+              {
+                "id": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.JoinRoom.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "type": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.JoinRoom.cs",
+                "startLine": 65,
+                "endLine": 65
+              },
+              {
+                "id": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.Config.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "type": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.Config.cs",
+                "startLine": 8,
+                "endLine": 8
+              },
+              {
+                "id": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.NetRoom.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "type": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.NetRoom.cs",
+                "startLine": 12,
+                "endLine": 12
+              },
+              {
+                "id": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.Prefab.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "type": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.Prefab.cs",
+                "startLine": 13,
+                "endLine": 13
+              },
+              {
+                "id": "Method:Assets/NEON/Code/Framework/SaveData/Base/NetConfigDataService.cs:ReadFromMirrorNetMgrAndSave",
+                "name": "ReadFromMirrorNetMgrAndSave",
+                "type": "Method",
+                "filePath": "Assets/NEON/Code/Framework/SaveData/Base/NetConfigDataService.cs",
+                "startLine": 74,
+                "endLine": 74,
+                "module": "Framework"
+              }
+            ]
+          }
+        },
+        {
+          "tool": "context",
+          "input": {
+            "uid": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:MirrorNetMgr",
+            "repo": "neonspark-v1-subset"
+          },
+          "output": {
+            "status": "found",
+            "symbol": {
+              "uid": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:MirrorNetMgr",
+              "name": "MirrorNetMgr",
+              "kind": "Class",
+              "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+              "startLine": 33,
+              "endLine": 33
+            },
+            "incoming": {
+              "calls": [
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/GameSystem.cs:GoToBar",
+                  "name": "GoToBar",
+                  "filePath": "Assets/NEON/Code/Game/GameSystem.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/Game/GameSystem.cs:GoToMenu",
+                  "name": "GoToMenu",
+                  "filePath": "Assets/NEON/Code/Game/GameSystem.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/VeewoUI/BarScreen/BarHomePage.cs:GotoMainMenuConfirm",
+                  "name": "GotoMainMenuConfirm",
+                  "filePath": "Assets/NEON/Code/VeewoUI/BarScreen/BarHomePage.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:Awake",
+                  "name": "Awake",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:Awake",
+                  "name": "Awake",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:Awake",
+                  "name": "Awake",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnRelayDisconnected",
+                  "name": "OnRelayDisconnected",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:GetNetRoomManageConfig",
+                  "name": "GetNetRoomManageConfig",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:GetBestRoomManage",
+                  "name": "GetBestRoomManage",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnDestroy",
+                  "name": "OnDestroy",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnDestroy",
+                  "name": "OnDestroy",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnStartServer",
+                  "name": "OnStartServer",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnClientConnect",
+                  "name": "OnClientConnect",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnStopClient",
+                  "name": "OnStopClient",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnStopClient",
+                  "name": "OnStopClient",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnStopClient",
+                  "name": "OnStopClient",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:TryFallbackToSingleOnDisconnect",
+                  "name": "TryFallbackToSingleOnDisconnect",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnServerConnect",
+                  "name": "OnServerConnect",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnServerDisconnect",
+                  "name": "OnServerDisconnect",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnServerDisconnect",
+                  "name": "OnServerDisconnect",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnStopServer",
+                  "name": "OnStopServer",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:ExitNetworkGame",
+                  "name": "ExitNetworkGame",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:WaitOtherConnDisconnect",
+                  "name": "WaitOtherConnDisconnect",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:LogoutToMainScreenMode",
+                  "name": "LogoutToMainScreenMode",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:LogoutToBarMode",
+                  "name": "LogoutToBarMode",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:Close",
+                  "name": "Close",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnServerBattleLoadFinish",
+                  "name": "OnServerBattleLoadFinish",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnServerPlayerReadyBattle",
+                  "name": "OnServerPlayerReadyBattle",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnHostDataFragmentReceived",
+                  "name": "OnHostDataFragmentReceived",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnAllPlayerReadyLoadHandler",
+                  "name": "OnAllPlayerReadyLoadHandler",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                }
+              ]
+            },
+            "outgoing": {
+              "imports": [
+                {
+                  "uid": "File:Assets/NEON/Code/Framework/SaveData/SaveData.cs",
+                  "name": "SaveData.cs",
+                  "filePath": "Assets/NEON/Code/Framework/SaveData/SaveData.cs",
+                  "kind": "File"
+                },
+                {
+                  "uid": "File:Assets/NEON/Code/Game/Core/Room.cs",
+                  "name": "Room.cs",
+                  "filePath": "Assets/NEON/Code/Game/Core/Room.cs",
+                  "kind": "File"
+                }
+              ],
+              "calls": [
+                {
+                  "uid": "Method:Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs:Raise",
+                  "name": "Raise",
+                  "filePath": "Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs:Raise",
+                  "name": "Raise",
+                  "filePath": "Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs:Raise",
+                  "name": "Raise",
+                  "filePath": "Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs:Raise",
+                  "name": "Raise",
+                  "filePath": "Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs:Raise",
+                  "name": "Raise",
+                  "filePath": "Packages/com.veewo.veenode/Veewo/Graph/Runtime/GraphEventHub.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/Util/NetUtil.cs:GetLocalNetPlayer",
+                  "name": "GetLocalNetPlayer",
+                  "filePath": "Assets/NEON/Code/NetworkCode/Util/NetUtil.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:Awake",
+                  "name": "Awake",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:InitializeEventListener",
+                  "name": "InitializeEventListener",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:UnregisterAllListeners",
+                  "name": "UnregisterAllListeners",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:GetBestRoomManage",
+                  "name": "GetBestRoomManage",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:GetBestRoomManage",
+                  "name": "GetBestRoomManage",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:LoadNetKcpConfig",
+                  "name": "LoadNetKcpConfig",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnDestroy",
+                  "name": "OnDestroy",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnStartServer",
+                  "name": "OnStartServer",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnClientConnect",
+                  "name": "OnClientConnect",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnStopClient",
+                  "name": "OnStopClient",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnStopClient",
+                  "name": "OnStopClient",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:TryCaptureNetworkSaveSnapshotOnDisconnect",
+                  "name": "TryCaptureNetworkSaveSnapshotOnDisconnect",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:TryFallbackToSingleOnDisconnect",
+                  "name": "TryFallbackToSingleOnDisconnect",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Method:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:OnServerConnect",
+                  "name": "OnServerConnect",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Method"
+                },
+                {
+                  "uid": "Function:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:DoStartHost",
+                  "name": "DoStartHost",
+                  "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                  "kind": "Function"
+                },
+                {
+                  "uid": "Function:Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs:StopCoroutine",
+                  "name": "StopCoroutine",
+                  "filePath": "Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs",
+                  "kind": "Function"
+                },
+                {
+                  "uid": "Function:Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs:StopCoroutine",
+                  "name": "StopCoroutine",
+                  "filePath": "Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs",
+                  "kind": "Function"
+                },
+                {
+                  "uid": "Function:Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs:StopCoroutine",
+                  "name": "StopCoroutine",
+                  "filePath": "Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs",
+                  "kind": "Function"
+                },
+                {
+                  "uid": "Function:Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs:StopCoroutine",
+                  "name": "StopCoroutine",
+                  "filePath": "Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs",
+                  "kind": "Function"
+                },
+                {
+                  "uid": "Function:Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs:StopCoroutine",
+                  "name": "StopCoroutine",
+                  "filePath": "Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs",
+                  "kind": "Function"
+                },
+                {
+                  "uid": "Function:Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs:StopCoroutine",
+                  "name": "StopCoroutine",
+                  "filePath": "Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs",
+                  "kind": "Function"
+                },
+                {
+                  "uid": "Function:Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs:StopCoroutine",
+                  "name": "StopCoroutine",
+                  "filePath": "Assets/NEON/Code/Game/Graph/Nodes/Reloads/FireAddEnergy.cs",
+                  "kind": "Function"
+                }
+              ]
+            },
+            "processes": [
+              {
+                "id": "proc_33_onserverdisconnect",
+                "name": "OnServerDisconnect → RefreshIconCache",
+                "step_index": 1,
+                "step_count": 7
+              },
+              {
+                "id": "proc_34_onserverdisconnect",
+                "name": "OnServerDisconnect → GetRarity",
+                "step_index": 1,
+                "step_count": 7
+              },
+              {
+                "id": "proc_35_onserverdisconnect",
+                "name": "OnServerDisconnect → SerializeRuntimeStats",
+                "step_index": 1,
+                "step_count": 7
+              },
+              {
+                "id": "proc_74_onserverdisconnect",
+                "name": "OnServerDisconnect → GetDataByToken",
+                "step_index": 1,
+                "step_count": 6
+              },
+              {
+                "id": "proc_75_onserverdisconnect",
+                "name": "OnServerDisconnect → PlayerEventManager",
+                "step_index": 1,
+                "step_count": 6
+              },
+              {
+                "id": "proc_177_ongamemodechange",
+                "name": "OnGameModeChange → ClearHeartInfo",
+                "step_index": 4,
+                "step_count": 5
+              },
+              {
+                "id": "proc_256_onserverdisconnect",
+                "name": "OnServerDisconnect → RpcUITeamGameDisconnnect",
+                "step_index": 1,
+                "step_count": 4
+              },
+              {
+                "id": "proc_257_onserverdisconnect",
+                "name": "OnServerDisconnect → IsAt",
+                "step_index": 1,
+                "step_count": 4
+              }
+            ]
+          }
+        },
+        {
+          "tool": "impact",
+          "input": {
+            "target": "MirrorNetMgr",
+            "uid": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:MirrorNetMgr",
+            "direction": "upstream",
+            "repo": "neonspark-v1-subset"
+          },
+          "output": {
+            "status": "ambiguous",
+            "message": "Found 7 symbols matching 'MirrorNetMgr'. Use target_uid or file_path to disambiguate.",
+            "candidates": [
+              {
+                "uid": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "kind": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs",
+                "line": 33
+              },
+              {
+                "uid": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.TimeOut.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "kind": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.TimeOut.cs",
+                "line": 8
+              },
+              {
+                "uid": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.Reconnect.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "kind": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.Reconnect.cs",
+                "line": 36
+              },
+              {
+                "uid": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.Prefab.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "kind": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.Prefab.cs",
+                "line": 13
+              },
+              {
+                "uid": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.NetRoom.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "kind": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.NetRoom.cs",
+                "line": 12
+              },
+              {
+                "uid": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.JoinRoom.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "kind": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.JoinRoom.cs",
+                "line": 65
+              },
+              {
+                "uid": "Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.Config.cs:MirrorNetMgr",
+                "name": "MirrorNetMgr",
+                "kind": "Class",
+                "filePath": "Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.Config.cs",
+                "line": 8
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
