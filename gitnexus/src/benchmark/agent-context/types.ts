@@ -18,8 +18,11 @@ export interface AgentContextCheck {
   id: 'T' | 'U' | 'D' | 'B' | 'I' | 'E' | string;
   required_uid?: string;
   forbidden_uid?: string;
-  min_results?: number;
-  max_results?: number;
+  min_incoming?: number;
+  min_outgoing?: number;
+  min_impacted?: number;
+  internal_anchors?: string[];
+  min_internal_hits?: number;
   max_tool_calls?: number;
 }
 
@@ -33,4 +36,10 @@ export interface AgentContextScenario {
 export interface AgentContextDataset {
   thresholds: AgentContextThresholds;
   scenarios: AgentContextScenario[];
+}
+
+export interface AgentContextCheckResult {
+  id: string;
+  pass: boolean;
+  detail?: string;
 }
