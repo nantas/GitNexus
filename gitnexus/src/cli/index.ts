@@ -33,6 +33,7 @@ import { wikiCommand } from './wiki.js';
 import { queryCommand, contextCommand, impactCommand, cypherCommand } from './tool.js';
 import { evalServerCommand } from './eval-server.js';
 import { benchmarkUnityCommand } from './benchmark-unity.js';
+import { benchmarkAgentContextCommand } from './benchmark-agent-context.js';
 const program = new Command();
 const collectValues = (value: string, previous: string[]) => [...previous, value];
 
@@ -164,5 +165,25 @@ program
   .option('--scope-prefix <pathPrefix>', 'Analyze scope path prefix (repeatable)', collectValues, [])
   .option('--skip-analyze', 'Skip analyze stage and evaluate current index only')
   .action(benchmarkUnityCommand);
+
+program
+  .command('benchmark-agent-context <dataset>')
+  .description('Run scenario-based agent refactor context benchmark')
+  .option('-p, --profile <profile>', 'quick or full', 'quick')
+  .option('-r, --repo <name>', 'Target indexed repo')
+  .option('--repo-alias <name>', 'Analyze-time repo alias and default evaluation repo when --repo is omitted')
+  .option('--target-path <path>', 'Path to analyze before evaluation (required unless --skip-analyze)')
+  .option(
+    '--report-dir <path>',
+    'Output directory for benchmark-report.json and benchmark-summary.md',
+    '.gitnexus/benchmark-agent-context',
+  )
+  .option('--extensions <list>', 'Analyze extension filter (default: .cs)', '.cs')
+  .option('--scope-manifest <path>', 'Analyze scope manifest file')
+  .option('--scope-prefix <pathPrefix>', 'Analyze scope path prefix (repeatable)', collectValues, [])
+  .option('--skip-analyze', 'Skip analyze stage and evaluate current index only')
+  .action(async (dataset, options) => {
+    await benchmarkAgentContextCommand(dataset, options);
+  });
 
 program.parse(process.argv);
