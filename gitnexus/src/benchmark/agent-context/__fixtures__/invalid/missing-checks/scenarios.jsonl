@@ -1,0 +1,1 @@
+{"scenario_id":"invalid-missing-checks","target_uid":"Class:Sample:MissingChecks","tool_plan":[{"tool":"query","input":{"query":"MissingChecks"}}]}

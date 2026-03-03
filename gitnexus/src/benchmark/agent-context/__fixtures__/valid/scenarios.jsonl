@@ -1,0 +1,1 @@
+{"scenario_id":"sample-refactor-context","target_uid":"Class:Sample:Target","tool_plan":[{"tool":"query","input":{"query":"Target"}}],"checks":[{"id":"T","required_uid":"Class:Sample:Target"}]}
