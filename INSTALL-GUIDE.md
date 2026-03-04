@@ -13,7 +13,7 @@
 把下面这句话直接发给 agent：
 
 ```text
-阅读 https://github.com/<ORG>/<REPO>/blob/<BRANCH>/INSTALL-GUIDE.md ，并在当前仓库完成 GitNexus 安装、setup、索引构建和检索验收；按文档先与我确认 agent 类型与索引范围，再执行。
+阅读 https://github.com/nantas/GitNexus/blob/nantas-dev/INSTALL-GUIDE.md ，并在当前仓库完成 GitNexus 安装、setup、索引构建和检索验收；按文档先与我确认 agent 类型与索引范围，再执行。
 ```
 
 如果你在本地使用，可改为本地路径：
