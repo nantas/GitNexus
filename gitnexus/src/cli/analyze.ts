@@ -20,6 +20,7 @@ import { generateAIContextFiles } from './ai-context.js';
 import fs from 'fs/promises';
 import { registerClaudeHook } from './claude-hooks.js';
 import { normalizeRepoAlias, parseExtensionList, resolveAnalyzeScopeRules } from './analyze-options.js';
+import { formatFallbackSummary, formatUnityDiagnosticsSummary } from './analyze-summary.js';
 
 const HEAP_MB = 8192;
 const HEAP_FLAG = `--max-old-space-size=${HEAP_MB}`;
@@ -400,6 +401,10 @@ export const analyzeCommand = async (
       }
     }
   }
+  const unitySummaryLines = formatUnityDiagnosticsSummary(pipelineResult.unityResult?.diagnostics);
+  for (const line of unitySummaryLines) {
+    console.log(`  ${line}`);
+  }
   console.log(`  ${stats.nodes.toLocaleString()} nodes | ${stats.edges.toLocaleString()} edges | ${pipelineResult.communityResult?.stats.totalCommunities || 0} clusters | ${pipelineResult.processResult?.stats.totalProcesses || 0} flows`);
   console.log(`  KuzuDB ${kuzuTime}s | FTS ${ftsTime}s | Embeddings ${embeddingSkipped ? embeddingSkipReason : embeddingTime + 's'}`);
   if (includeExtensions.length > 0) {
@@ -415,13 +420,13 @@ export const analyzeCommand = async (
     console.log(`  Hooks: ${hookResult.message}`);
   }
 
-  // Show a quiet summary if some edge types needed fallback insertion
+  // Show fallback summary with pair-level preview and explicit outcomes
   if (kuzuWarnings.length > 0) {
-    const totalFallback = kuzuWarnings.reduce((sum, w) => {
-      const m = w.match(/\((\d+) edges\)/);
-      return sum + (m ? parseInt(m[1]) : 0);
-    }, 0);
-    console.log(`  Note: ${totalFallback} edges across ${kuzuWarnings.length} types inserted via fallback (schema will be updated in next release)`);
+    const fallbackLines = formatFallbackSummary(kuzuWarnings, kuzuResult.fallbackStats);
+    for (const line of fallbackLines) {
+      console.log(`  ${line}`);
+    }
+    console.log('  Note: schema pair coverage should be updated when fallback failures are non-zero');
   }
 
   try {

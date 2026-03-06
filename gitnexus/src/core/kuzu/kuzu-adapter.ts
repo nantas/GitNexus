@@ -118,6 +118,12 @@ const doInitKuzu = async (dbPath: string) => {
 
 export type KuzuProgressCallback = (message: string) => void;
 
+export interface FallbackInsertStats {
+  attempted: number;
+  succeeded: number;
+  failed: number;
+}
+
 export const loadGraphToKuzu = async (
   graph: KnowledgeGraph,
   repoPath: string,
@@ -200,6 +206,7 @@ export const loadGraphToKuzu = async (
 
   const insertedRels = totalValidRels;
   const warnings: string[] = [];
+  let fallbackStats: FallbackInsertStats = { attempted: 0, succeeded: 0, failed: 0 };
   if (insertedRels > 0) {
 
     log(`Loading edges: ${insertedRels.toLocaleString()} across ${relsByPair.size} types`);
@@ -238,7 +245,7 @@ export const loadGraphToKuzu = async (
 
     if (failedPairLines.length > 0) {
       log(`Inserting ${failedPairEdges} edges individually (missing schema pairs)`);
-      await fallbackRelationshipInserts([relHeader, ...failedPairLines], validTables, getNodeLabel);
+      fallbackStats = await fallbackRelationshipInserts([relHeader, ...failedPairLines], validTables, getNodeLabel);
     }
   }
 
@@ -255,7 +262,7 @@ export const loadGraphToKuzu = async (
   } catch {}
   try { await fs.rmdir(csvDir); } catch {}
 
-  return { success: true, insertedRels, skippedRels, warnings };
+  return { success: true, insertedRels, skippedRels, warnings, fallbackStats };
 };
 
 // KuzuDB default ESCAPE is '\' (backslash), but our CSV uses RFC 4180 escaping ("" for literal quotes).
@@ -281,21 +288,32 @@ const fallbackRelationshipInserts = async (
   validRelLines: string[],
   validTables: Set<string>,
   getNodeLabel: (id: string) => string
-) => {
-  if (!conn) return;
+): Promise<FallbackInsertStats> => {
+  const attempted = Math.max(0, validRelLines.length - 1);
+  if (!conn) {
+    return { attempted, succeeded: 0, failed: attempted };
+  }
   const escapeLabel = (label: string): string => {
     return BACKTICK_TABLES.has(label) ? `\`${label}\`` : label;
   };
 
+  let succeeded = 0;
+  let failed = 0;
   for (let i = 1; i < validRelLines.length; i++) {
     const line = validRelLines[i];
     try {
       const match = line.match(/"([^"]*)","([^"]*)","([^"]*)",([0-9.]+),"([^"]*)",([0-9-]+)/);
-      if (!match) continue;
+      if (!match) {
+        failed++;
+        continue;
+      }
       const [, fromId, toId, relType, confidenceStr, reason, stepStr] = match;
       const fromLabel = getNodeLabel(fromId);
       const toLabel = getNodeLabel(toId);
-      if (!validTables.has(fromLabel) || !validTables.has(toLabel)) continue;
+      if (!validTables.has(fromLabel) || !validTables.has(toLabel)) {
+        failed++;
+        continue;
+      }
 
       const confidence = parseFloat(confidenceStr) || 1.0;
       const step = parseInt(stepStr) || 0;
@@ -305,10 +323,12 @@ const fallbackRelationshipInserts = async (
               (b:${escapeLabel(toLabel)} {id: '${toId.replace(/'/g, "''")}' })
         CREATE (a)-[:${REL_TABLE_NAME} {type: '${relType}', confidence: ${confidence}, reason: '${reason.replace(/'/g, "''")}', step: ${step}}]->(b)
       `);
+      succeeded++;
     } catch {
-      // skip
+      failed++;
     }
   }
+  return { attempted, succeeded, failed };
 };
 
 /** Tables with isExported column (TypeScript/JS-native types) */
