@@ -1,0 +1,11 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &1000
+GameObject:
+  m_Component:
+  - component: {fileID: 2100}
+--- !u!114 &2100
+MonoBehaviour:
+  m_Script: {fileID: 11500000, guid: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, type: 3}
+  battleState: Boss
+  uiDocument: {fileID: 11400000, guid: 11111111111111111111111111111111, type: 2}

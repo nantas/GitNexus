@@ -1,0 +1,11 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &1000
+GameObject:
+  m_Component:
+  - component: {fileID: 2200}
+--- !u!114 &2200
+MonoBehaviour:
+  m_Script: {fileID: 11500000, guid: cccccccccccccccccccccccccccccccc, type: 3}
+  walkSpeed: 5
+  animatorController: {fileID: 7400000, guid: 22222222222222222222222222222222, type: 2}

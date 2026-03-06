@@ -1,0 +1,10 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &1000
+GameObject:
+  m_Component:
+  - component: {fileID: 2000}
+--- !u!114 &2000
+MonoBehaviour:
+  m_Script: {fileID: 11500000, guid: a6d481d58c0b4f646b7106ceaf633d6e, type: 3}
+  needPause: 1

@@ -52,6 +52,14 @@ assets/
 !benchmarks/fixtures/unity-mini/Assets/
 !benchmarks/fixtures/unity-mini/Assets/Scripts/
 !benchmarks/fixtures/unity-mini/Assets/Scripts/*.cs
+!gitnexus/src/core/unity/__fixtures__/mini-unity/Assets/
+!gitnexus/src/core/unity/__fixtures__/mini-unity/Assets/Prefabs/
+!gitnexus/src/core/unity/__fixtures__/mini-unity/Assets/Prefabs/*.prefab
+!gitnexus/src/core/unity/__fixtures__/mini-unity/Assets/Scene/
+!gitnexus/src/core/unity/__fixtures__/mini-unity/Assets/Scene/*.unity
+!gitnexus/src/core/unity/__fixtures__/mini-unity/Assets/Scripts/
+!gitnexus/src/core/unity/__fixtures__/mini-unity/Assets/Scripts/*.cs
+!gitnexus/src/core/unity/__fixtures__/mini-unity/Assets/Scripts/*.cs.meta
 
 # Generated files (should not be indexed)
 repomix-output*

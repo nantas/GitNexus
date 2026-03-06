@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &1000
+GameObject:
+  m_Component:
+  - component: {fileID: 11400000}
+--- !u!114 &11400000 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 11400000, guid: 99999999999999999999999999999999, type: 3}
+  m_PrefabInstance: {fileID: 3000}
+  m_Script: {fileID: 11500000, guid: dddddddddddddddddddddddddddddddd, type: 3}
+  needPause: 0
+  mainUIDocument: {fileID: 11400000, guid: 33333333333333333333333333333333, type: 2}
+--- !u!1001 &3000
+PrefabInstance:
+  m_Modification:
+    m_Modifications:
+    - target: {fileID: 11400000}
+      propertyPath: needPause
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 11400000}
+      propertyPath: mainUIDocument
+      value: 
+      objectReference: {fileID: 11400000, guid: 44444444444444444444444444444444, type: 2}
