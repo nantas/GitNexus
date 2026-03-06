@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { generateId } from '../../lib/utils.js';
 import type { KnowledgeGraph, GraphNode, GraphRelationship } from '../graph/types.js';
+import type { UnityScanContext } from '../unity/scan-context.js';
+import { buildUnityScanContext } from '../unity/scan-context.js';
 import { resolveUnityBindings } from '../unity/resolver.js';
 
 export interface UnityResourceProcessingResult {
@@ -12,7 +14,7 @@ export interface UnityResourceProcessingResult {
 
 export async function processUnityResources(
   graph: KnowledgeGraph,
-  options: { repoPath: string },
+  options: { repoPath: string; scopedPaths?: string[] },
 ): Promise<UnityResourceProcessingResult> {
   const classNodes = [...graph.iterNodes()].filter(
     (node) => node.label === 'Class' && String(node.properties.filePath || '').endsWith('.cs'),
@@ -21,13 +23,34 @@ export async function processUnityResources(
   let bindingCount = 0;
   let componentCount = 0;
   const diagnostics: string[] = [];
+  let scanContext: UnityScanContext | undefined;
+
+  try {
+    scanContext = await buildUnityScanContext({
+      repoRoot: options.repoPath,
+      scopedPaths: options.scopedPaths,
+    });
+
+    const uniqueResourcePaths = new Set<string>();
+    for (const hits of scanContext.guidToResourceHits.values()) {
+      for (const hit of hits) {
+        uniqueResourcePaths.add(hit.resourcePath);
+      }
+    }
+
+    diagnostics.push(
+      `scanContext: scripts=${scanContext.symbolToScriptPath.size}, guids=${scanContext.scriptPathToGuid.size}, resources=${uniqueResourcePaths.size}`,
+    );
+  } catch (error) {
+    diagnostics.push(error instanceof Error ? error.message : String(error));
+  }
 
   for (const classNode of classNodes) {
     const symbol = classNode.properties.name;
     if (!symbol) continue;
 
     try {
-      const resolved = await resolveUnityBindings({ repoRoot: options.repoPath, symbol });
+      const resolved = await resolveUnityBindings({ repoRoot: options.repoPath, symbol, scanContext });
       diagnostics.push(...resolved.unityDiagnostics);
       if (resolved.resourceBindings.length === 0) {
         continue;

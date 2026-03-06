@@ -59,3 +59,39 @@ test('processUnityResources adds Unity resource relationships and component payl
   assert.ok(componentNodes.some((node) => String(node.properties.description).includes('mainUIDocument')));
   assert.ok(result.bindingCount >= symbols.length);
 });
+
+test('processUnityResources builds scan context once and enriches all class nodes', async () => {
+  const graph = createKnowledgeGraph();
+
+  for (const symbol of symbols) {
+    const filePath = `Assets/Scripts/${symbol}.cs`;
+    const fileId = generateId('File', filePath);
+    const classId = generateId('Class', `${filePath}:${symbol}`);
+
+    graph.addNode({
+      id: fileId,
+      label: 'File',
+      properties: {
+        name: `${symbol}.cs`,
+        filePath,
+      },
+    });
+
+    graph.addNode({
+      id: classId,
+      label: 'Class',
+      properties: {
+        name: symbol,
+        filePath,
+      },
+    });
+  }
+
+  const result = await processUnityResources(graph, {
+    repoPath: fixtureRoot,
+    scopedPaths: ['Assets/Scripts/MainUIManager.cs'],
+  });
+
+  assert.ok(result.processedSymbols > 0);
+  assert.ok(result.bindingCount > 0);
+});
