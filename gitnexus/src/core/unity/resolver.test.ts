@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildUnityScanContext } from './scan-context.js';
 import { hasCoverage, resolveUnityBindings } from './resolver.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -34,4 +35,10 @@ test('resolveUnityBindings applies PrefabInstance modifications for stripped sce
   assert.equal(needPause?.sourceLayer, 'scene');
   assert.equal(uiDocument?.guid, '44444444444444444444444444444444');
   assert.equal(uiDocument?.sourceLayer, 'scene');
+});
+
+test('resolveUnityBindings uses provided scan context without repo re-scan', async () => {
+  const context = await buildUnityScanContext({ repoRoot: fixtureRoot });
+  const result = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'MainUIManager', scanContext: context });
+  assert.ok(result.resourceBindings.length > 0);
 });
