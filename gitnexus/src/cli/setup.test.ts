@@ -11,6 +11,10 @@ const execFileAsync = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(here, '..', '..');
 const cliPath = path.join(packageRoot, 'dist', 'cli', 'index.js');
+const packageName = JSON.parse(
+  await fs.readFile(path.join(packageRoot, 'package.json'), 'utf-8'),
+) as { name?: string };
+const expectedMcpPackage = `${packageName.name || 'gitnexus'}@latest`;
 
 async function runSetup(args: string[], env: NodeJS.ProcessEnv, cwd = packageRoot) {
   return execFileAsync(process.execPath, [cliPath, 'setup', ...args], { cwd, env });
@@ -129,7 +133,7 @@ process.exit(0);
     const parsed = JSON.parse(raw) as { args: string[] };
 
     assert.deepEqual(parsed.args.slice(0, 4), ['mcp', 'add', 'gitnexus', '--']);
-    assert.ok(parsed.args.includes('gitnexus@latest'));
+    assert.ok(parsed.args.includes(expectedMcpPackage));
     assert.ok(parsed.args.includes('mcp'));
   } finally {
     await fs.rm(fakeHome, { recursive: true, force: true });
@@ -157,7 +161,7 @@ test('setup configures OpenCode MCP in ~/.config/opencode/opencode.json', async 
     };
 
     assert.equal(opencodeConfig.mcp?.gitnexus?.type, 'local');
-    assert.deepEqual(opencodeConfig.mcp?.gitnexus?.command, ['npx', '-y', 'gitnexus@latest', 'mcp']);
+    assert.deepEqual(opencodeConfig.mcp?.gitnexus?.command, ['npx', '-y', expectedMcpPackage, 'mcp']);
   } finally {
     await fs.rm(fakeHome, { recursive: true, force: true });
   }
@@ -187,7 +191,7 @@ test('setup keeps using legacy ~/.config/opencode/config.json when it already ex
 
     assert.equal(legacyConfig.existing, true);
     assert.equal(legacyConfig.mcp?.gitnexus?.type, 'local');
-    assert.deepEqual(legacyConfig.mcp?.gitnexus?.command, ['npx', '-y', 'gitnexus@latest', 'mcp']);
+    assert.deepEqual(legacyConfig.mcp?.gitnexus?.command, ['npx', '-y', expectedMcpPackage, 'mcp']);
     await assert.rejects(fs.access(preferredConfigPath));
   } finally {
     await fs.rm(fakeHome, { recursive: true, force: true });
@@ -318,7 +322,7 @@ test('setup --scope project --agent opencode writes only opencode.json', async (
     const config = JSON.parse(configRaw) as { setupScope?: string };
 
     assert.equal(opencodeConfig.mcp?.gitnexus?.type, 'local');
-    assert.deepEqual(opencodeConfig.mcp?.gitnexus?.command, ['npx', '-y', 'gitnexus@latest', 'mcp']);
+    assert.deepEqual(opencodeConfig.mcp?.gitnexus?.command, ['npx', '-y', expectedMcpPackage, 'mcp']);
     await assert.rejects(fs.access(projectMcpPath));
     await assert.rejects(fs.access(codexConfigPath));
     await fs.access(localSkillPath);

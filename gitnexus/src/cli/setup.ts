@@ -7,6 +7,7 @@
  */
 
 import fs from 'fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'path';
 import os from 'os';
 import { execFile } from 'node:child_process';
@@ -38,6 +39,7 @@ interface McpEntry {
 }
 
 type SetupAgent = 'claude' | 'opencode' | 'codex';
+const FALLBACK_MCP_PACKAGE = 'gitnexus@latest';
 
 function resolveSetupScope(rawScope?: string): SetupScope {
   if (!rawScope || rawScope.trim() === '') return 'global';
@@ -56,6 +58,26 @@ function resolveSetupAgent(rawAgent?: string): SetupAgent {
 }
 
 /**
+ * Resolve the package spec used by MCP commands.
+ * Defaults to gitnexus@latest when package metadata is unavailable.
+ */
+function resolveMcpPackageSpec(): string {
+  try {
+    const packageJsonPath = path.join(__dirname, '..', '..', 'package.json');
+    const raw = readFileSync(packageJsonPath, 'utf-8');
+    const parsed = JSON.parse(raw) as { name?: string };
+    if (typeof parsed.name === 'string' && parsed.name.trim().length > 0) {
+      return `${parsed.name}@latest`;
+    }
+  } catch {
+    // Fallback keeps behavior for unusual runtimes.
+  }
+  return FALLBACK_MCP_PACKAGE;
+}
+
+const MCP_PACKAGE_SPEC = resolveMcpPackageSpec();
+
+/**
  * The MCP server entry for all editors.
  * On Windows, npx must be invoked via cmd /c since it's a .cmd script.
  */
@@ -63,12 +85,12 @@ function getMcpEntry(): McpEntry {
   if (process.platform === 'win32') {
     return {
       command: 'cmd',
-      args: ['/c', 'npx', '-y', 'gitnexus@latest', 'mcp'],
+      args: ['/c', 'npx', '-y', MCP_PACKAGE_SPEC, 'mcp'],
     };
   }
   return {
     command: 'npx',
-    args: ['-y', 'gitnexus@latest', 'mcp'],
+    args: ['-y', MCP_PACKAGE_SPEC, 'mcp'],
   };
 }
 
@@ -226,7 +248,7 @@ async function setupClaudeCode(result: SetupResult): Promise<void> {
   console.log('');
   console.log('  Claude Code detected. Run this command to add GitNexus MCP:');
   console.log('');
-  console.log('    claude mcp add gitnexus -- npx -y gitnexus mcp');
+  console.log(`    claude mcp add gitnexus -- npx -y ${MCP_PACKAGE_SPEC} mcp`);
   console.log('');
   result.configured.push('Claude Code (MCP manual step printed)');
 }

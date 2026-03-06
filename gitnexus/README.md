@@ -70,7 +70,7 @@ If you prefer to configure manually instead of using `gitnexus setup`:
 ### Claude Code (full support — MCP + skills + hooks)
 
 ```bash
-claude mcp add gitnexus -- npx -y gitnexus@latest mcp
+claude mcp add gitnexus -- npx -y @veewo/gitnexus@latest mcp
 ```
 
 ### Cursor / Windsurf
@@ -82,7 +82,7 @@ Add to `~/.cursor/mcp.json` (global — works for all projects):
   "mcpServers": {
     "gitnexus": {
       "command": "npx",
-      "args": ["-y", "gitnexus@latest", "mcp"]
+      "args": ["-y", "@veewo/gitnexus@latest", "mcp"]
     }
   }
 }
@@ -97,7 +97,7 @@ Add to `~/.config/opencode/opencode.json`:
   "mcp": {
     "gitnexus": {
       "type": "local",
-      "command": ["npx", "-y", "gitnexus@latest", "mcp"]
+      "command": ["npx", "-y", "@veewo/gitnexus@latest", "mcp"]
     }
   }
 }
@@ -106,7 +106,7 @@ Add to `~/.config/opencode/opencode.json`:
 ### Codex
 
 ```bash
-codex mcp add gitnexus -- npx -y gitnexus@latest mcp
+codex mcp add gitnexus -- npx -y @veewo/gitnexus@latest mcp
 ```
 
 ## How It Works
