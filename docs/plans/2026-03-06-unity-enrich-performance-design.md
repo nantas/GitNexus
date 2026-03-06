@@ -1,8 +1,8 @@
 # GitNexus Unity Enrich 性能优化设计（不降精度）
 
 **日期**: 2026-03-06  
-**状态**: 需求确认完成（设计冻结）  
-**类型**: 性能优化设计（非实现）
+**状态**: 已实现并回归验证完成  
+**类型**: 性能优化设计 + 实施落地
 
 ## 1. 背景
 
@@ -122,3 +122,18 @@
 1. 先完成最小可交付重构（单次扫描 + join）。
 2. 再补全回归与诊断统计。
 3. 最后评估是否进入 `.gitnexus` 持久化缓存阶段。
+
+## 11. 实施状态（2026-03-06）
+
+已完成：
+
+1. 新增 `UnityScanContext` 并在 enrich 生命周期内单次构建。
+2. `resolveUnityBindings` 支持注入 `scanContext`，仅在未提供 context 时回退全仓扫描。
+3. `processUnityResources` 切换为“两阶段执行”（先建 context，再按 class join），并输出 `scanContext` 诊断计数。
+4. pipeline 已透传 `extensionFiltered` 的 `scopedPaths` 到 Unity enrich。
+5. 新增缓存复用回归测试，锁定同一资源 YAML 的重复解析防回退行为。
+6. Unity 相关回归套件通过（`20/20`）。
+
+当前已知限制：
+
+1. CLI `analyze` 汇总输出尚未展示 `unityResult.diagnostics`，诊断信息目前需通过 pipeline 结果/API 获取。
