@@ -9,18 +9,28 @@ export interface UnityResourceGuidHit {
   lineText: string;
 }
 
-export async function findGuidHits(repoRoot: string, guid: string): Promise<UnityResourceGuidHit[]> {
-  const resourceFiles = (await glob(['**/*.prefab', '**/*.unity'], {
-    cwd: repoRoot,
-    nodir: true,
-    dot: false,
-  })).sort((left, right) => left.localeCompare(right));
+export interface FindGuidHitsOptions {
+  resourceFiles?: string[];
+}
+
+export async function findGuidHits(
+  repoRoot: string,
+  guid: string,
+  options: FindGuidHitsOptions = {},
+): Promise<UnityResourceGuidHit[]> {
+  const resourceFiles = await resolveResourceFiles(repoRoot, options.resourceFiles);
 
   const hits: UnityResourceGuidHit[] = [];
 
   for (const resourcePath of resourceFiles) {
     const absolutePath = path.join(repoRoot, resourcePath);
-    const content = await fs.readFile(absolutePath, 'utf-8');
+    let content = '';
+    try {
+      content = await fs.readFile(absolutePath, 'utf-8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
     const lines = content.split(/\r?\n/);
 
     for (let index = 0; index < lines.length; index += 1) {
@@ -35,4 +45,29 @@ export async function findGuidHits(repoRoot: string, guid: string): Promise<Unit
   }
 
   return hits;
+}
+
+async function resolveResourceFiles(repoRoot: string, scopedResourceFiles?: string[]): Promise<string[]> {
+  if (!scopedResourceFiles || scopedResourceFiles.length === 0) {
+    return (await glob(['**/*.prefab', '**/*.unity'], {
+      cwd: repoRoot,
+      nodir: true,
+      dot: false,
+    })).sort((left, right) => left.localeCompare(right));
+  }
+
+  const normalized = scopedResourceFiles
+    .filter((value) => value.endsWith('.prefab') || value.endsWith('.unity'))
+    .map((value) => normalizeRelativePath(repoRoot, value))
+    .filter((value): value is string => value !== null)
+    .sort((left, right) => left.localeCompare(right));
+
+  return [...new Set(normalized)];
+}
+
+function normalizeRelativePath(repoRoot: string, filePath: string): string | null {
+  const relativePath = path.isAbsolute(filePath) ? path.relative(repoRoot, filePath) : filePath;
+  const normalized = relativePath.replace(/\\/g, '/');
+  if (normalized.startsWith('../')) return null;
+  return normalized;
 }
