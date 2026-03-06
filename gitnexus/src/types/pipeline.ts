@@ -18,6 +18,11 @@ export interface PipelineProgress {
   };
 }
 
+export interface PipelineRunOptions {
+  includeExtensions?: string[];
+  scopeRules?: string[];
+}
+
 // Original result type (used internally in pipeline)
 export interface PipelineResult {
   graph: KnowledgeGraph;

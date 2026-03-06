@@ -15,6 +15,7 @@ import { getLanguageFromFilename } from './utils.js';
 import { createWorkerPool, WorkerPool } from './workers/worker-pool.js';
 import { selectEntriesByScopeRules } from './scope-filter.js';
 import path from 'path';
+import type { PipelineRunOptions } from '../../types/pipeline.js';
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -30,10 +31,7 @@ const AST_CACHE_CAP = 50;
 export const runPipelineFromRepo = async (
   repoPath: string,
   onProgress: (progress: PipelineProgress) => void,
-  options?: {
-    includeExtensions?: string[];
-    scopeRules?: string[];
-  },
+  options?: PipelineRunOptions,
 ): Promise<PipelineResult> => {
   const graph = createKnowledgeGraph();
   const symbolTable = createSymbolTable();
@@ -364,7 +362,7 @@ export const runPipelineFromRepo = async (
       stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: graph.nodeCount },
     });
 
-    const unityResult = await processUnityResources(graph, { repoPath });
+    const unityResult = await processUnityResources(graph, { repoPath, scopedPaths: allPaths });
 
     onProgress({
       phase: 'complete',
