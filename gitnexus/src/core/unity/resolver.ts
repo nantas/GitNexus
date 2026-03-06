@@ -5,6 +5,7 @@ import { buildMetaIndex } from './meta-index.js';
 import type { MergedUnityComponent, UnityObjectLayer } from './override-merger.js';
 import { mergeOverrideChain } from './override-merger.js';
 import { findGuidHits, type UnityResourceGuidHit } from './resource-hit-scanner.js';
+import type { UnityScanContext } from './scan-context.js';
 import { parseUnityYamlObjects, type UnityObjectBlock } from './yaml-object-graph.js';
 
 export type UnityBindingKind = 'direct' | 'prefab-instance' | 'nested' | 'variant' | 'scene-override';
@@ -12,6 +13,7 @@ export type UnityBindingKind = 'direct' | 'prefab-instance' | 'nested' | 'varian
 export interface ResolveInput {
   repoRoot: string;
   symbol: string;
+  scanContext?: UnityScanContext;
 }
 
 export interface UnityScalarField {
@@ -58,16 +60,16 @@ export interface ResolveOutput {
 }
 
 export async function resolveUnityBindings(input: ResolveInput): Promise<ResolveOutput> {
-  const scriptPath = await resolveSymbolScriptPath(input.repoRoot, input.symbol);
-  const scriptGuid = await resolveScriptGuid(input.repoRoot, scriptPath);
-  const hits = await findGuidHits(input.repoRoot, scriptGuid);
+  const scriptPath = await resolveSymbolScriptPath(input.repoRoot, input.symbol, input.scanContext);
+  const scriptGuid = await resolveScriptGuid(input.repoRoot, scriptPath, input.scanContext);
+  const hits = input.scanContext
+    ? (input.scanContext.guidToResourceHits.get(scriptGuid) ?? [])
+    : await findGuidHits(input.repoRoot, scriptGuid);
   const resourceBindings: ResolvedUnityBinding[] = [];
   const unityDiagnostics: string[] = [];
 
   for (const hit of hits) {
-    const absoluteResourcePath = path.join(input.repoRoot, hit.resourcePath);
-    const raw = await fs.readFile(absoluteResourcePath, 'utf-8');
-    const blocks = parseUnityYamlObjects(raw);
+    const blocks = await getResourceBlocks(input.repoRoot, hit.resourcePath, input.scanContext);
     const matchedComponents = blocks.filter(
       (block) => block.objectType === 'MonoBehaviour' && block.fields.m_Script?.includes(scriptGuid),
     );
@@ -110,7 +112,12 @@ export function hasCoverage(resultSet: ResolveOutput[]): { hasScalar: boolean; h
   };
 }
 
-async function resolveSymbolScriptPath(repoRoot: string, symbol: string): Promise<string> {
+async function resolveSymbolScriptPath(repoRoot: string, symbol: string, scanContext?: UnityScanContext): Promise<string> {
+  const contextHit = scanContext?.symbolToScriptPath.get(symbol);
+  if (contextHit) {
+    return normalizePath(contextHit);
+  }
+
   const scriptFiles = (await glob('**/*.cs', {
     cwd: repoRoot,
     nodir: true,
@@ -142,7 +149,12 @@ async function resolveSymbolScriptPath(repoRoot: string, symbol: string): Promis
   throw new Error(`Unity symbol "${symbol}" was not found under ${repoRoot}.`);
 }
 
-async function resolveScriptGuid(repoRoot: string, scriptPath: string): Promise<string> {
+async function resolveScriptGuid(repoRoot: string, scriptPath: string, scanContext?: UnityScanContext): Promise<string> {
+  const contextGuid = scanContext?.scriptPathToGuid.get(normalizePath(scriptPath));
+  if (contextGuid) {
+    return contextGuid;
+  }
+
   const metaIndex = await buildMetaIndex(repoRoot);
   for (const [guid, indexedScriptPath] of metaIndex.entries()) {
     if (normalizePath(indexedScriptPath) === normalizePath(scriptPath)) {
@@ -151,6 +163,24 @@ async function resolveScriptGuid(repoRoot: string, scriptPath: string): Promise<
   }
 
   throw new Error(`No .meta guid found for ${scriptPath}.`);
+}
+
+async function getResourceBlocks(
+  repoRoot: string,
+  resourcePath: string,
+  scanContext?: UnityScanContext,
+): Promise<UnityObjectBlock[]> {
+  const normalizedResourcePath = normalizePath(resourcePath);
+  const cached = scanContext?.resourceDocCache.get(normalizedResourcePath);
+  if (cached) {
+    return cached;
+  }
+
+  const absoluteResourcePath = path.join(repoRoot, normalizedResourcePath);
+  const raw = await fs.readFile(absoluteResourcePath, 'utf-8');
+  const blocks = parseUnityYamlObjects(raw);
+  scanContext?.resourceDocCache.set(normalizedResourcePath, blocks);
+  return blocks;
 }
 
 function resolveBindingForComponent(

@@ -81,3 +81,56 @@ Scoped acceptance index observations:
 - Phase 0 acceptance: PASS
 - Phase 1 scoped graph-native acceptance: PASS
 - DoD coverage rule (`scalar + reference` across 4 real samples): PASS
+
+## Performance Optimization Regression (2026-03-06)
+
+### Full Suite Verification
+
+Executed:
+
+```bash
+cd gitnexus
+npm run build
+node --test \
+  dist/core/unity/*.test.js \
+  dist/core/ingestion/unity-resource-processor.test.js \
+  dist/cli/unity-bindings.test.js \
+  dist/mcp/local/unity-enrichment.test.js \
+  dist/cli/analyze-multi-scope-regression.test.js
+```
+
+Result:
+
+- PASS (`20/20`)
+
+### Scoped Analyze Sampling
+
+Original scoped real-repo command from the design discussion:
+
+```bash
+gitnexus analyze --repo-alias neonspark-unity-acceptance --scope-prefix Assets/NEON/Code/VeewoUI/MainUIManager.cs --extensions .cs --force
+```
+
+In this repository workspace, that exact scope prefix does not exist, so an equivalent local scoped sample was used:
+
+```bash
+npx gitnexus analyze --repo-alias neonspark-unity-acceptance-local --scope-prefix gitnexus/src/core/unity/__fixtures__/mini-unity/Assets --extensions .cs --force
+```
+
+Observed summary:
+
+- `Scoped Files: 4`
+- `File filter: .cs`
+- analyze pipeline completed successfully
+
+Programmatic pipeline sample (same scope/filter) confirms the new enrich diagnostics payload:
+
+```json
+[
+  "scanContext: scripts=4, guids=4, resources=0"
+]
+```
+
+### Known Limitation
+
+- Current CLI analyze summary does not print `unityResult.diagnostics`; diagnostics are available from pipeline result / APIs.

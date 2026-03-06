@@ -28,3 +28,20 @@ test('runPipelineFromRepo deduplicates overlapping scope matches and reports dia
   assert.equal(result.scopeDiagnostics?.dedupedMatchCount, 3);
   assert.equal(result.scopeDiagnostics?.normalizedCollisions.length, 0);
 });
+
+test('pipeline forwards extension-filtered scoped paths to unity enrich', { timeout: 60_000 }, async () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const fixtureRepo = path.resolve(here, '../../src/core/unity/__fixtures__/mini-unity');
+
+  const result = await runPipelineFromRepo(
+    fixtureRepo,
+    () => {},
+    {
+      includeExtensions: ['.cs'],
+      scopeRules: ['Assets'],
+    },
+  );
+
+  assert.equal(result.unityResult?.bindingCount, 0);
+  assert.ok(result.unityResult?.diagnostics.some((message) => message.includes('scanContext:')));
+});
