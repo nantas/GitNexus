@@ -28,6 +28,7 @@ test('projectUnityBindings restores graph-native Unity payload rows', () => {
 test('loadUnityContext queries component payload rows and projects stable output', async () => {
   const out = await loadUnityContext('repo-id', 'Class:Assets/Scripts/MainUIManager.cs:MainUIManager', async (query) => {
     assert.match(query, /UNITY_COMPONENT_INSTANCE/);
+    assert.match(query, /UNITY_SERIALIZED_TYPE_IN/);
     return [
       {
         resourcePath: 'Assets/Scene/MainUIManager.unity',
@@ -49,4 +50,22 @@ test('loadUnityContext queries component payload rows and projects stable output
   assert.equal(out.resourceBindings[0]?.bindingKind, 'scene-override');
   assert.equal(out.serializedFields.scalarFields[0]?.name, 'needPause');
   assert.deepEqual(out.unityDiagnostics, []);
+});
+
+test('loadUnityContext returns resourceBindings for UNITY_SERIALIZED_TYPE_IN relations', async () => {
+  const out = await loadUnityContext('repo-id', 'Class:Assets/Scripts/AssetRef.cs:AssetRef', async () => [
+    {
+      relationType: 'UNITY_SERIALIZED_TYPE_IN',
+      relationReason: '{"hostSymbol":"InventoryConfig","fieldName":"icon","declaredType":"AssetRef"}',
+      resourcePath: 'Assets/Config/Inventory.asset',
+      payload: JSON.stringify({
+        resourceType: 'asset',
+        serializedFields: { scalarFields: [], referenceFields: [] },
+      }),
+    },
+  ] as any);
+
+  assert.equal(out.resourceBindings.length, 1);
+  assert.equal(out.resourceBindings[0]?.resourcePath, 'Assets/Config/Inventory.asset');
+  assert.equal(out.resourceBindings[0]?.resourceType, 'asset');
 });
