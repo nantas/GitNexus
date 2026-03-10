@@ -1,0 +1,198 @@
+{
+  "capturedAt": "2026-03-09T05:40:10.628Z",
+  "repoRoot": "/Volumes/Shuttle/unity-projects/neonspark",
+  "manifestPath": "/Users/nantasmac/projects/agentic/GitNexus/benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
+  "runs": [
+    {
+      "run": 1,
+      "totalMs": 5393.6,
+      "phases": [
+        {
+          "phase": "extracting",
+          "durationMs": 2900.4
+        },
+        {
+          "phase": "structure",
+          "durationMs": 8.7
+        },
+        {
+          "phase": "parsing",
+          "durationMs": 1567.1
+        },
+        {
+          "phase": "communities",
+          "durationMs": 686.1
+        },
+        {
+          "phase": "processes",
+          "durationMs": 104.2
+        },
+        {
+          "phase": "enriching",
+          "durationMs": 126.7
+        },
+        {
+          "phase": "complete",
+          "durationMs": 0.1
+        }
+      ],
+      "unity": {
+        "processedSymbols": 6,
+        "bindingCount": 7,
+        "diagnosticsTotal": 3,
+        "timingsMs": {
+          "scanContext": 120.4,
+          "resolve": 2,
+          "graphWrite": 0.1,
+          "total": 126.6
+        }
+      }
+    },
+    {
+      "run": 2,
+      "totalMs": 4211.9,
+      "phases": [
+        {
+          "phase": "extracting",
+          "durationMs": 1822.3
+        },
+        {
+          "phase": "structure",
+          "durationMs": 8.4
+        },
+        {
+          "phase": "parsing",
+          "durationMs": 1438.5
+        },
+        {
+          "phase": "communities",
+          "durationMs": 774.1
+        },
+        {
+          "phase": "processes",
+          "durationMs": 108
+        },
+        {
+          "phase": "enriching",
+          "durationMs": 60.4
+        },
+        {
+          "phase": "complete",
+          "durationMs": 0.1
+        }
+      ],
+      "unity": {
+        "processedSymbols": 6,
+        "bindingCount": 7,
+        "diagnosticsTotal": 3,
+        "timingsMs": {
+          "scanContext": 54.7,
+          "resolve": 1.1,
+          "graphWrite": 0.1,
+          "total": 60.3
+        }
+      }
+    },
+    {
+      "run": 3,
+      "totalMs": 4224.7,
+      "phases": [
+        {
+          "phase": "extracting",
+          "durationMs": 1854.1
+        },
+        {
+          "phase": "structure",
+          "durationMs": 9.4
+        },
+        {
+          "phase": "parsing",
+          "durationMs": 1510.3
+        },
+        {
+          "phase": "communities",
+          "durationMs": 697
+        },
+        {
+          "phase": "processes",
+          "durationMs": 96.6
+        },
+        {
+          "phase": "enriching",
+          "durationMs": 57.1
+        },
+        {
+          "phase": "complete",
+          "durationMs": 0.1
+        }
+      ],
+      "unity": {
+        "processedSymbols": 6,
+        "bindingCount": 7,
+        "diagnosticsTotal": 3,
+        "timingsMs": {
+          "scanContext": 51.6,
+          "resolve": 1.1,
+          "graphWrite": 0.1,
+          "total": 57
+        }
+      }
+    }
+  ],
+  "summary": {
+    "scanContextMs": {
+      "mean": 75.6,
+      "median": 54.7,
+      "min": 51.6,
+      "max": 120.4,
+      "spread": 68.8
+    },
+    "unityTotalMs": {
+      "mean": 81.3,
+      "median": 60.3,
+      "min": 57,
+      "max": 126.6,
+      "spread": 69.6
+    },
+    "enrichingPhaseMs": {
+      "mean": 81.4,
+      "median": 60.4,
+      "min": 57.1,
+      "max": 126.7,
+      "spread": 69.6
+    },
+    "processedSymbols": [
+      6
+    ],
+    "bindingCount": [
+      7
+    ],
+    "diagnosticsTotal": [
+      3
+    ]
+  },
+  "summaryWarm": {
+    "runRange": "2-3",
+    "scanContextMs": {
+      "mean": 53.2,
+      "median": 54.7,
+      "min": 51.6,
+      "max": 54.7,
+      "spread": 3.1
+    },
+    "unityTotalMs": {
+      "mean": 58.6,
+      "median": 60.3,
+      "min": 57,
+      "max": 60.3,
+      "spread": 3.3
+    },
+    "enrichingPhaseMs": {
+      "mean": 58.8,
+      "median": 60.4,
+      "min": 57.1,
+      "max": 60.4,
+      "spread": 3.3
+    }
+  }
+}

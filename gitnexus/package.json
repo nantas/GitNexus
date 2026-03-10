@@ -39,6 +39,7 @@
     "build": "tsc",
     "dev": "tsx watch src/cli/index.ts",
     "prepare": "npm run build",
+    "test:unity": "npm run build && node --test dist/core/unity/*.test.js",
     "test:benchmark": "npm run build && node --test dist/benchmark/*.test.js dist/cli/*.test.js",
     "benchmark:quick": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/v1 --profile quick --target-path ../benchmarks/fixtures/unity-mini",
     "benchmark:full": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/v1 --profile full --target-path ../benchmarks/fixtures/unity-mini",
@@ -47,7 +48,8 @@
     "benchmark:neonspark:v2:full": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/neonspark-v2 --profile full --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
     "benchmark:neonspark:v2:quick": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/neonspark-v2 --profile quick --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
     "benchmark:agent-context:quick": "npm run build && node dist/cli/index.js benchmark-agent-context ../benchmarks/agent-context/neonspark-refactor-v1 --profile quick --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
-    "benchmark:agent-context:full": "npm run build && node dist/cli/index.js benchmark-agent-context ../benchmarks/agent-context/neonspark-refactor-v1 --profile full --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt"
+    "benchmark:agent-context:full": "npm run build && node dist/cli/index.js benchmark-agent-context ../benchmarks/agent-context/neonspark-refactor-v1 --profile full --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
+    "benchmark:u2:sample": "npm run build && node dist/benchmark/u2-performance-sampler.js"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",

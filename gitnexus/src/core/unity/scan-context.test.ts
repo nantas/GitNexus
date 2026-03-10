@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { buildUnityScanContext } from './scan-context.js';
 import { resolveUnityBindings } from './resolver.js';
@@ -25,4 +27,53 @@ test('buildUnityScanContext exposes reusable resourceDocCache for repeated resol
   await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'MainUIManager', scanContext: context });
   assert.equal(context.resourceDocCache.size, cacheSizeAfterFirst);
   assert.ok(cacheSizeAfterFirst > 0);
+});
+
+test('buildUnityScanContext accepts symbol declarations as hint source', async () => {
+  const context = await buildUnityScanContext({
+    repoRoot: fixtureRoot,
+    scopedPaths: ['Assets/Scene/MainUIManager.unity'],
+    symbolDeclarations: [
+      { symbol: 'HintOnly', scriptPath: 'Assets/Scripts/HintOnly.cs' },
+      { symbol: 'MainUIManager', scriptPath: 'Assets/Scripts/MainUIManager.cs' },
+    ],
+  } as any);
+
+  assert.equal(context.symbolToScriptPath.get('HintOnly'), 'Assets/Scripts/HintOnly.cs');
+  assert.equal(context.symbolToScriptPath.get('MainUIManager'), 'Assets/Scripts/MainUIManager.cs');
+});
+
+test('buildUnityScanContext skips resource scanning when there are no script guids', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-scancontext-'));
+  const badResourceDir = path.join(tempRoot, 'Assets/Scene/Broken.unity');
+  await fs.mkdir(badResourceDir, { recursive: true });
+
+  try {
+    const context = await buildUnityScanContext({
+      repoRoot: tempRoot,
+      scopedPaths: ['Assets/Scene/Broken.unity'],
+    });
+
+    assert.equal(context.scriptPathToGuid.size, 0);
+    assert.equal(context.guidToResourceHits.size, 0);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('buildUnityScanContext indexes scoped asset meta files for guid->path resolution', async () => {
+  const context = await buildUnityScanContext({
+    repoRoot: fixtureRoot,
+    scopedPaths: [
+      'Assets/Scripts/MainUIManager.cs',
+      'Assets/Scripts/MainUIManager.cs.meta',
+      'Assets/Scene/MainUIManager.unity',
+      'Assets/Config/MainUIDocument.asset.meta',
+    ],
+  });
+
+  assert.equal(
+    context.assetGuidToPath?.get('44444444444444444444444444444444'),
+    'Assets/Config/MainUIDocument.asset',
+  );
 });

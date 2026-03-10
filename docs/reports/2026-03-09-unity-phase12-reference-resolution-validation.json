@@ -1,0 +1,57 @@
+{
+  "generatedAt": "2026-03-09T08:06:55.557Z",
+  "alias": "neonspark-unity-phase11-real-20260309",
+  "checks": {
+    "context_found": true,
+    "option_binding_present": true,
+    "resolved_references_present": true,
+    "list_references_structured": true,
+    "list_references_have_index": true,
+    "local_resolution_present": true,
+    "local_resolution_has_target_details": true,
+    "null_resolution_present": true
+  },
+  "summary": {
+    "bindingCount": 4,
+    "resolvedReferenceCount": 11,
+    "listReferenceCount": 6,
+    "localResolvedCount": 9,
+    "nullResolvedCount": 2
+  },
+  "sample": {
+    "firstListReference": {
+      "fieldName": "menuScreenList",
+      "sourceLayer": "prefab",
+      "fileId": "9003262109753179337",
+      "fromList": true,
+      "listIndex": 0,
+      "resolution": "local-object",
+      "target": {
+        "resourcePath": "Assets/NEON/VeewoUI/OptionScreen.prefab",
+        "objectId": "9003262109753179337",
+        "objectType": "MonoBehaviour",
+        "gameObjectName": "GameScreen"
+      }
+    },
+    "firstLocalReference": {
+      "fieldName": "defaultMenuScreen",
+      "sourceLayer": "prefab",
+      "fileId": "9003262109753179337",
+      "fromList": false,
+      "resolution": "local-object",
+      "target": {
+        "resourcePath": "Assets/NEON/VeewoUI/OptionScreen.prefab",
+        "objectId": "9003262109753179337",
+        "objectType": "MonoBehaviour",
+        "gameObjectName": "GameScreen"
+      }
+    },
+    "firstNullReference": {
+      "fieldName": "mainUIDocument",
+      "sourceLayer": "prefab",
+      "fileId": "0",
+      "fromList": false,
+      "resolution": "null"
+    }
+  }
+}

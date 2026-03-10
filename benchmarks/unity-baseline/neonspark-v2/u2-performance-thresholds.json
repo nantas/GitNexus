@@ -1,0 +1,14 @@
+{
+  "metaIndexMs": {
+    "medianMax": 5000,
+    "maxMax": 6000
+  },
+  "referenceResolveMs": {
+    "medianMax": 6500,
+    "maxMax": 7500
+  },
+  "graphReferenceWriteMs": {
+    "medianMax": 700,
+    "maxMax": 800
+  }
+}

@@ -6,7 +6,7 @@ import type { MergedUnityComponent, UnityObjectLayer } from './override-merger.j
 import { mergeOverrideChain } from './override-merger.js';
 import { findGuidHits, type UnityResourceGuidHit } from './resource-hit-scanner.js';
 import type { UnityScanContext } from './scan-context.js';
-import { parseUnityYamlObjects, type UnityObjectBlock } from './yaml-object-graph.js';
+import { parseUnityYamlObjects, type UnityObjectBlock, type UnityObjectType } from './yaml-object-graph.js';
 
 export type UnityBindingKind = 'direct' | 'prefab-instance' | 'nested' | 'variant' | 'scene-override';
 
@@ -36,6 +36,27 @@ export interface UnitySerializedFields {
   referenceFields: UnityReferenceField[];
 }
 
+export type UnityReferenceResolution = 'null' | 'local-object' | 'external-asset' | 'unresolved';
+
+export interface UnityResolvedReferenceTarget {
+  resourcePath?: string;
+  objectId?: string;
+  objectType?: UnityObjectType | string;
+  gameObjectName?: string;
+  assetPath?: string;
+}
+
+export interface UnityResolvedReference {
+  fieldName: string;
+  sourceLayer: string;
+  fileId?: string;
+  guid?: string;
+  fromList: boolean;
+  listIndex?: number;
+  resolution: UnityReferenceResolution;
+  target?: UnityResolvedReferenceTarget;
+}
+
 export interface UnityBindingEvidence {
   line: number;
   lineText: string;
@@ -43,11 +64,12 @@ export interface UnityBindingEvidence {
 
 export interface ResolvedUnityBinding {
   resourcePath: string;
-  resourceType: 'prefab' | 'scene';
+  resourceType: 'prefab' | 'scene' | 'asset';
   bindingKind: UnityBindingKind;
   componentObjectId: string;
   evidence: UnityBindingEvidence;
   serializedFields: UnitySerializedFields;
+  resolvedReferences: UnityResolvedReference[];
 }
 
 export interface ResolveOutput {
@@ -80,7 +102,7 @@ export async function resolveUnityBindings(input: ResolveInput): Promise<Resolve
     }
 
     for (const block of matchedComponents) {
-      const resolved = resolveBindingForComponent(block, blocks, hit);
+      const resolved = resolveBindingForComponent(block, blocks, hit, input.scanContext);
       resourceBindings.push({
         resourcePath: hit.resourcePath,
         resourceType: hit.resourceType,
@@ -91,6 +113,7 @@ export async function resolveUnityBindings(input: ResolveInput): Promise<Resolve
           lineText: hit.lineText,
         },
         serializedFields: resolved.serializedFields,
+        resolvedReferences: resolved.resolvedReferences,
       });
     }
   }
@@ -187,7 +210,8 @@ function resolveBindingForComponent(
   componentBlock: UnityObjectBlock,
   blocks: UnityObjectBlock[],
   hit: UnityResourceGuidHit,
-): { bindingKind: UnityBindingKind; serializedFields: UnitySerializedFields } {
+  scanContext?: UnityScanContext,
+): { bindingKind: UnityBindingKind; serializedFields: UnitySerializedFields; resolvedReferences: UnityResolvedReference[] } {
   const directLayer = createLayerFromFields(componentBlock.fields, baseLayerName(hit.resourceType));
   const layers: UnityObjectLayer[] = [directLayer];
   let bindingKind: UnityBindingKind = inferBindingKind(componentBlock, hit.resourceType);
@@ -218,6 +242,7 @@ function resolveBindingForComponent(
   return {
     bindingKind,
     serializedFields: toSerializedFields(merged),
+    resolvedReferences: toResolvedReferences(merged, blocks, hit.resourcePath, scanContext?.assetGuidToPath),
   };
 }
 
@@ -295,15 +320,153 @@ function aggregateSerializedFields(resourceBindings: ResolvedUnityBinding[]): Un
   };
 }
 
-function inferBindingKind(componentBlock: UnityObjectBlock, resourceType: 'prefab' | 'scene'): UnityBindingKind {
+function toResolvedReferences(
+  merged: MergedUnityComponent,
+  blocks: UnityObjectBlock[],
+  resourcePath: string,
+  assetGuidToPath?: Map<string, string>,
+): UnityResolvedReference[] {
+  const references: UnityResolvedReference[] = [];
+  const blocksById = new Map<string, UnityObjectBlock>();
+  for (const block of blocks) {
+    blocksById.set(block.objectId, block);
+  }
+
+  for (const reference of Object.values(merged.referenceFields)) {
+    references.push(
+      resolveReferenceCandidate(
+        {
+          fieldName: reference.name,
+          sourceLayer: reference.sourceLayer,
+          fileId: reference.fileId,
+          guid: reference.guid,
+          fromList: false,
+        },
+        blocksById,
+        resourcePath,
+        assetGuidToPath,
+      ),
+    );
+  }
+
+  for (const scalar of Object.values(merged.scalarFields)) {
+    const candidates = parseListReferenceCandidates(scalar.name, scalar.sourceLayer, scalar.value);
+    references.push(
+      ...candidates.map((candidate) =>
+        resolveReferenceCandidate(candidate, blocksById, resourcePath, assetGuidToPath),
+      ),
+    );
+  }
+
+  return references;
+}
+
+type UnityReferenceCandidate = Pick<UnityResolvedReference, 'fieldName' | 'sourceLayer' | 'fileId' | 'guid' | 'fromList' | 'listIndex'>;
+
+function parseListReferenceCandidates(fieldName: string, sourceLayer: string, rawValue: string): UnityReferenceCandidate[] {
+  const trimmed = rawValue.trim();
+  if (!trimmed.startsWith('-')) return [];
+
+  const candidates: UnityReferenceCandidate[] = [];
+  const lines = trimmed.split(/\r?\n/);
+  let listIndex = 0;
+  for (const line of lines) {
+    const lineTrimmed = line.trim();
+    if (!lineTrimmed.startsWith('-')) continue;
+    const entryMatch = lineTrimmed.match(/^-\s*(\{.*\})\s*$/);
+    if (!entryMatch) continue;
+    const parsed = parseObjectReference(entryMatch[1]);
+    if (!parsed) continue;
+
+    candidates.push({
+      fieldName,
+      sourceLayer,
+      fileId: parsed.fileId,
+      guid: parsed.guid,
+      fromList: true,
+      listIndex,
+    });
+    listIndex += 1;
+  }
+  return candidates;
+}
+
+function resolveReferenceCandidate(
+  candidate: UnityReferenceCandidate,
+  blocksById: Map<string, UnityObjectBlock>,
+  resourcePath: string,
+  assetGuidToPath?: Map<string, string>,
+): UnityResolvedReference {
+  const fileId = candidate.fileId;
+  const guid = candidate.guid;
+  const normalizedGuid = guid ? guid.toLowerCase() : undefined;
+
+  if (fileId === '0') {
+    return {
+      ...candidate,
+      resolution: 'null',
+    };
+  }
+
+  if (normalizedGuid && !isBuiltInGuid(normalizedGuid)) {
+    const assetPath = assetGuidToPath?.get(normalizedGuid) || assetGuidToPath?.get(guid!);
+    return {
+      ...candidate,
+      resolution: assetPath ? 'external-asset' : 'unresolved',
+      target: assetPath ? { assetPath } : undefined,
+    };
+  }
+
+  if (fileId) {
+    const targetBlock = blocksById.get(fileId);
+    if (targetBlock) {
+      return {
+        ...candidate,
+        resolution: 'local-object',
+        target: {
+          resourcePath,
+          objectId: targetBlock.objectId,
+          objectType: targetBlock.objectType,
+          gameObjectName: resolveGameObjectName(targetBlock, blocksById),
+        },
+      };
+    }
+  }
+
+  return {
+    ...candidate,
+    resolution: 'unresolved',
+  };
+}
+
+function resolveGameObjectName(block: UnityObjectBlock, blocksById: Map<string, UnityObjectBlock>): string | undefined {
+  if (block.objectType === 'GameObject') {
+    return block.fields.m_Name?.trim() || undefined;
+  }
+
+  const gameObjectRef = parseObjectReference(block.fields.m_GameObject || '');
+  const gameObjectId = gameObjectRef?.fileId;
+  if (!gameObjectId) return undefined;
+  const gameObjectBlock = blocksById.get(gameObjectId);
+  if (!gameObjectBlock || gameObjectBlock.objectType !== 'GameObject') return undefined;
+  return gameObjectBlock.fields.m_Name?.trim() || undefined;
+}
+
+function isBuiltInGuid(guid: string): boolean {
+  return /^0+$/.test(guid);
+}
+
+function inferBindingKind(componentBlock: UnityObjectBlock, resourceType: 'prefab' | 'scene' | 'asset'): UnityBindingKind {
   if (componentBlock.stripped && resourceType === 'scene') return 'scene-override';
   if (componentBlock.stripped) return 'nested';
   if (componentBlock.fields.m_PrefabInstance) return 'prefab-instance';
   return 'direct';
 }
 
-function baseLayerName(resourceType: 'prefab' | 'scene'): string {
-  return resourceType === 'scene' ? 'scene' : 'prefab';
+function baseLayerName(resourceType: 'prefab' | 'scene' | 'asset'): string {
+  if (resourceType === 'scene') return 'scene';
+  if (resourceType === 'asset') return 'asset';
+  return 'prefab';
 }
 
 function extractFileId(rawValue?: string): string | undefined {

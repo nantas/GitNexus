@@ -9,18 +9,75 @@ import { hasCoverage, resolveUnityBindings } from './resolver.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureRoot = path.resolve(here, '../../../src/core/unity/__fixtures__/mini-unity');
 const requiredSamples = ['Global', 'BattleMode', 'PlayerActor', 'MainUIManager'];
+const acceptanceBaseline: Record<
+  string,
+  {
+    expectedBindingKinds: string[];
+    minScalarFields: number;
+    minReferenceFields: number;
+    requiredScalarFields: string[];
+    requiredReferenceFields: string[];
+  }
+> = {
+  Global: {
+    expectedBindingKinds: ['direct'],
+    minScalarFields: 1,
+    minReferenceFields: 0,
+    requiredScalarFields: ['needPause'],
+    requiredReferenceFields: [],
+  },
+  BattleMode: {
+    expectedBindingKinds: ['direct'],
+    minScalarFields: 1,
+    minReferenceFields: 1,
+    requiredScalarFields: ['battleState'],
+    requiredReferenceFields: ['uiDocument'],
+  },
+  PlayerActor: {
+    expectedBindingKinds: ['direct'],
+    minScalarFields: 1,
+    minReferenceFields: 1,
+    requiredScalarFields: ['walkSpeed'],
+    requiredReferenceFields: ['animatorController'],
+  },
+  MainUIManager: {
+    expectedBindingKinds: ['scene-override'],
+    minScalarFields: 1,
+    minReferenceFields: 1,
+    requiredScalarFields: ['needPause'],
+    requiredReferenceFields: ['mainUIDocument'],
+  },
+};
 
-test('resolveUnityBindings returns bindings and fields for required Unity samples', async () => {
+test('resolveUnityBindings matches frozen acceptance baseline for required Unity samples', async () => {
   const results = await Promise.all(
     requiredSamples.map((symbol) => resolveUnityBindings({ repoRoot: fixtureRoot, symbol })),
   );
 
   for (const result of results) {
+    const baseline = acceptanceBaseline[result.symbol];
+    assert.ok(baseline, `Missing acceptance baseline for ${result.symbol}`);
+
+    const bindingKinds = Array.from(new Set(result.resourceBindings.map((binding) => binding.bindingKind))).sort();
     assert.ok(result.resourceBindings.length >= 1, `${result.symbol} should have at least one resource binding`);
+    assert.deepEqual(bindingKinds, [...baseline.expectedBindingKinds].sort(), `${result.symbol} binding kinds changed`);
     assert.ok(
-      result.serializedFields.scalarFields.length + result.serializedFields.referenceFields.length > 0,
-      `${result.symbol} should expose serialized fields`,
+      result.serializedFields.scalarFields.length >= baseline.minScalarFields,
+      `${result.symbol} scalar field count below baseline`,
     );
+    assert.ok(
+      result.serializedFields.referenceFields.length >= baseline.minReferenceFields,
+      `${result.symbol} reference field count below baseline`,
+    );
+
+    const scalarNames = new Set(result.serializedFields.scalarFields.map((field) => field.name));
+    const referenceNames = new Set(result.serializedFields.referenceFields.map((field) => field.name));
+    for (const fieldName of baseline.requiredScalarFields) {
+      assert.ok(scalarNames.has(fieldName), `${result.symbol} missing scalar field ${fieldName}`);
+    }
+    for (const fieldName of baseline.requiredReferenceFields) {
+      assert.ok(referenceNames.has(fieldName), `${result.symbol} missing reference field ${fieldName}`);
+    }
   }
 
   assert.deepEqual(hasCoverage(results), { hasScalar: true, hasReference: true });
@@ -74,4 +131,112 @@ test('resource YAML parse is reused across symbols sharing same resource file', 
   assert.ok(first.resourceBindings.length > 0);
   assert.ok(second.resourceBindings.length > 0);
   assert.equal(targetResourceReadCount, 1);
+});
+
+test('resolveUnityBindings emits structured local/list reference targets for agent consumption', async () => {
+  const result = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'MenuScreenCarrier' });
+  const binding = result.resourceBindings[0];
+  assert.ok(binding);
+
+  const defaultRef = binding.resolvedReferences.find((ref) => ref.fieldName === 'defaultScreen' && !ref.fromList);
+  assert.equal(defaultRef?.resolution, 'local-object');
+  assert.equal(defaultRef?.target?.objectType, 'GameObject');
+  assert.equal(defaultRef?.target?.gameObjectName, 'ScreenA');
+
+  const listRefs = binding.resolvedReferences
+    .filter((ref) => ref.fieldName === 'menuScreenList' && ref.fromList)
+    .sort((left, right) => (left.listIndex || 0) - (right.listIndex || 0));
+  assert.equal(listRefs.length, 3);
+  assert.equal(listRefs[0].resolution, 'local-object');
+  assert.equal(listRefs[0].target?.gameObjectName, 'ScreenA');
+  assert.equal(listRefs[1].resolution, 'local-object');
+  assert.equal(listRefs[1].target?.gameObjectName, 'ScreenB');
+  assert.equal(listRefs[2].resolution, 'null');
+});
+
+test('resolveUnityBindings resolves external guid to asset path when scan context includes asset meta', async () => {
+  const context = await buildUnityScanContext({
+    repoRoot: fixtureRoot,
+    scopedPaths: [
+      'Assets/Scripts/MainUIManager.cs',
+      'Assets/Scripts/MainUIManager.cs.meta',
+      'Assets/Scene/MainUIManager.unity',
+      'Assets/Config/MainUIDocument.asset.meta',
+    ],
+  });
+  const result = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'MainUIManager', scanContext: context });
+  const mainBinding = result.resourceBindings[0];
+  assert.ok(mainBinding);
+
+  const externalRef = mainBinding.resolvedReferences.find(
+    (ref) => ref.fieldName === 'mainUIDocument' && ref.guid === '44444444444444444444444444444444',
+  );
+  assert.equal(externalRef?.resolution, 'external-asset');
+  assert.equal(externalRef?.target?.assetPath, 'Assets/Config/MainUIDocument.asset');
+});
+
+test('resolveUnityBindings supports ScriptableObject .asset resource bindings', async () => {
+  const context = await buildUnityScanContext({
+    repoRoot: fixtureRoot,
+    scopedPaths: [
+      'Assets/Scripts/U2ScriptableConfig.cs',
+      'Assets/Scripts/U2ScriptableConfig.cs.meta',
+      'Assets/Config/U2ScriptableConfig.asset',
+      'Assets/Config/U2ScriptableConfig.asset.meta',
+      'Assets/Config/MainUIDocument.asset.meta',
+    ],
+  });
+  const result = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'U2ScriptableConfig', scanContext: context });
+  const binding = result.resourceBindings[0];
+  assert.ok(binding);
+  assert.equal(binding.resourceType, 'asset');
+  assert.equal(binding.resourcePath, 'Assets/Config/U2ScriptableConfig.asset');
+  assert.deepEqual(binding.serializedFields, result.serializedFields);
+  assert.deepEqual(
+    binding.serializedFields.scalarFields.map((field) => field.name),
+    ['menuScreenList'],
+  );
+  assert.deepEqual(
+    binding.serializedFields.referenceFields.map((field) => field.name),
+    ['mainUIDocument'],
+  );
+  assert.equal(binding.serializedFields.referenceFields[0]?.sourceLayer, 'asset');
+
+  const directExternal = binding.resolvedReferences.find(
+    (ref) => ref.fieldName === 'mainUIDocument' && !ref.fromList,
+  );
+  assert.equal(directExternal?.resolution, 'external-asset');
+  assert.equal(directExternal?.target?.assetPath, 'Assets/Config/MainUIDocument.asset');
+
+  const listRefs = binding.resolvedReferences
+    .filter((ref) => ref.fieldName === 'menuScreenList' && ref.fromList)
+    .sort((left, right) => (left.listIndex || 0) - (right.listIndex || 0));
+  assert.equal(listRefs.length, 2);
+  assert.equal(listRefs[0]?.resolution, 'null');
+  assert.equal(listRefs[1]?.resolution, 'external-asset');
+});
+
+test('resolveUnityBindings keeps existing scene serializedFields stable when .asset support is enabled', async () => {
+  const context = await buildUnityScanContext({
+    repoRoot: fixtureRoot,
+    scopedPaths: [
+      'Assets/Scripts/MainUIManager.cs',
+      'Assets/Scripts/MainUIManager.cs.meta',
+      'Assets/Scene/MainUIManager.unity',
+      'Assets/Scripts/U2ScriptableConfig.cs',
+      'Assets/Scripts/U2ScriptableConfig.cs.meta',
+      'Assets/Config/U2ScriptableConfig.asset',
+      'Assets/Config/U2ScriptableConfig.asset.meta',
+      'Assets/Config/MainUIDocument.asset.meta',
+    ],
+  });
+  const result = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'MainUIManager', scanContext: context });
+  const needPause = result.serializedFields.scalarFields.find((field) => field.name === 'needPause');
+  const mainUIDocument = result.serializedFields.referenceFields.find((field) => field.name === 'mainUIDocument');
+
+  assert.ok(result.resourceBindings.length > 0);
+  assert.equal(needPause?.sourceLayer, 'scene');
+  assert.equal(needPause?.value, '1');
+  assert.equal(mainUIDocument?.sourceLayer, 'scene');
+  assert.equal(mainUIDocument?.guid, '44444444444444444444444444444444');
 });

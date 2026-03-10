@@ -1,0 +1,43 @@
+{
+  "capturedAt": "2026-03-09T03:40:19.574Z",
+  "repoRoot": "/Volumes/Shuttle/unity-projects/neonspark",
+  "manifestPath": "/Users/nantasmac/projects/agentic/GitNexus/benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
+  "totalMs": 7522.2,
+  "phases": [
+    {
+      "phase": "extracting",
+      "durationMs": 3856.1
+    },
+    {
+      "phase": "structure",
+      "durationMs": 9.9
+    },
+    {
+      "phase": "parsing",
+      "durationMs": 1965.3
+    },
+    {
+      "phase": "communities",
+      "durationMs": 809.6
+    },
+    {
+      "phase": "processes",
+      "durationMs": 116.6
+    },
+    {
+      "phase": "enriching",
+      "durationMs": 764.2
+    },
+    {
+      "phase": "complete",
+      "durationMs": 0.1
+    }
+  ],
+  "unity": {
+    "processedSymbols": 6,
+    "bindingCount": 7,
+    "diagnosticsTotal": 3,
+    "prefilterNoGuidHit": "prefilter: skipped 5129 symbol(s) without guid resource hits",
+    "prefilterMissingMapping": "prefilter: skipped 236 symbol(s) missing scanContext script mapping"
+  }
+}

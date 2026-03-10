@@ -156,7 +156,7 @@ gitnexus clean --all --force     # Delete all indexes
 gitnexus wiki [path]             # Generate repository wiki from knowledge graph
 gitnexus wiki --model <model>    # Wiki with custom LLM model (default: gpt-4o-mini)
 gitnexus wiki --base-url <url>   # Wiki with custom LLM API base URL
-gitnexus unity-bindings <symbol> --target-path <path> [--json]  # Experimental Unity C# <-> prefab/scene cross-reference
+gitnexus unity-bindings <symbol> --target-path <path> [--json]  # Experimental Unity C# <-> prefab/scene/asset cross-reference
 gitnexus context <symbol> --unity-resources on                  # Include graph-native Unity resource data
 gitnexus query <symbol> --unity-resources on                    # Enrich query symbol hits with Unity resource data
 gitnexus benchmark-unity <dataset>         # Baseline accuracy benchmark suite
@@ -165,7 +165,7 @@ gitnexus benchmark-agent-context <dataset> # Scenario-based refactor context ben
 
 For scoped indexing, `analyze` logs scope overlap dedupe counts and any normalized path collisions to help diagnose multi-directory merge safety.
 
-Unity resource retrieval is opt-in on `query/context` via `unity_resources: off|on|auto` (default: `off`) and surfaces `resourceBindings`, `serializedFields`, and `unityDiagnostics` when enabled.
+Unity resource retrieval is opt-in on `query/context` via `unity_resources: off|on|auto` (default: `off`) and surfaces `resourceBindings`, `serializedFields`, `resolvedReferences`, and `unityDiagnostics` when enabled.
 
 ### What Your AI Agent Gets
 

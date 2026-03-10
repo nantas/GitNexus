@@ -1,0 +1,313 @@
+{
+  "generatedAt": "2026-03-09T09:48:46.403Z",
+  "scenario": "U2 DoD-1 context/query acceptance with unity-resources on",
+  "summary": {
+    "runs": 3,
+    "allRunsPass": true,
+    "repo": "u2-acceptance-20260309",
+    "symbols": [
+      "Global",
+      "BattleMode",
+      "PlayerActor",
+      "MainUIManager",
+      "U2ScriptableConfig",
+      "MenuScreenCarrier"
+    ]
+  },
+  "runResults": [
+    {
+      "run": 1,
+      "symbolRows": [
+        {
+          "symbol": "Global",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 0,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 0,
+          "hasListReferences": false,
+          "hasListIndex": true,
+          "unresolvedCount": 0,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        },
+        {
+          "symbol": "BattleMode",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 1,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 1,
+          "hasListReferences": false,
+          "hasListIndex": true,
+          "unresolvedCount": 1,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        },
+        {
+          "symbol": "PlayerActor",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 1,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 1,
+          "hasListReferences": false,
+          "hasListIndex": true,
+          "unresolvedCount": 1,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        },
+        {
+          "symbol": "MainUIManager",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 1,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 1,
+          "hasListReferences": false,
+          "hasListIndex": true,
+          "unresolvedCount": 0,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        },
+        {
+          "symbol": "U2ScriptableConfig",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 3,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 3,
+          "hasListReferences": true,
+          "hasListIndex": true,
+          "unresolvedCount": 0,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": true
+        },
+        {
+          "symbol": "MenuScreenCarrier",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 4,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 4,
+          "hasListReferences": true,
+          "hasListIndex": true,
+          "unresolvedCount": 0,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        }
+      ],
+      "checks": {
+        "allContextFound": true,
+        "allQueryDefinitionFound": true,
+        "allContextBindingsPresent": true,
+        "allQueryBindingsPresent": true,
+        "allResolvedReferencesConsumable": true,
+        "menuListStructured": true,
+        "scriptableAssetResolved": true
+      }
+    },
+    {
+      "run": 2,
+      "symbolRows": [
+        {
+          "symbol": "Global",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 0,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 0,
+          "hasListReferences": false,
+          "hasListIndex": true,
+          "unresolvedCount": 0,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        },
+        {
+          "symbol": "BattleMode",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 1,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 1,
+          "hasListReferences": false,
+          "hasListIndex": true,
+          "unresolvedCount": 1,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        },
+        {
+          "symbol": "PlayerActor",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 1,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 1,
+          "hasListReferences": false,
+          "hasListIndex": true,
+          "unresolvedCount": 1,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        },
+        {
+          "symbol": "MainUIManager",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 1,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 1,
+          "hasListReferences": false,
+          "hasListIndex": true,
+          "unresolvedCount": 0,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        },
+        {
+          "symbol": "U2ScriptableConfig",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 3,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 3,
+          "hasListReferences": true,
+          "hasListIndex": true,
+          "unresolvedCount": 0,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": true
+        },
+        {
+          "symbol": "MenuScreenCarrier",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 4,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 4,
+          "hasListReferences": true,
+          "hasListIndex": true,
+          "unresolvedCount": 0,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        }
+      ],
+      "checks": {
+        "allContextFound": true,
+        "allQueryDefinitionFound": true,
+        "allContextBindingsPresent": true,
+        "allQueryBindingsPresent": true,
+        "allResolvedReferencesConsumable": true,
+        "menuListStructured": true,
+        "scriptableAssetResolved": true
+      }
+    },
+    {
+      "run": 3,
+      "symbolRows": [
+        {
+          "symbol": "Global",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 0,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 0,
+          "hasListReferences": false,
+          "hasListIndex": true,
+          "unresolvedCount": 0,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        },
+        {
+          "symbol": "BattleMode",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 1,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 1,
+          "hasListReferences": false,
+          "hasListIndex": true,
+          "unresolvedCount": 1,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        },
+        {
+          "symbol": "PlayerActor",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 1,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 1,
+          "hasListReferences": false,
+          "hasListIndex": true,
+          "unresolvedCount": 1,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        },
+        {
+          "symbol": "MainUIManager",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 1,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 1,
+          "hasListReferences": false,
+          "hasListIndex": true,
+          "unresolvedCount": 0,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        },
+        {
+          "symbol": "U2ScriptableConfig",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 3,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 3,
+          "hasListReferences": true,
+          "hasListIndex": true,
+          "unresolvedCount": 0,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": true
+        },
+        {
+          "symbol": "MenuScreenCarrier",
+          "contextFound": true,
+          "contextBindingCount": 1,
+          "contextResolvedCount": 4,
+          "queryDefinitionFound": true,
+          "queryBindingCount": 1,
+          "queryResolvedCount": 4,
+          "hasListReferences": true,
+          "hasListIndex": true,
+          "unresolvedCount": 0,
+          "consumableResolvedReferences": true,
+          "assetReferencePresent": null
+        }
+      ],
+      "checks": {
+        "allContextFound": true,
+        "allQueryDefinitionFound": true,
+        "allContextBindingsPresent": true,
+        "allQueryBindingsPresent": true,
+        "allResolvedReferencesConsumable": true,
+        "menuListStructured": true,
+        "scriptableAssetResolved": true
+      }
+    }
+  ]
+}

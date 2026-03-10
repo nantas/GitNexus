@@ -156,9 +156,13 @@ gitnexus list
 
 ### 6.2 Query（用用户给出的业务关键词）
 
+> Unity 资源增强默认关闭（`unity_resources=off`）。仅在需要 Unity 资源字段时加 `--unity-resources on`。
+
 ```bash
 gitnexus query "<keyword-1>" --repo "$ALIAS" --limit 5
 gitnexus query "<keyword-2>" --repo "$ALIAS" --limit 5
+# 如需 Unity 资源增强：
+gitnexus query "<keyword-1>" --repo "$ALIAS" --limit 5 --unity-resources on
 ```
 
 通过标准：
@@ -170,6 +174,8 @@ gitnexus query "<keyword-2>" --repo "$ALIAS" --limit 5
 
 ```bash
 gitnexus context "<symbol-1>" --repo "$ALIAS"
+# 如需 Unity 资源增强：
+gitnexus context "<symbol-1>" --repo "$ALIAS" --unity-resources on
 gitnexus impact "<symbol-1>" --repo "$ALIAS" --depth 3
 ```
 

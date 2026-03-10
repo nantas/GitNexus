@@ -1,0 +1,48 @@
+{
+  "capturedAt": "2026-03-09T09:03:30+08:00",
+  "repoRoot": "/Volumes/Shuttle/unity-projects/neonspark",
+  "repoAlias": "neonspark-u23-full-20260309",
+  "pipelineProfile": {
+    "source": "docs/reports/2026-03-09-u2-full-repo-pipeline-profile.json",
+    "totalMs": 30284.9,
+    "phases": {
+      "extractingMs": 5319.3,
+      "structureMs": 425.5,
+      "parsingMs": 11823.7,
+      "communitiesMs": 5054.8,
+      "processesMs": 295.6,
+      "enrichingMs": 7365.1
+    },
+    "unityTimingsMs": {
+      "scanContext": 4063.3,
+      "resolve": 3011.9,
+      "graphWrite": 261.3,
+      "total": 7364.7
+    },
+    "unity": {
+      "processedSymbols": 1330,
+      "bindingCount": 90725,
+      "diagnosticsTotal": 8
+    },
+    "scopedFiles": 219783
+  },
+  "cliAnalyze": {
+    "sourceLog": "/tmp/u2_full_repo_analyze_20260309.log",
+    "totalSec": 114.8,
+    "kuzuSec": 73.5,
+    "ftsSec": 19.6,
+    "nodes": 383474,
+    "edges": 618406,
+    "clusters": 7437,
+    "flows": 300
+  },
+  "projectionCheck": {
+    "projectDocRangeSec": {
+      "pipelineLower": 75.9,
+      "pipelineUpper": 138.0
+    },
+    "actualPipelineSec": 30.3,
+    "inRange": false,
+    "note": "Scoped unit-resource extrapolation significantly overestimated optimized full-repo pipeline cost."
+  }
+}

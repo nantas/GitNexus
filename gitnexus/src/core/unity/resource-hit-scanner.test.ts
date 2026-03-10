@@ -11,3 +11,10 @@ test('findGuidHits returns resource hits for matching MonoBehaviour scripts', as
   assert.equal(hits[0].resourcePath, 'Assets/Scene/Global.unity');
   assert.equal(hits[0].line, 9);
 });
+
+test('findGuidHits includes ScriptableObject .asset resources', async () => {
+  const hits = await findGuidHits(fixtureRoot, 'abababababababababababababababab');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].resourceType, 'asset');
+  assert.equal(hits[0].resourcePath, 'Assets/Config/U2ScriptableConfig.asset');
+});

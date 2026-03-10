@@ -176,11 +176,16 @@ gitnexus clean                   # Delete index for current repo
 gitnexus clean --all --force     # Delete all indexes
 gitnexus wiki [path]             # Generate LLM-powered docs from knowledge graph
 gitnexus wiki --model <model>    # Wiki with custom LLM model (default: gpt-4o-mini)
+gitnexus unity-bindings <symbol> --target-path <path> [--json]  # Experimental Unity C# <-> prefab/scene/asset cross-reference
+gitnexus context <symbol> --unity-resources on                   # Include graph-native Unity resource data (opt-in)
+gitnexus query <symbol> --unity-resources on                     # Enrich query symbol hits with Unity resource data (opt-in)
 gitnexus benchmark-unity ../benchmarks/unity-baseline/v1 --profile quick --target-path ../benchmarks/fixtures/unity-mini
 gitnexus benchmark-unity ../benchmarks/unity-baseline/v1 --profile full --target-path ../benchmarks/fixtures/unity-mini
 ```
 
 For scoped indexing, `analyze` logs scope overlap dedupe counts and any normalized path collisions to help diagnose multi-directory merge safety.
+
+Unity resource retrieval is opt-in on `query/context` via `unity_resources: off|on|auto` (default: `off`). Use `--unity-resources on` when you need `resourceBindings`, `serializedFields`, `resolvedReferences`, and `unityDiagnostics` in output.
 
 ## Unity Benchmark
 

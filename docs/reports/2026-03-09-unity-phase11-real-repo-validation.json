@@ -1,0 +1,445 @@
+{
+  "generatedAt": "2026-03-09T06:09:09.133Z",
+  "repoRoot": "/Volumes/Shuttle/unity-projects/neonspark",
+  "alias": "neonspark-unity-phase11-real-20260309",
+  "manifestPath": "/tmp/neonspark_phase11_real_scope_20260309.txt",
+  "scopeRoots": [
+    "Assets/NEON/Code",
+    "Assets/NEON/Scene",
+    "Assets/NEON/VeewoUI",
+    "Assets/NEON/Prefab/UI",
+    "Packages/com.veewo.*",
+    "Packages/com.neonspark.*"
+  ],
+  "elapsedMs": 22380.5,
+  "checks": {
+    "main_ui_resolve_has_bindings": true,
+    "main_ui_option_prefab_has_serialized_fields": true,
+    "context_unity_resources_has_bindings": true,
+    "query_unity_resources_has_serialized_fields": true,
+    "pipeline_unity_timings_present": true,
+    "pipeline_unity_bindings_positive": true,
+    "diagnostics_format_ok": true
+  },
+  "mainUIManager": {
+    "resolve": {
+      "scriptPath": "Assets/NEON/Code/VeewoUI/MainUIManager.cs",
+      "scriptGuid": "1c1dec3f6f22057438735241f6a3bf87",
+      "bindingCount": 4,
+      "bindings": [
+        {
+          "resourcePath": "Assets/NEON/Prefab/UI/UI Screen.prefab",
+          "resourceType": "prefab",
+          "bindingKind": "nested",
+          "componentObjectId": "6469227783308530027",
+          "evidence": {
+            "line": 9357,
+            "lineText": "  m_Script: {fileID: 11500000, guid: 1c1dec3f6f22057438735241f6a3bf87, type: 3}"
+          },
+          "serializedFields": {
+            "scalarFields": [],
+            "referenceFields": []
+          }
+        },
+        {
+          "resourcePath": "Assets/NEON/Scene/BarMode/BarMode.unity",
+          "resourceType": "scene",
+          "bindingKind": "scene-override",
+          "componentObjectId": "1540252102",
+          "evidence": {
+            "line": 4166,
+            "lineText": "  m_Script: {fileID: 11500000, guid: 1c1dec3f6f22057438735241f6a3bf87, type: 3}"
+          },
+          "serializedFields": {
+            "scalarFields": [],
+            "referenceFields": []
+          }
+        },
+        {
+          "resourcePath": "Assets/NEON/Scene/MainScreenMode.unity",
+          "resourceType": "scene",
+          "bindingKind": "scene-override",
+          "componentObjectId": "804508885",
+          "evidence": {
+            "line": 7175,
+            "lineText": "  m_Script: {fileID: 11500000, guid: 1c1dec3f6f22057438735241f6a3bf87, type: 3}"
+          },
+          "serializedFields": {
+            "scalarFields": [],
+            "referenceFields": []
+          }
+        },
+        {
+          "resourcePath": "Assets/NEON/VeewoUI/OptionScreen.prefab",
+          "resourceType": "prefab",
+          "bindingKind": "prefab-instance",
+          "componentObjectId": "1163466825925611152",
+          "evidence": {
+            "line": 54,
+            "lineText": "  m_Script: {fileID: 11500000, guid: 1c1dec3f6f22057438735241f6a3bf87, type: 3}"
+          },
+          "serializedFields": {
+            "scalarFields": [
+              {
+                "name": "isApplyDamageMult",
+                "sourceLayer": "prefab",
+                "value": "0",
+                "valueType": "number"
+              },
+              {
+                "name": "isUseShow",
+                "sourceLayer": "prefab",
+                "value": "0",
+                "valueType": "number"
+              },
+              {
+                "name": "menuScreenList",
+                "sourceLayer": "prefab",
+                "value": "- {fileID: 9003262109753179337}\n- {fileID: 8627683225488842875}\n- {fileID: 2692586658970349286}\n- {fileID: 4064251909791178553}\n- {fileID: 6747021959615626460}\n- {fileID: 4484678464204164987}",
+                "valueType": "string"
+              },
+              {
+                "name": "needPause",
+                "sourceLayer": "prefab",
+                "value": "1",
+                "valueType": "number"
+              },
+              {
+                "name": "noExited",
+                "sourceLayer": "prefab",
+                "value": "0",
+                "valueType": "number"
+              },
+              {
+                "name": "onlyBarOpen",
+                "sourceLayer": "prefab",
+                "value": "0",
+                "valueType": "number"
+              }
+            ],
+            "referenceFields": [
+              {
+                "name": "defaultMenuScreen",
+                "sourceLayer": "prefab",
+                "fileId": "9003262109753179337"
+              },
+              {
+                "name": "initMenuScreen",
+                "sourceLayer": "prefab",
+                "fileId": "9003262109753179337"
+              },
+              {
+                "name": "mainUIDocument",
+                "sourceLayer": "prefab",
+                "fileId": "0"
+              },
+              {
+                "name": "selectedMenuScreen",
+                "sourceLayer": "prefab",
+                "fileId": "0"
+              },
+              {
+                "name": "startMenuScreen",
+                "sourceLayer": "prefab",
+                "fileId": "9003262109753179337"
+              }
+            ]
+          }
+        }
+      ],
+      "serializedFields": {
+        "scalarFields": [
+          {
+            "name": "isApplyDamageMult",
+            "sourceLayer": "prefab",
+            "value": "0",
+            "valueType": "number"
+          },
+          {
+            "name": "isUseShow",
+            "sourceLayer": "prefab",
+            "value": "0",
+            "valueType": "number"
+          },
+          {
+            "name": "menuScreenList",
+            "sourceLayer": "prefab",
+            "value": "- {fileID: 9003262109753179337}\n- {fileID: 8627683225488842875}\n- {fileID: 2692586658970349286}\n- {fileID: 4064251909791178553}\n- {fileID: 6747021959615626460}\n- {fileID: 4484678464204164987}",
+            "valueType": "string"
+          },
+          {
+            "name": "needPause",
+            "sourceLayer": "prefab",
+            "value": "1",
+            "valueType": "number"
+          },
+          {
+            "name": "noExited",
+            "sourceLayer": "prefab",
+            "value": "0",
+            "valueType": "number"
+          },
+          {
+            "name": "onlyBarOpen",
+            "sourceLayer": "prefab",
+            "value": "0",
+            "valueType": "number"
+          }
+        ],
+        "referenceFields": [
+          {
+            "name": "defaultMenuScreen",
+            "sourceLayer": "prefab",
+            "fileId": "9003262109753179337"
+          },
+          {
+            "name": "initMenuScreen",
+            "sourceLayer": "prefab",
+            "fileId": "9003262109753179337"
+          },
+          {
+            "name": "mainUIDocument",
+            "sourceLayer": "prefab",
+            "fileId": "0"
+          },
+          {
+            "name": "selectedMenuScreen",
+            "sourceLayer": "prefab",
+            "fileId": "0"
+          },
+          {
+            "name": "startMenuScreen",
+            "sourceLayer": "prefab",
+            "fileId": "9003262109753179337"
+          }
+        ]
+      },
+      "diagnostics": []
+    },
+    "context": {
+      "bindingCount": 4,
+      "scalarCount": 6,
+      "referenceCount": 5
+    },
+    "query": {
+      "matchedDefinitionCount": 20,
+      "topDefinition": {
+        "id": "Class:Assets/NEON/Code/VeewoUI/MainUIManager.cs:MainUIManager",
+        "name": "MainUIManager",
+        "type": "Class",
+        "filePath": "Assets/NEON/Code/VeewoUI/MainUIManager.cs",
+        "startLine": 35,
+        "endLine": 35,
+        "module": "VeewoUI",
+        "resourceBindings": [
+          {
+            "resourcePath": "Assets/NEON/Prefab/UI/UI Screen.prefab",
+            "resourceType": "prefab",
+            "bindingKind": "nested",
+            "componentObjectId": "6469227783308530027",
+            "evidence": {
+              "line": 0,
+              "lineText": ""
+            },
+            "serializedFields": {
+              "scalarFields": [],
+              "referenceFields": []
+            }
+          },
+          {
+            "resourcePath": "Assets/NEON/Scene/BarMode/BarMode.unity",
+            "resourceType": "scene",
+            "bindingKind": "scene-override",
+            "componentObjectId": "1540252102",
+            "evidence": {
+              "line": 0,
+              "lineText": ""
+            },
+            "serializedFields": {
+              "scalarFields": [],
+              "referenceFields": []
+            }
+          },
+          {
+            "resourcePath": "Assets/NEON/Scene/MainScreenMode.unity",
+            "resourceType": "scene",
+            "bindingKind": "scene-override",
+            "componentObjectId": "804508885",
+            "evidence": {
+              "line": 0,
+              "lineText": ""
+            },
+            "serializedFields": {
+              "scalarFields": [],
+              "referenceFields": []
+            }
+          },
+          {
+            "resourcePath": "Assets/NEON/VeewoUI/OptionScreen.prefab",
+            "resourceType": "prefab",
+            "bindingKind": "prefab-instance",
+            "componentObjectId": "1163466825925611152",
+            "evidence": {
+              "line": 0,
+              "lineText": ""
+            },
+            "serializedFields": {
+              "scalarFields": [
+                {
+                  "name": "isApplyDamageMult",
+                  "sourceLayer": "prefab",
+                  "value": "0",
+                  "valueType": "number"
+                },
+                {
+                  "name": "isUseShow",
+                  "sourceLayer": "prefab",
+                  "value": "0",
+                  "valueType": "number"
+                },
+                {
+                  "name": "menuScreenList",
+                  "sourceLayer": "prefab",
+                  "value": "- {fileID: 9003262109753179337}\n- {fileID: 8627683225488842875}\n- {fileID: 2692586658970349286}\n- {fileID: 4064251909791178553}\n- {fileID: 6747021959615626460}\n- {fileID: 4484678464204164987}",
+                  "valueType": "string"
+                },
+                {
+                  "name": "needPause",
+                  "sourceLayer": "prefab",
+                  "value": "1",
+                  "valueType": "number"
+                },
+                {
+                  "name": "noExited",
+                  "sourceLayer": "prefab",
+                  "value": "0",
+                  "valueType": "number"
+                },
+                {
+                  "name": "onlyBarOpen",
+                  "sourceLayer": "prefab",
+                  "value": "0",
+                  "valueType": "number"
+                }
+              ],
+              "referenceFields": [
+                {
+                  "name": "defaultMenuScreen",
+                  "sourceLayer": "prefab",
+                  "fileId": "9003262109753179337"
+                },
+                {
+                  "name": "initMenuScreen",
+                  "sourceLayer": "prefab",
+                  "fileId": "9003262109753179337"
+                },
+                {
+                  "name": "mainUIDocument",
+                  "sourceLayer": "prefab",
+                  "fileId": "0"
+                },
+                {
+                  "name": "selectedMenuScreen",
+                  "sourceLayer": "prefab",
+                  "fileId": "0"
+                },
+                {
+                  "name": "startMenuScreen",
+                  "sourceLayer": "prefab",
+                  "fileId": "9003262109753179337"
+                }
+              ]
+            }
+          }
+        ],
+        "serializedFields": {
+          "scalarFields": [
+            {
+              "name": "isApplyDamageMult",
+              "sourceLayer": "prefab",
+              "value": "0",
+              "valueType": "number"
+            },
+            {
+              "name": "isUseShow",
+              "sourceLayer": "prefab",
+              "value": "0",
+              "valueType": "number"
+            },
+            {
+              "name": "menuScreenList",
+              "sourceLayer": "prefab",
+              "value": "- {fileID: 9003262109753179337}\n- {fileID: 8627683225488842875}\n- {fileID: 2692586658970349286}\n- {fileID: 4064251909791178553}\n- {fileID: 6747021959615626460}\n- {fileID: 4484678464204164987}",
+              "valueType": "string"
+            },
+            {
+              "name": "needPause",
+              "sourceLayer": "prefab",
+              "value": "1",
+              "valueType": "number"
+            },
+            {
+              "name": "noExited",
+              "sourceLayer": "prefab",
+              "value": "0",
+              "valueType": "number"
+            },
+            {
+              "name": "onlyBarOpen",
+              "sourceLayer": "prefab",
+              "value": "0",
+              "valueType": "number"
+            }
+          ],
+          "referenceFields": [
+            {
+              "name": "defaultMenuScreen",
+              "sourceLayer": "prefab",
+              "fileId": "9003262109753179337"
+            },
+            {
+              "name": "initMenuScreen",
+              "sourceLayer": "prefab",
+              "fileId": "9003262109753179337"
+            },
+            {
+              "name": "mainUIDocument",
+              "sourceLayer": "prefab",
+              "fileId": "0"
+            },
+            {
+              "name": "selectedMenuScreen",
+              "sourceLayer": "prefab",
+              "fileId": "0"
+            },
+            {
+              "name": "startMenuScreen",
+              "sourceLayer": "prefab",
+              "fileId": "9003262109753179337"
+            }
+          ]
+        },
+        "unityDiagnostics": []
+      }
+    }
+  },
+  "pipelineUnityResult": {
+    "processedSymbols": 444,
+    "bindingCount": 9020,
+    "componentCount": 9020,
+    "diagnostics": [
+      "scanContext: scripts=5209, guids=4667, resources=219",
+      "prefilter: skipped 4765 symbol(s) without guid resource hits",
+      "prefilter: skipped 230 symbol(s) missing scanContext script mapping",
+      "diagnostics: aggregated 1 issue(s) across 1 category(ies); sampleLimit=3",
+      "diagnostics: category=no-monobehaviour-match count=1 sampleCount=1",
+      "diagnostics: sample[no-monobehaviour-match] No MonoBehaviour block matched script guid d623cc6a2f378cd4dbbdac3118fb08b4 in Assets/NEON/VeewoUI/BarScreen.prefab."
+    ],
+    "timingsMs": {
+      "scanContext": 271.9,
+      "resolve": 317.3,
+      "graphWrite": 25.5,
+      "total": 622.8
+    }
+  }
+}

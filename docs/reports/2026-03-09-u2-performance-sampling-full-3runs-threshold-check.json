@@ -1,0 +1,225 @@
+{
+  "capturedAt": "2026-03-09T09:36:24.652Z",
+  "targetPath": "/Volumes/Shuttle/unity-projects/neonspark",
+  "runs": 3,
+  "scope": {
+    "scopeManifest": null,
+    "scopePrefix": [],
+    "scopeRuleCount": 0
+  },
+  "samples": [
+    {
+      "run": 1,
+      "totalMs": 26945,
+      "phases": [
+        {
+          "phase": "extracting",
+          "durationMs": 2532
+        },
+        {
+          "phase": "structure",
+          "durationMs": 393.1
+        },
+        {
+          "phase": "parsing",
+          "durationMs": 9201.8
+        },
+        {
+          "phase": "communities",
+          "durationMs": 3818.4
+        },
+        {
+          "phase": "processes",
+          "durationMs": 275.6
+        },
+        {
+          "phase": "enriching",
+          "durationMs": 10723.8
+        },
+        {
+          "phase": "complete",
+          "durationMs": 0.1
+        }
+      ],
+      "unity": {
+        "processedSymbols": 2724,
+        "bindingCount": 128946,
+        "diagnosticsTotal": 8,
+        "timingsMs": {
+          "scanContext": 4206,
+          "resolve": 5864.2,
+          "graphWrite": 624.4,
+          "total": 10723.7
+        }
+      }
+    },
+    {
+      "run": 2,
+      "totalMs": 24250.4,
+      "phases": [
+        {
+          "phase": "extracting",
+          "durationMs": 2468.3
+        },
+        {
+          "phase": "structure",
+          "durationMs": 561.5
+        },
+        {
+          "phase": "parsing",
+          "durationMs": 7864
+        },
+        {
+          "phase": "communities",
+          "durationMs": 3100
+        },
+        {
+          "phase": "processes",
+          "durationMs": 278.9
+        },
+        {
+          "phase": "enriching",
+          "durationMs": 9977.3
+        },
+        {
+          "phase": "complete",
+          "durationMs": 0.1
+        }
+      ],
+      "unity": {
+        "processedSymbols": 2724,
+        "bindingCount": 128946,
+        "diagnosticsTotal": 8,
+        "timingsMs": {
+          "scanContext": 4158.6,
+          "resolve": 5197.1,
+          "graphWrite": 594.3,
+          "total": 9977.3
+        }
+      }
+    },
+    {
+      "run": 3,
+      "totalMs": 24322.1,
+      "phases": [
+        {
+          "phase": "extracting",
+          "durationMs": 2776.4
+        },
+        {
+          "phase": "structure",
+          "durationMs": 588
+        },
+        {
+          "phase": "parsing",
+          "durationMs": 7696.7
+        },
+        {
+          "phase": "communities",
+          "durationMs": 2840.4
+        },
+        {
+          "phase": "processes",
+          "durationMs": 248.1
+        },
+        {
+          "phase": "enriching",
+          "durationMs": 10172.2
+        },
+        {
+          "phase": "complete",
+          "durationMs": 0.1
+        }
+      ],
+      "unity": {
+        "processedSymbols": 2724,
+        "bindingCount": 128946,
+        "diagnosticsTotal": 8,
+        "timingsMs": {
+          "scanContext": 4320.1,
+          "resolve": 5249.2,
+          "graphWrite": 574.6,
+          "total": 10172.1
+        }
+      }
+    }
+  ],
+  "metrics": {
+    "metaIndexMs": {
+      "mean": 4228.2,
+      "median": 4206,
+      "min": 4158.6,
+      "max": 4320.1,
+      "spread": 161.5
+    },
+    "referenceResolveMs": {
+      "mean": 5436.8,
+      "median": 5249.2,
+      "min": 5197.1,
+      "max": 5864.2,
+      "spread": 667.1
+    },
+    "graphReferenceWriteMs": {
+      "mean": 597.8,
+      "median": 594.3,
+      "min": 574.6,
+      "max": 624.4,
+      "spread": 49.8
+    },
+    "unityTotalMs": {
+      "mean": 10291,
+      "median": 10172.1,
+      "min": 9977.3,
+      "max": 10723.7,
+      "spread": 746.4
+    },
+    "pipelineTotalMs": {
+      "mean": 25172.5,
+      "median": 24322.1,
+      "min": 24250.4,
+      "max": 26945,
+      "spread": 2694.6
+    }
+  },
+  "notes": {
+    "metaIndexMsDefinition": "Current implementation uses unity.timingsMs.scanContext as metaIndexMs proxy (scanContext includes meta index + resource scan + asset meta index)."
+  },
+  "thresholdVerdict": {
+    "pass": true,
+    "metrics": {
+      "metaIndexMs": {
+        "pass": true,
+        "actual": {
+          "median": 4206,
+          "max": 4320.1
+        },
+        "expected": {
+          "medianMax": 5000,
+          "maxMax": 6000
+        }
+      },
+      "referenceResolveMs": {
+        "pass": true,
+        "actual": {
+          "median": 5249.2,
+          "max": 5864.2
+        },
+        "expected": {
+          "medianMax": 6500,
+          "maxMax": 7500
+        }
+      },
+      "graphReferenceWriteMs": {
+        "pass": true,
+        "actual": {
+          "median": 594.3,
+          "max": 624.4
+        },
+        "expected": {
+          "medianMax": 700,
+          "maxMax": 800
+        }
+      }
+    }
+  }
+}

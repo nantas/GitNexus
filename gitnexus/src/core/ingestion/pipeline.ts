@@ -97,6 +97,10 @@ export const runPipelineFromRepo = async (
     });
 
     const allPaths = extensionFiltered.map(f => f.path);
+    const unityScopedPaths =
+      (options?.scopeRules && options.scopeRules.length > 0)
+        ? scopedFiles.map(f => f.path)
+        : allPaths;
     processStructure(graph, allPaths);
 
     onProgress({
@@ -362,7 +366,7 @@ export const runPipelineFromRepo = async (
       stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: graph.nodeCount },
     });
 
-    const unityResult = await processUnityResources(graph, { repoPath, scopedPaths: allPaths });
+    const unityResult = await processUnityResources(graph, { repoPath, scopedPaths: unityScopedPaths });
 
     onProgress({
       phase: 'complete',

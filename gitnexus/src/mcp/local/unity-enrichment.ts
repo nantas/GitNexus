@@ -39,10 +39,11 @@ export function projectUnityBindings(rows: any[]): UnityContextPayload {
       const parsed = JSON.parse(rawPayload) as Partial<ResolvedUnityBinding> & {
         serializedFields?: UnitySerializedFields;
         resourcePath?: string;
-        resourceType?: 'prefab' | 'scene';
+        resourceType?: 'prefab' | 'scene' | 'asset';
         bindingKind?: ResolvedUnityBinding['bindingKind'];
         componentObjectId?: string;
         evidence?: ResolvedUnityBinding['evidence'];
+        resolvedReferences?: ResolvedUnityBinding['resolvedReferences'];
       };
 
       const binding: ResolvedUnityBinding = {
@@ -52,6 +53,7 @@ export function projectUnityBindings(rows: any[]): UnityContextPayload {
         componentObjectId: parsed.componentObjectId || '',
         evidence: parsed.evidence || { line: 0, lineText: '' },
         serializedFields: parsed.serializedFields || { scalarFields: [], referenceFields: [] },
+        resolvedReferences: parsed.resolvedReferences || [],
       };
 
       resourceBindings.push(binding);
@@ -72,6 +74,8 @@ export function projectUnityBindings(rows: any[]): UnityContextPayload {
   };
 }
 
-function inferResourceType(resourcePath: string): 'prefab' | 'scene' {
-  return resourcePath.endsWith('.prefab') ? 'prefab' : 'scene';
+function inferResourceType(resourcePath: string): 'prefab' | 'scene' | 'asset' {
+  if (resourcePath.endsWith('.prefab')) return 'prefab';
+  if (resourcePath.endsWith('.asset')) return 'asset';
+  return 'scene';
 }

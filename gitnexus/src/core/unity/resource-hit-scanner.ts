@@ -4,7 +4,7 @@ import { glob } from 'glob';
 
 export interface UnityResourceGuidHit {
   resourcePath: string;
-  resourceType: 'prefab' | 'scene';
+  resourceType: 'prefab' | 'scene' | 'asset';
   line: number;
   lineText: string;
 }
@@ -37,7 +37,7 @@ export async function findGuidHits(
       if (!lines[index].includes(guid)) continue;
       hits.push({
         resourcePath: resourcePath.replace(/\\/g, '/'),
-        resourceType: resourcePath.endsWith('.prefab') ? 'prefab' : 'scene',
+        resourceType: inferResourceType(resourcePath),
         line: index + 1,
         lineText: lines[index],
       });
@@ -49,7 +49,7 @@ export async function findGuidHits(
 
 async function resolveResourceFiles(repoRoot: string, scopedResourceFiles?: string[]): Promise<string[]> {
   if (!scopedResourceFiles || scopedResourceFiles.length === 0) {
-    return (await glob(['**/*.prefab', '**/*.unity'], {
+    return (await glob(['**/*.prefab', '**/*.unity', '**/*.asset'], {
       cwd: repoRoot,
       nodir: true,
       dot: false,
@@ -57,7 +57,7 @@ async function resolveResourceFiles(repoRoot: string, scopedResourceFiles?: stri
   }
 
   const normalized = scopedResourceFiles
-    .filter((value) => value.endsWith('.prefab') || value.endsWith('.unity'))
+    .filter((value) => value.endsWith('.prefab') || value.endsWith('.unity') || value.endsWith('.asset'))
     .map((value) => normalizeRelativePath(repoRoot, value))
     .filter((value): value is string => value !== null)
     .sort((left, right) => left.localeCompare(right));
@@ -70,4 +70,10 @@ function normalizeRelativePath(repoRoot: string, filePath: string): string | nul
   const normalized = relativePath.replace(/\\/g, '/');
   if (normalized.startsWith('../')) return null;
   return normalized;
+}
+
+function inferResourceType(resourcePath: string): UnityResourceGuidHit['resourceType'] {
+  if (resourcePath.endsWith('.prefab')) return 'prefab';
+  if (resourcePath.endsWith('.asset')) return 'asset';
+  return 'scene';
 }

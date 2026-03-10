@@ -1,0 +1,47 @@
+{
+  "capturedAt": "2026-03-09T04:17:26.010Z",
+  "repoRoot": "/Volumes/Shuttle/unity-projects/neonspark",
+  "manifestPath": "/Users/nantasmac/projects/agentic/GitNexus/benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
+  "totalMs": 6225.2,
+  "phases": [
+    {
+      "phase": "extracting",
+      "durationMs": 3100.1
+    },
+    {
+      "phase": "structure",
+      "durationMs": 9
+    },
+    {
+      "phase": "parsing",
+      "durationMs": 1585.9
+    },
+    {
+      "phase": "communities",
+      "durationMs": 700.8
+    },
+    {
+      "phase": "processes",
+      "durationMs": 111.5
+    },
+    {
+      "phase": "enriching",
+      "durationMs": 717.5
+    },
+    {
+      "phase": "complete",
+      "durationMs": 0.1
+    }
+  ],
+  "unity": {
+    "processedSymbols": 6,
+    "bindingCount": 7,
+    "diagnosticsTotal": 3,
+    "timingsMs": {
+      "scanContext": 711.7,
+      "resolve": 2,
+      "graphWrite": 0.1,
+      "total": 717.4
+    }
+  }
+}

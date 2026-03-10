@@ -1,0 +1,65 @@
+{
+  "capturedAt": "2026-03-09T09:01:23.314Z",
+  "repoRoot": "/Volumes/Shuttle/unity-projects/neonspark",
+  "totalMs": 30284.9,
+  "phases": [
+    {
+      "phase": "extracting",
+      "startMs": 0,
+      "durationMs": 5319.3,
+      "message": "Scanning repository..."
+    },
+    {
+      "phase": "structure",
+      "startMs": 5320.1,
+      "durationMs": 425.5,
+      "message": "Analyzing project structure..."
+    },
+    {
+      "phase": "parsing",
+      "startMs": 5745.6,
+      "durationMs": 11823.7,
+      "message": "Parsing 12218 files in 5 chunks..."
+    },
+    {
+      "phase": "communities",
+      "startMs": 17569.3,
+      "durationMs": 5054.8,
+      "message": "Detecting code communities..."
+    },
+    {
+      "phase": "processes",
+      "startMs": 22624.1,
+      "durationMs": 295.6,
+      "message": "Detecting execution flows..."
+    },
+    {
+      "phase": "enriching",
+      "startMs": 22919.7,
+      "durationMs": 7365.1,
+      "message": "Extracting Unity resource bindings..."
+    },
+    {
+      "phase": "complete",
+      "startMs": 30284.8,
+      "durationMs": 0.1,
+      "message": "Graph complete! 7471 communities, 300 processes detected."
+    }
+  ],
+  "unity": {
+    "processedSymbols": 1330,
+    "bindingCount": 90725,
+    "diagnosticsTotal": 8,
+    "timingsMs": {
+      "scanContext": 4063.3,
+      "resolve": 3011.9,
+      "graphWrite": 261.3,
+      "total": 7364.7
+    }
+  },
+  "summary": {
+    "totalFiles": 219783,
+    "communities": 7471,
+    "processes": 300
+  }
+}

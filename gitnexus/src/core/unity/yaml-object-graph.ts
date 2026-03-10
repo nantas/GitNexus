@@ -91,7 +91,7 @@ function parseFields(lines: string[]): Record<string, string> {
       continue;
     }
 
-    const topLevelMatch = line.match(/^ {2}([^ ][^:]*):(.*)$/);
+    const topLevelMatch = line.match(/^ {2}(?!-)([^ ][^:]*):(.*)$/);
     if (topLevelMatch) {
       flush();
       currentKey = topLevelMatch[1].trim();

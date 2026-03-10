@@ -1,0 +1,14 @@
+{
+  "capturedAt": "2026-03-09T09:40:30+08:00",
+  "command": "npm run test:unity",
+  "runs": [
+    { "run": 1, "exitCode": 0, "tests": 22, "pass": 22, "fail": 0, "log": "/tmp/u2_test_unity_run1.log" },
+    { "run": 2, "exitCode": 0, "tests": 22, "pass": 22, "fail": 0, "log": "/tmp/u2_test_unity_run2.log" },
+    { "run": 3, "exitCode": 0, "tests": 22, "pass": 22, "fail": 0, "log": "/tmp/u2_test_unity_run3.log" }
+  ],
+  "summary": {
+    "allPass": true,
+    "totalRuns": 3,
+    "totalFailures": 0
+  }
+}
