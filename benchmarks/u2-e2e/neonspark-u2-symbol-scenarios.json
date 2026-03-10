@@ -1,0 +1,125 @@
+[
+  {
+    "symbol": "MainUIManager",
+    "kind": "component",
+    "objectives": [
+      "Verify context response exposes resourceBindings and resolvedReferences",
+      "Verify context off/on behavior differs for enrichment fields"
+    ],
+    "deepDivePlan": [
+      {
+        "tool": "query",
+        "input": {
+          "query": "MainUIManager",
+          "goal": "Find UI resource targets"
+        }
+      },
+      {
+        "tool": "impact",
+        "input": {
+          "target": "MainUIManager",
+          "direction": "upstream"
+        }
+      }
+    ]
+  },
+  {
+    "symbol": "CoinPowerUp",
+    "kind": "component",
+    "objectives": [
+      "Verify enriched context includes asset-type binding evidence",
+      "Verify deep dive query can recover dependency hints"
+    ],
+    "deepDivePlan": [
+      {
+        "tool": "query",
+        "input": {
+          "query": "CoinPowerUp",
+          "goal": "Locate linked assets and config objects"
+        }
+      },
+      {
+        "tool": "cypher",
+        "input": {
+          "query": "MATCH (s:SYMBOL {name:$name})--(n) RETURN n LIMIT 20",
+          "params": {
+            "name": "CoinPowerUp"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "symbol": "GlobalDataAssets",
+    "kind": "scriptableobject",
+    "objectives": [
+      "Verify scriptable object context includes reference evidence",
+      "Verify impact traversal returns usage/dependency surface"
+    ],
+    "deepDivePlan": [
+      {
+        "tool": "impact",
+        "input": {
+          "target": "GlobalDataAssets",
+          "direction": "both"
+        }
+      },
+      {
+        "tool": "query",
+        "input": {
+          "query": "GlobalDataAssets dependencies",
+          "goal": "Find dependent systems"
+        }
+      }
+    ]
+  },
+  {
+    "symbol": "AssetRef",
+    "kind": "serializable-class",
+    "objectives": [
+      "Allow empty resourceBindings in context when direct links are unavailable",
+      "Require deep dive evidence for usage or dependencies"
+    ],
+    "deepDivePlan": [
+      {
+        "tool": "query",
+        "input": {
+          "query": "AssetRef usage",
+          "goal": "Find classes and components that consume AssetRef"
+        }
+      },
+      {
+        "tool": "impact",
+        "input": {
+          "target": "AssetRef",
+          "direction": "upstream"
+        }
+      }
+    ]
+  },
+  {
+    "symbol": "PlayerActor",
+    "kind": "partial-component",
+    "contextFileHint": "Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.cs",
+    "objectives": [
+      "Verify partial symbol context still includes enriched references",
+      "Verify deep dive can connect gameplay component dependencies"
+    ],
+    "deepDivePlan": [
+      {
+        "tool": "context",
+        "input": {
+          "name": "PlayerActor",
+          "maxTokens": 1200
+        }
+      },
+      {
+        "tool": "query",
+        "input": {
+          "query": "PlayerActor resource binding",
+          "goal": "Extract binding and dependency overview"
+        }
+      }
+    ]
+  }
+]
