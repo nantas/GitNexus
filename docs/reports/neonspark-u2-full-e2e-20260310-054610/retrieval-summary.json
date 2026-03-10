@@ -1,0 +1,54 @@
+{
+  "symbols": [
+    {
+      "symbol": "MainUIManager",
+      "pass": true,
+      "stepCount": 4,
+      "durationMs": 242.2,
+      "totalTokensEst": 5740,
+      "failures": []
+    },
+    {
+      "symbol": "CoinPowerUp",
+      "pass": true,
+      "stepCount": 4,
+      "durationMs": 56.9,
+      "totalTokensEst": 15655,
+      "failures": []
+    },
+    {
+      "symbol": "GlobalDataAssets",
+      "pass": true,
+      "stepCount": 4,
+      "durationMs": 130.1,
+      "totalTokensEst": 4566,
+      "failures": []
+    },
+    {
+      "symbol": "AssetRef",
+      "pass": false,
+      "stepCount": 4,
+      "durationMs": 140.7,
+      "totalTokensEst": 7204,
+      "failures": [
+        "AssetRef: context(on) must include resourceBindings"
+      ]
+    },
+    {
+      "symbol": "PlayerActor",
+      "pass": true,
+      "stepCount": 4,
+      "durationMs": 262.6,
+      "totalTokensEst": 13815,
+      "failures": []
+    }
+  ],
+  "tokenSummary": {
+    "totalTokensEst": 46980,
+    "totalDurationMs": 832.5
+  },
+  "failures": [
+    "AssetRef: AssetRef: context(on) must include resourceBindings",
+    "duration.min=0.9ms median=22.3ms max=210.4ms"
+  ]
+}

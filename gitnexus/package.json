@@ -49,7 +49,8 @@
     "benchmark:neonspark:v2:quick": "npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/neonspark-v2 --profile quick --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
     "benchmark:agent-context:quick": "npm run build && node dist/cli/index.js benchmark-agent-context ../benchmarks/agent-context/neonspark-refactor-v1 --profile quick --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
     "benchmark:agent-context:full": "npm run build && node dist/cli/index.js benchmark-agent-context ../benchmarks/agent-context/neonspark-refactor-v1 --profile full --target-path /Volumes/Shuttle/unity-projects/neonspark --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
-    "benchmark:u2:sample": "npm run build && node dist/benchmark/u2-performance-sampler.js"
+    "benchmark:u2:sample": "npm run build && node dist/benchmark/u2-performance-sampler.js",
+    "benchmark:u2:e2e": "npm run build && node dist/cli/index.js benchmark-u2-e2e --config ../benchmarks/u2-e2e/neonspark-full-u2-e2e.config.json"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",

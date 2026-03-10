@@ -18,7 +18,9 @@ test('buildSerializableTypeIndex extracts serializable symbols and host field de
         using System.Collections.Generic;
         public class InventoryConfig : ScriptableObject {
           public AssetRef icon;
+          public AssetRef<GameObject> iconPrefab;
           [SerializeField] private List<AssetRef> drops;
+          [SerializeField] private List<AssetRef<Sprite>> iconVariants;
           [SerializeField] private int ignored;
         }
       `,
@@ -27,6 +29,8 @@ test('buildSerializableTypeIndex extracts serializable symbols and host field de
 
   assert.equal(index.serializableSymbols.has('AssetRef'), true);
   assert.equal(index.hostFieldTypeHints.get('InventoryConfig')?.get('icon'), 'AssetRef');
+  assert.equal(index.hostFieldTypeHints.get('InventoryConfig')?.get('iconPrefab'), 'AssetRef');
   assert.equal(index.hostFieldTypeHints.get('InventoryConfig')?.get('drops'), 'AssetRef');
+  assert.equal(index.hostFieldTypeHints.get('InventoryConfig')?.get('iconVariants'), 'AssetRef');
   assert.equal(index.hostFieldTypeHints.get('InventoryConfig')?.has('ignored'), false);
 });

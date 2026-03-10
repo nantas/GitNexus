@@ -38,6 +38,7 @@ import { evalServerCommand } from './eval-server.js';
 import { benchmarkUnityCommand } from './benchmark-unity.js';
 import { benchmarkAgentContextCommand } from './benchmark-agent-context.js';
 import { unityBindingsCommand } from './unity-bindings.js';
+import { benchmarkU2E2ECommand } from './benchmark-u2-e2e.js';
 
 function resolveCliVersion(): string {
   try {
@@ -220,6 +221,15 @@ program
   .option('--skip-analyze', 'Skip analyze stage and evaluate current index only')
   .action(async (dataset, options) => {
     await benchmarkAgentContextCommand(dataset, options);
+  });
+
+program
+  .command('benchmark-u2-e2e')
+  .description('Run fail-fast full neonspark U2 E2E benchmark and emit evidence reports')
+  .option('--config <path>', 'Path to E2E config JSON')
+  .option('--report-dir <path>', 'Output directory for reports')
+  .action(async (options) => {
+    await benchmarkU2E2ECommand(options);
   });
 
 program.parse(process.argv);

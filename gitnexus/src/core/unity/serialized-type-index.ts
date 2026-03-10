@@ -103,13 +103,17 @@ function extractHostFieldHints(classBody: string, serializableSymbols: Set<strin
 }
 
 function normalizeDeclaredType(input: string): string | null {
-  const compact = String(input || '').replace(/\s+/g, '');
+  let compact = String(input || '').replace(/\s+/g, '');
+  compact = compact.replace(/^global::/, '');
   if (!compact) return null;
 
   let typeName = compact;
 
-  const listMatch = typeName.match(/^(?:System\.Collections\.Generic\.)?List<([A-Za-z_][A-Za-z0-9_\.]*)>$/);
-  if (listMatch) {
+  while (true) {
+    const listMatch = typeName.match(
+      /^(?:System\.Collections\.Generic\.)?(?:List|IList|IReadOnlyList|IEnumerable|HashSet)<(.+)>$/,
+    );
+    if (!listMatch) break;
     typeName = listMatch[1];
   }
 
@@ -118,6 +122,11 @@ function normalizeDeclaredType(input: string): string | null {
   }
   if (typeName.endsWith('?')) {
     typeName = typeName.slice(0, -1);
+  }
+
+  const genericStart = typeName.indexOf('<');
+  if (genericStart !== -1) {
+    typeName = typeName.slice(0, genericStart);
   }
 
   const shortName = typeName.split('.').pop() || '';

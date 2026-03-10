@@ -105,6 +105,9 @@ function assertScenario(
   }
 
   if (scenario.symbol === 'AssetRef') {
+    if (!hasBindings) {
+      failures.push('AssetRef: context(on) must include resourceBindings');
+    }
     const deepDiveEvidence = deepDiveOutputs.some((output) => hasDeepDiveEvidence(output));
     if (!deepDiveEvidence) {
       failures.push('AssetRef: deep-dive must provide usage/dependency evidence');

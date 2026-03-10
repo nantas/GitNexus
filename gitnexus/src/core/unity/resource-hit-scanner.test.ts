@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { findGuidHits } from './resource-hit-scanner.js';
 
-const fixtureRoot = 'src/core/unity/__fixtures__/mini-unity';
+const here = path.dirname(fileURLToPath(import.meta.url));
+const fixtureRoot = path.resolve(here, '../../../src/core/unity/__fixtures__/mini-unity');
 
 test('findGuidHits returns resource hits for matching MonoBehaviour scripts', async () => {
   const hits = await findGuidHits(fixtureRoot, 'a6d481d58c0b4f646b7106ceaf633d6e');
