@@ -62,6 +62,15 @@ export interface UnityBindingEvidence {
   lineText: string;
 }
 
+export interface UnityAssetRefPathReference {
+  parentFieldName: string;
+  fieldName: string;
+  relativePath: string;
+  sourceLayer: string;
+  isEmpty: boolean;
+  isSprite: boolean;
+}
+
 export interface ResolvedUnityBinding {
   resourcePath: string;
   resourceType: 'prefab' | 'scene' | 'asset';
@@ -70,6 +79,7 @@ export interface ResolvedUnityBinding {
   evidence: UnityBindingEvidence;
   serializedFields: UnitySerializedFields;
   resolvedReferences: UnityResolvedReference[];
+  assetRefPaths?: UnityAssetRefPathReference[];
 }
 
 export interface ResolveOutput {
@@ -114,6 +124,7 @@ export async function resolveUnityBindings(input: ResolveInput): Promise<Resolve
         },
         serializedFields: resolved.serializedFields,
         resolvedReferences: resolved.resolvedReferences,
+        assetRefPaths: extractAssetRefPathReferences(resolved.serializedFields),
       });
     }
   }
@@ -311,6 +322,53 @@ function toSerializedFields(merged: MergedUnityComponent): UnitySerializedFields
     scalarFields: Object.values(merged.scalarFields).sort((left, right) => left.name.localeCompare(right.name)),
     referenceFields: Object.values(merged.referenceFields).sort((left, right) => left.name.localeCompare(right.name)),
   };
+}
+
+const ASSET_REF_FIELD_RE = /^\s*([A-Za-z0-9_]*Ref):\s*$/;
+const RELATIVE_PATH_RE = /^\s*_relativePath:\s*(.*)$/;
+
+function unquote(value: string): string {
+  return value.replace(/^"|"$/g, '');
+}
+
+function isSpriteRelativePath(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes('/sprites/')) return true;
+  return /\.(png|jpg|jpeg|tga|psd|webp|spriteatlas|spriteatlasv2)$/.test(normalized);
+}
+
+export function extractAssetRefPathReferences(serializedFields: UnitySerializedFields): UnityAssetRefPathReference[] {
+  const refs: UnityAssetRefPathReference[] = [];
+  for (const scalarField of serializedFields.scalarFields) {
+    const text = String(scalarField.value || '');
+    if (!text) continue;
+
+    let currentFieldName = scalarField.name;
+    const lines = text.split(/\r?\n/);
+    for (const line of lines) {
+      const fieldMatch = line.match(ASSET_REF_FIELD_RE);
+      if (fieldMatch) {
+        currentFieldName = fieldMatch[1];
+        continue;
+      }
+      const relativeMatch = line.match(RELATIVE_PATH_RE);
+      if (!relativeMatch) {
+        continue;
+      }
+      const relativePath = unquote((relativeMatch[1] || '').trim());
+      refs.push({
+        parentFieldName: scalarField.name,
+        fieldName: currentFieldName,
+        relativePath,
+        sourceLayer: scalarField.sourceLayer || 'unknown',
+        isEmpty: relativePath.length === 0,
+        isSprite: isSpriteRelativePath(relativePath),
+      });
+    }
+  }
+
+  return refs;
 }
 
 function aggregateSerializedFields(resourceBindings: ResolvedUnityBinding[]): UnitySerializedFields {

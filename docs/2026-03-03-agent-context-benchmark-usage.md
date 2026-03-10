@@ -1,6 +1,6 @@
 # Agent Refactor Context Benchmark Usage
 
-Run from repo root: `/Users/nantasmac/projects/agentic/GitNexus`.
+Run from repository root.
 
 ## Dataset
 
@@ -32,7 +32,7 @@ cd gitnexus
 npm run build
 node dist/cli/index.js benchmark-agent-context ../benchmarks/agent-context/neonspark-refactor-v1 \
   --profile quick \
-  --target-path /Volumes/Shuttle/unity-projects/neonspark \
+  --target-path /path/to/unity-repo \
   --repo-alias neonspark-v1-subset \
   --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt
 ```

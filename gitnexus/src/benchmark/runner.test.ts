@@ -21,7 +21,7 @@ test('resolveBenchmarkRepoName falls back to repo alias', () => {
 
 test('resolveBenchmarkRepoName uses target basename when no repo input exists', () => {
   const resolved = resolveBenchmarkRepoName({
-    targetPath: '/Volumes/Shuttle/unity-projects/neonspark',
+    targetPath: '/tmp/unity-projects/neonspark',
   });
   assert.equal(resolved, 'neonspark');
 });

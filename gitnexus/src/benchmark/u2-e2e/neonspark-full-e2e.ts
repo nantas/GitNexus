@@ -6,6 +6,7 @@ import { parseAnalyzeSummary, compareEstimate, type AnalyzeSummary, type Estimat
 import { runSymbolScenario, type SymbolScenarioResult } from './retrieval-runner.js';
 import { summarizeDurations } from './metrics.js';
 import { writeU2E2EReports, type U2RetrievalSummary } from './report.js';
+import { summarizeCharacterListAssetRefSprite } from './characterlist-assetref.js';
 import { createAgentContextToolRunner } from '../agent-context/tool-runner.js';
 
 export type E2EGateName =
@@ -217,6 +218,116 @@ function extractPipelineMeanMs(profile: Record<string, unknown> | undefined): nu
   return typeof mean === 'number' && Number.isFinite(mean) ? mean : 0;
 }
 
+function parseNumericCount(raw: unknown): number | null {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return raw;
+  }
+  if (typeof raw === 'string') {
+    const cleaned = raw.trim().replace(/,/g, '');
+    if (!cleaned) return null;
+    const parsed = Number(cleaned);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+export function extractSingleCountFromCypherResult(result: unknown): number | null {
+  if (Array.isArray(result) && result.length > 0) {
+    const first = result[0] as any;
+    if (first && typeof first === 'object') {
+      return (
+        parseNumericCount(first.serializedTypeEdgeCount)
+        ?? parseNumericCount(first.c)
+        ?? parseNumericCount(first.count)
+        ?? null
+      );
+    }
+  }
+
+  if (!result || typeof result !== 'object') {
+    return null;
+  }
+
+  const row = result as Record<string, unknown>;
+  const direct =
+    parseNumericCount(row.serializedTypeEdgeCount)
+    ?? parseNumericCount(row.c)
+    ?? parseNumericCount(row.count);
+  if (direct !== null) {
+    return direct;
+  }
+
+  const markdown = row.markdown;
+  if (typeof markdown === 'string' && markdown.trim().length > 0) {
+    const lines = markdown
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    for (let index = 2; index < lines.length; index += 1) {
+      const cells = lines[index]
+        .split('|')
+        .map((cell) => cell.trim())
+        .filter((cell) => cell.length > 0);
+      for (const cell of cells) {
+        const parsed = parseNumericCount(cell);
+        if (parsed !== null) {
+          return parsed;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+async function loadSerializedTypeEdgeCount(
+  runner: { cypher: (params: Record<string, unknown>) => Promise<any> },
+  repoAlias: string,
+): Promise<number> {
+  const result = await runner.cypher({
+    repo: repoAlias,
+    query: "MATCH ()-[r:CodeRelation]->() WHERE r.type='UNITY_SERIALIZED_TYPE_IN' RETURN COUNT(r) AS serializedTypeEdgeCount",
+  });
+  const count = extractSingleCountFromCypherResult(result);
+  if (count === null) {
+    throw new Error('Unable to parse UNITY_SERIALIZED_TYPE_IN edge count from cypher result');
+  }
+  return count;
+}
+
+function selectClassUid(contextOutput: any, expectedSymbol: string): string | null {
+  const candidates = Array.isArray(contextOutput?.candidates) ? contextOutput.candidates : [];
+  const expectedLower = expectedSymbol.toLowerCase();
+  for (const candidate of candidates) {
+    const kind = String(candidate?.kind || '').toLowerCase();
+    if (kind !== 'class') continue;
+    const name = String(candidate?.name || '').toLowerCase();
+    if (name !== expectedLower) continue;
+    const uid = String(candidate?.uid || '').trim();
+    if (uid) return uid;
+  }
+  return null;
+}
+
+async function loadCharacterListContext(
+  runner: { context: (params: Record<string, unknown>) => Promise<any> },
+  repoAlias: string,
+): Promise<any> {
+  const input = { name: 'CharacterList', repo: repoAlias, unity_resources: 'on' };
+  const first = await runner.context(input);
+  if (first?.status !== 'ambiguous') {
+    return first;
+  }
+
+  const classUid = selectClassUid(first, 'CharacterList');
+  if (!classUid) {
+    return first;
+  }
+  return runner.context({ ...input, uid: classUid });
+}
+
 export async function runNeonsparkU2E2E(options: RunNeonsparkU2E2EOptions): Promise<E2ERunResult> {
   const cwd = process.cwd();
   const repoRoot = await resolveRepoRoot(cwd);
@@ -323,8 +434,33 @@ export async function runNeonsparkU2E2E(options: RunNeonsparkU2E2EOptions): Prom
           for (const scenario of config.symbolScenarios) {
             results.push(await runSymbolScenario(runner, scenario, repoAlias));
           }
+
+          const serializedTypeEdgeCount = await loadSerializedTypeEdgeCount(runner, repoAlias);
+          if (serializedTypeEdgeCount <= 0) {
+            throw new Error('U3 gate failed: UNITY_SERIALIZED_TYPE_IN edge count must be > 0');
+          }
+
+          const characterListContext = await loadCharacterListContext(runner, repoAlias);
+          const characterBindings = Array.isArray(characterListContext?.resourceBindings)
+            ? characterListContext.resourceBindings
+            : [];
+          const characterListAssetRefSprite = summarizeCharacterListAssetRefSprite(characterBindings);
+          if (characterListAssetRefSprite.spriteAssetRefInstances <= 0) {
+            throw new Error('U3 gate failed: CharacterList AssetRef sprite instances must be > 0');
+          }
+
           state.retrievalResults = results;
-          state.retrievalSummary = summarizeRetrieval(results);
+          state.retrievalSummary = {
+            ...summarizeRetrieval(results),
+            serializedTypeEdgeCount,
+            characterListAssetRefSprite: {
+              extractedAssetRefInstances: characterListAssetRefSprite.extractedAssetRefInstances,
+              nonEmptyAssetRefInstances: characterListAssetRefSprite.nonEmptyAssetRefInstances,
+              spriteAssetRefInstances: characterListAssetRefSprite.spriteAssetRefInstances,
+              spriteRatioInNonEmpty: characterListAssetRefSprite.spriteRatioInNonEmpty,
+              uniqueSpriteAssets: characterListAssetRefSprite.uniqueSpriteAssets,
+            },
+          };
           return state.retrievalSummary;
         } finally {
           await runner.close();

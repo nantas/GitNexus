@@ -1,11 +1,11 @@
 # NeonSpark / NeonAbyss2 Benchmark Usage (Unified)
 
-Run from repo root: `/Users/nantasmac/projects/agentic/GitNexus`.
+Run from repository root.
 
 ## 0) Repo Path Clarification
 
 - `NeonAbyss2` and `NeonSpark` refer to the same physical Unity repository path in this workflow:
-  - `/Volumes/Shuttle/unity-projects/neonspark`
+  - `/path/to/unity-repo`
 - Benchmark datasets are separate calibration contracts over that same source repo:
   - v1 baseline dataset: `benchmarks/unity-baseline/neonspark-v1`
   - v2 expanded calibration dataset: `benchmarks/unity-baseline/neonspark-v2`
@@ -17,7 +17,7 @@ Run from repo root: `/Users/nantasmac/projects/agentic/GitNexus`.
 ```bash
 cd gitnexus
 npm run build
-node dist/cli/index.js analyze --force --extensions .cs /Volumes/Shuttle/unity-projects/neonspark \
+node dist/cli/index.js analyze --force --extensions .cs /path/to/unity-repo \
   --repo-alias neonspark-v1-subset \
   --scope-manifest ../benchmarks/unity-baseline/neonspark-v1/sync-manifest.txt
 ```
@@ -75,7 +75,7 @@ Use this when validating the larger symbol/relation/task set and robust threshol
 ```bash
 cd gitnexus
 npm run build
-node dist/cli/index.js analyze --force --extensions .cs /Volumes/Shuttle/unity-projects/neonspark \
+node dist/cli/index.js analyze --force --extensions .cs /path/to/unity-repo \
   --repo-alias neonspark-v1-subset \
   --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt
 ```

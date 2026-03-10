@@ -1,6 +1,6 @@
 {
   "runIdPrefix": "neonspark-u2-full-e2e",
-  "targetPath": "/Volumes/Shuttle/unity-projects/neonspark",
+  "targetPath": "__SET_VIA_GITNEXUS_U2_E2E_TARGET_PATH__",
   "repoAliasPrefix": "neonspark-u2-e2e",
   "scope": {
     "scriptPrefixes": [

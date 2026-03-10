@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runE2E } from './neonspark-full-e2e.js';
+import { extractSingleCountFromCypherResult, runE2E } from './neonspark-full-e2e.js';
 
 test('runE2E stops on first gate failure and writes checkpoint', async () => {
   const checkpoints: Array<{ reportDir: string; payload: any }> = [];
@@ -29,4 +29,17 @@ test('runE2E stops on first gate failure and writes checkpoint', async () => {
   assert.equal(checkpoints.length, 1);
   assert.equal(checkpoints[0].reportDir, '/tmp/u2-e2e-unit');
   assert.equal(checkpoints[0].payload.failedGate, 'build');
+});
+
+test('extractSingleCountFromCypherResult parses markdown-formatted cypher output', () => {
+  const count = extractSingleCountFromCypherResult({
+    markdown: '| serializedTypeEdgeCount |\n| --- |\n| 3791 |',
+    row_count: 1,
+  });
+  assert.equal(count, 3791);
+});
+
+test('extractSingleCountFromCypherResult parses raw row output', () => {
+  const count = extractSingleCountFromCypherResult([{ serializedTypeEdgeCount: 42 }]);
+  assert.equal(count, 42);
 });

@@ -118,3 +118,36 @@ test('buildUnityScanContext selects canonical script for duplicated symbol decla
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('buildUnityScanContext exposes serializable symbol index and host field type hints', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-serializable-scancontext-'));
+  const scriptsDir = path.join(tempRoot, 'Assets/Scripts');
+  await fs.mkdir(scriptsDir, { recursive: true });
+
+  try {
+    await fs.writeFile(
+      path.join(scriptsDir, 'AssetRef.cs'),
+      `
+        [System.Serializable]
+        public class AssetRef { public string guid; }
+      `,
+      'utf-8',
+    );
+    await fs.writeFile(
+      path.join(scriptsDir, 'InventoryConfig.cs'),
+      `
+        using UnityEngine;
+        public class InventoryConfig : ScriptableObject {
+          public AssetRef icon;
+        }
+      `,
+      'utf-8',
+    );
+
+    const context = await buildUnityScanContext({ repoRoot: tempRoot });
+    assert.equal(context.serializableSymbols.has('AssetRef'), true);
+    assert.equal(context.hostFieldTypeHints.get('InventoryConfig')?.get('icon'), 'AssetRef');
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});

@@ -4,6 +4,7 @@ import { glob } from 'glob';
 import { buildAssetMetaIndex, buildMetaIndex } from './meta-index.js';
 import type { UnityResourceGuidHit } from './resource-hit-scanner.js';
 import type { UnityObjectBlock } from './yaml-object-graph.js';
+import { buildSerializableTypeIndexFromSources } from './serialized-type-index.js';
 
 const DECLARATION_PATTERN = /\b(?:class|struct|interface)\s+([A-Za-z_][A-Za-z0-9_]*)\b/g;
 const GUID_IN_LINE_PATTERN = /\bguid:\s*([0-9a-f]{32})\b/gi;
@@ -26,6 +27,8 @@ export interface UnityScanContext {
   symbolToScriptPath: Map<string, string>;
   scriptPathToGuid: Map<string, string>;
   guidToResourceHits: Map<string, UnityResourceGuidHit[]>;
+  serializableSymbols: Set<string>;
+  hostFieldTypeHints: Map<string, Map<string, string>>;
   assetGuidToPath?: Map<string, string>;
   resourceDocCache: Map<string, UnityObjectBlock[]>;
 }
@@ -39,6 +42,8 @@ export async function buildUnityScanContext(input: BuildScanContextInput): Promi
     input.symbolDeclarations && input.symbolDeclarations.length > 0
       ? buildSymbolScriptPathIndexFromDeclarations(input.repoRoot, input.symbolDeclarations, input.scopedPaths)
       : await buildSymbolScriptPathIndex(input.repoRoot, scriptFiles);
+  const scriptSources = await loadScriptSources(input.repoRoot, scriptFiles);
+  const serializableTypeIndex = buildSerializableTypeIndexFromSources(scriptSources);
 
   const metaFiles = scriptFiles.map((scriptPath) => `${scriptPath}.meta`);
   const guidToScriptPath = await buildMetaIndex(input.repoRoot, { metaFiles });
@@ -64,9 +69,29 @@ export async function buildUnityScanContext(input: BuildScanContextInput): Promi
     symbolToScriptPath,
     scriptPathToGuid,
     guidToResourceHits,
+    serializableSymbols: serializableTypeIndex.serializableSymbols,
+    hostFieldTypeHints: serializableTypeIndex.hostFieldTypeHints,
     assetGuidToPath,
     resourceDocCache: new Map<string, UnityObjectBlock[]>(),
   };
+}
+
+async function loadScriptSources(
+  repoRoot: string,
+  scriptFiles: string[],
+): Promise<Array<{ filePath: string; content: string }>> {
+  const sources: Array<{ filePath: string; content: string }> = [];
+  for (const scriptPath of scriptFiles) {
+    const normalizedPath = normalizeSlashes(scriptPath);
+    try {
+      const content = await fs.readFile(path.join(repoRoot, normalizedPath), 'utf-8');
+      sources.push({ filePath: normalizedPath, content });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+  }
+  return sources;
 }
 
 async function buildSymbolScriptPathIndex(repoRoot: string, scriptFiles: string[]): Promise<Map<string, string[]>> {

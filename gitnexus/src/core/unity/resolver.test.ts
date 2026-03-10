@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildUnityScanContext } from './scan-context.js';
-import { hasCoverage, resolveUnityBindings } from './resolver.js';
+import { extractAssetRefPathReferences, hasCoverage, resolveUnityBindings } from './resolver.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureRoot = path.resolve(here, '../../../src/core/unity/__fixtures__/mini-unity');
@@ -239,4 +239,62 @@ test('resolveUnityBindings keeps existing scene serializedFields stable when .as
   assert.equal(needPause?.value, '1');
   assert.equal(mainUIDocument?.sourceLayer, 'scene');
   assert.equal(mainUIDocument?.guid, '44444444444444444444444444444444');
+});
+
+test('extractAssetRefPathReferences parses nested _relativePath rows and marks sprite assets', () => {
+  const refs = extractAssetRefPathReferences({
+    scalarFields: [
+      {
+        name: 'Values',
+        sourceLayer: 'asset',
+        value: `
+_Head_Ref:
+  _relativePath: Assets/NEON/Art/Sprites/UI/0_pixle/ui_character_head/hero_head_Nik.png
+_actorPrefabRef:
+  _relativePath: Assets/ActorPrefab/Actor_Nik/V_Actor_Nik.prefab
+`,
+      },
+    ],
+    referenceFields: [],
+  });
+
+  assert.equal(refs.length, 2);
+  assert.equal(refs[0]?.fieldName, '_Head_Ref');
+  assert.equal(refs[0]?.isSprite, true);
+  assert.equal(refs[1]?.fieldName, '_actorPrefabRef');
+  assert.equal(refs[1]?.isSprite, false);
+});
+
+test('extractAssetRefPathReferences handles Unity Ref naming variants and stable sprite classification', () => {
+  const refs = extractAssetRefPathReferences({
+    scalarFields: [
+      {
+        name: 'Values',
+        sourceLayer: 'asset',
+        value: `
+_icon_Ref:
+  _relativePath: "Assets/NEON/Art/Sprites/UI/icon_main.PNG"
+actorPrefabRef:
+  _relativePath: Assets/ActorPrefab/Actor_Nik/V_Actor_Nik.prefab
+_atlas_Ref:
+  _relativePath: Assets/Atlas/UI.spriteatlasv2
+_empty_Ref:
+  _relativePath:
+`,
+      },
+    ],
+    referenceFields: [],
+  });
+
+  assert.equal(refs.length, 4);
+  assert.equal(refs[0]?.fieldName, '_icon_Ref');
+  assert.equal(refs[0]?.relativePath, 'Assets/NEON/Art/Sprites/UI/icon_main.PNG');
+  assert.equal(refs[0]?.isSprite, true);
+  assert.equal(refs[1]?.fieldName, 'actorPrefabRef');
+  assert.equal(refs[1]?.isSprite, false);
+  assert.equal(refs[2]?.fieldName, '_atlas_Ref');
+  assert.equal(refs[2]?.isSprite, true);
+  assert.equal(refs[3]?.fieldName, '_empty_Ref');
+  assert.equal(refs[3]?.isEmpty, true);
+  assert.equal(refs.every((row) => row.parentFieldName === 'Values'), true);
 });

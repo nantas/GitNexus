@@ -38,7 +38,7 @@ test('runSymbolScenario executes context off/on + deepDive and records metrics',
   assert.equal(out.assertions.pass, true);
 });
 
-test('AssetRef allows empty resourceBindings but requires deep-dive evidence', async () => {
+test('AssetRef requires context(on) resourceBindings after serializable-class coverage', async () => {
   const noEvidenceRunner = {
     context: async () => ({ status: 'found', resourceBindings: [] }),
     query: async () => ({ process_symbols: [] }),
@@ -54,7 +54,51 @@ test('AssetRef allows empty resourceBindings but requires deep-dive evidence', a
   });
 
   assert.equal(out.assertions.pass, false);
-  assert.ok(out.assertions.failures.some((f) => f.includes('deep-dive')));
+  assert.ok(out.assertions.failures.some((f) => f.includes('context(on) must include resourceBindings')));
+});
+
+test('AssetRef requires deep-dive evidence even when context(on) has resourceBindings', async () => {
+  const noDeepDiveEvidenceRunner = {
+    context: async () => ({
+      status: 'found',
+      resourceBindings: [{ resourcePath: 'Assets/Data/Unlock.asset', resourceType: 'asset' }],
+    }),
+    query: async () => ({ process_symbols: [] }),
+    impact: async () => ({ impactedCount: 0 }),
+    cypher: async () => ({ rows: [] }),
+  };
+
+  const out = await runSymbolScenario(noDeepDiveEvidenceRunner as any, {
+    symbol: 'AssetRef',
+    kind: 'serializable-class',
+    objectives: ['verify usage evidence'],
+    deepDivePlan: [{ tool: 'query', input: { query: 'AssetRef usage' } }],
+  });
+
+  assert.equal(out.assertions.pass, false);
+  assert.ok(out.assertions.failures.some((f) => f.includes('deep-dive must provide usage/dependency evidence')));
+});
+
+test('AssetRef passes when context(on) bindings and deep-dive evidence are both present', async () => {
+  const satisfiedRunner = {
+    context: async () => ({
+      status: 'found',
+      resourceBindings: [{ resourcePath: 'Assets/Data/Unlock.asset', resourceType: 'asset' }],
+    }),
+    query: async () => ({ process_symbols: [{ id: 'Class:Assets/Scripts/UnlockContent.cs:UnlockContent' }] }),
+    impact: async () => ({ impactedCount: 0 }),
+    cypher: async () => ({ rows: [] }),
+  };
+
+  const out = await runSymbolScenario(satisfiedRunner as any, {
+    symbol: 'AssetRef',
+    kind: 'serializable-class',
+    objectives: ['verify usage evidence'],
+    deepDivePlan: [{ tool: 'query', input: { query: 'AssetRef usage' } }],
+  });
+
+  assert.equal(out.assertions.pass, true);
+  assert.equal(out.assertions.failures.length, 0);
 });
 
 test('PlayerActor scenario uses context file hint and valid context deep-dive input', async () => {

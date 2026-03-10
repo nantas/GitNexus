@@ -353,6 +353,81 @@ test('processUnityResources writes UNITY_COMPONENT_INSTANCE only for canonical c
   assert.ok(result.diagnostics.some((line) => line.includes('skip-non-canonical=1')));
 });
 
+test('processUnityResources writes UNITY_SERIALIZED_TYPE_IN for serializable class field matches', async () => {
+  const graph = createKnowledgeGraph();
+  const hostPath = 'Assets/Scripts/HostClass.cs';
+  const serializablePath = 'Assets/Scripts/AssetRef.cs';
+  const hostClassId = generateId('Class', `${hostPath}:HostClass`);
+  const serializableClassId = generateId('Class', `${serializablePath}:AssetRef`);
+  graph.addNode({
+    id: hostClassId,
+    label: 'Class',
+    properties: { name: 'HostClass', filePath: hostPath },
+  });
+  graph.addNode({
+    id: serializableClassId,
+    label: 'Class',
+    properties: { name: 'AssetRef', filePath: serializablePath },
+  });
+
+  const fakeScanContext = {
+    symbolToScriptPath: new Map([
+      ['HostClass', hostPath],
+      ['AssetRef', serializablePath],
+    ]),
+    symbolToScriptPaths: new Map([
+      ['HostClass', [hostPath]],
+      ['AssetRef', [serializablePath]],
+    ]),
+    symbolToCanonicalScriptPath: new Map([
+      ['HostClass', hostPath],
+      ['AssetRef', serializablePath],
+    ]),
+    scriptPathToGuid: new Map([[hostPath, '11111111111111111111111111111111']]),
+    guidToResourceHits: new Map([
+      ['11111111111111111111111111111111', [{ resourcePath: 'Assets/Scene/Test.unity', resourceType: 'scene', line: 3, lineText: 'guid: 1111' }]],
+    ]),
+    serializableSymbols: new Set(['AssetRef']),
+    hostFieldTypeHints: new Map([['HostClass', new Map([['assetRef', 'AssetRef']])]]),
+    resourceDocCache: new Map(),
+  };
+
+  await processUnityResources(
+    graph,
+    { repoPath: fixtureRoot },
+    {
+      buildScanContext: async () => fakeScanContext as any,
+      resolveBindings: async () =>
+        ({
+          symbol: 'HostClass',
+          scriptPath: hostPath,
+          scriptGuid: '11111111111111111111111111111111',
+          resourceBindings: [
+            {
+              resourcePath: 'Assets/Scene/Test.unity',
+              resourceType: 'scene',
+              bindingKind: 'direct',
+              componentObjectId: '11400000',
+              evidence: { line: 3, lineText: 'guid: 1111' },
+              serializedFields: {
+                scalarFields: [],
+                referenceFields: [
+                  { name: 'assetRef', guid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', fileId: '0', sourceLayer: 'scene' },
+                ],
+              },
+            },
+          ],
+          serializedFields: { scalarFields: [], referenceFields: [] },
+          unityDiagnostics: [],
+        }) as any,
+    },
+  );
+
+  const serializedTypeEdges = [...graph.iterRelationships()].filter((rel) => rel.type === 'UNITY_SERIALIZED_TYPE_IN');
+  assert.equal(serializedTypeEdges.length, 1);
+  assert.equal(serializedTypeEdges[0]?.sourceId, serializableClassId);
+});
+
 test('processUnityResources writes compact unity payload by default', async () => {
   const graph = createKnowledgeGraph();
   const classId = generateId('Class', 'Assets/Scripts/Compact.cs:CompactSymbol');
@@ -409,6 +484,69 @@ test('processUnityResources writes compact unity payload by default', async () =
   assert.equal(payload.resourcePath, undefined);
   assert.equal(payload.resourceType, undefined);
   assert.equal(payload.evidence, undefined);
+});
+
+test('processUnityResources includes structured assetRefPaths in component payload', async () => {
+  const graph = createKnowledgeGraph();
+  const classId = generateId('Class', 'Assets/Scripts/CharacterList.cs:CharacterList');
+  graph.addNode({
+    id: classId,
+    label: 'Class',
+    properties: { name: 'CharacterList', filePath: 'Assets/Scripts/CharacterList.cs' },
+  });
+
+  const fakeScanContext = {
+    symbolToScriptPath: new Map([['CharacterList', 'Assets/Scripts/CharacterList.cs']]),
+    scriptPathToGuid: new Map([['Assets/Scripts/CharacterList.cs', '11111111111111111111111111111111']]),
+    guidToResourceHits: new Map([
+      ['11111111111111111111111111111111', [{ resourcePath: 'Assets/NEON/DataAssets/CharacterList.asset', resourceType: 'asset', line: 1, lineText: 'guid: 1111' }]],
+    ]),
+    resourceDocCache: new Map(),
+  };
+
+  await processUnityResources(
+    graph,
+    { repoPath: fixtureRoot },
+    {
+      buildScanContext: async () => fakeScanContext as any,
+      resolveBindings: async () =>
+        ({
+          symbol: 'CharacterList',
+          scriptPath: 'Assets/Scripts/CharacterList.cs',
+          scriptGuid: '11111111111111111111111111111111',
+          resourceBindings: [
+            {
+              resourcePath: 'Assets/NEON/DataAssets/CharacterList.asset',
+              resourceType: 'asset',
+              bindingKind: 'prefab-instance',
+              componentObjectId: '11400000',
+              evidence: { line: 1, lineText: 'guid: 1111' },
+              serializedFields: { scalarFields: [], referenceFields: [] },
+              resolvedReferences: [],
+              assetRefPaths: [
+                {
+                  parentFieldName: 'Values',
+                  fieldName: '_Head_Ref',
+                  relativePath: 'Assets/NEON/Art/Sprites/UI/0_pixle/ui_character_head/hero_head_Nik.png',
+                  sourceLayer: 'asset',
+                  isEmpty: false,
+                  isSprite: true,
+                },
+              ],
+            },
+          ],
+          serializedFields: { scalarFields: [], referenceFields: [] },
+          unityDiagnostics: [],
+        }) as any,
+    },
+  );
+
+  const component = [...graph.iterNodes()].find((node) => node.label === 'CodeElement');
+  assert.ok(component);
+  const payload = JSON.parse(String(component.properties.description));
+  assert.equal(payload.assetRefPaths?.length, 1);
+  assert.equal(payload.assetRefPaths?.[0]?.fieldName, '_Head_Ref');
+  assert.equal(payload.assetRefPaths?.[0]?.isSprite, true);
 });
 
 test('processUnityResources writes full unity payload when payloadMode=full', async () => {

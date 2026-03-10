@@ -19,12 +19,22 @@ export interface U2SymbolOutcome {
   failures?: string[];
 }
 
+export interface U2CharacterListAssetRefSpriteSummary {
+  extractedAssetRefInstances: number;
+  nonEmptyAssetRefInstances: number;
+  spriteAssetRefInstances: number;
+  spriteRatioInNonEmpty: number | null;
+  uniqueSpriteAssets: number;
+}
+
 export interface U2RetrievalSummary {
   symbols: U2SymbolOutcome[];
   tokenSummary?: {
     totalTokensEst: number;
     totalDurationMs: number;
   };
+  serializedTypeEdgeCount?: number;
+  characterListAssetRefSprite?: U2CharacterListAssetRefSpriteSummary;
   failures?: string[];
 }
 
@@ -105,6 +115,13 @@ export function buildRetrievalSummaryMarkdown(summary?: U2RetrievalSummary): str
     '## Token And Duration',
     `- Total Tokens (est): ${summary.tokenSummary?.totalTokensEst ?? 0}`,
     `- Total Duration: ${formatMs(summary.tokenSummary?.totalDurationMs)}`,
+    `- UNITY_SERIALIZED_TYPE_IN Edges: ${typeof summary.serializedTypeEdgeCount === 'number' ? summary.serializedTypeEdgeCount : 'n/a'}`,
+    `- CharacterList AssetRef Sprite Instances: ${summary.characterListAssetRefSprite?.spriteAssetRefInstances ?? 'n/a'}`,
+    `- CharacterList AssetRef Sprite Ratio: ${
+      typeof summary.characterListAssetRefSprite?.spriteRatioInNonEmpty === 'number'
+        ? `${(summary.characterListAssetRefSprite.spriteRatioInNonEmpty * 100).toFixed(2)}%`
+        : 'n/a'
+    }`,
     '',
     '## Failures',
     ...failureRows,
@@ -114,7 +131,9 @@ export function buildRetrievalSummaryMarkdown(summary?: U2RetrievalSummary): str
 
 export function buildFinalVerdictMarkdown(input: FinalVerdictInput): string {
   const summary = input.retrievalSummary;
-  const failures = [...(input.failures || []), ...((summary?.failures || []))];
+  const failures = [...(input.failures || []), ...((summary?.failures || []))].filter((failure, index, all) =>
+    all.indexOf(failure) === index,
+  );
 
   return [
     '# U2 E2E Final Verdict',
@@ -150,6 +169,13 @@ export function buildFinalVerdictMarkdown(input: FinalVerdictInput): string {
     '## Token Consumption Summary',
     `- Total Tokens (est): ${summary?.tokenSummary?.totalTokensEst ?? 0}`,
     `- Total Duration: ${formatMs(summary?.tokenSummary?.totalDurationMs)}`,
+    `- UNITY_SERIALIZED_TYPE_IN Edges: ${typeof summary?.serializedTypeEdgeCount === 'number' ? summary.serializedTypeEdgeCount : 'n/a'}`,
+    `- CharacterList AssetRef Sprite Instances: ${summary?.characterListAssetRefSprite?.spriteAssetRefInstances ?? 'n/a'}`,
+    `- CharacterList AssetRef Sprite Ratio: ${
+      typeof summary?.characterListAssetRefSprite?.spriteRatioInNonEmpty === 'number'
+        ? `${(summary.characterListAssetRefSprite.spriteRatioInNonEmpty * 100).toFixed(2)}%`
+        : 'n/a'
+    }`,
     '',
     '## Failures and Manual Actions',
     ...(failures.length > 0 ? failures.map((f) => `- ${f}`) : ['- none']),
