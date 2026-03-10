@@ -64,3 +64,54 @@ test('PlayerActor scenario uses context file hint and valid context deep-dive in
   assert.equal(player?.deepDivePlan[0]?.tool, 'context');
   assert.equal(player?.deepDivePlan[0]?.input?.name, 'PlayerActor');
 });
+
+test('runSymbolScenario retries context with file hint when response is ambiguous', async () => {
+  const hint = 'Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.cs';
+  const contextCalls: Record<string, unknown>[] = [];
+  const runner = {
+    context: async (input: Record<string, unknown>) => {
+      contextCalls.push(input);
+      if (input.unity_resources === 'off') {
+        return { status: 'found' };
+      }
+      if (input.file_path === hint) {
+        return {
+          status: 'found',
+          resourceBindings: [
+            {
+              resourcePath: 'Assets/Prefabs/Player.prefab',
+              resourceType: 'prefab',
+              resolvedReferences: [{ uid: 'Class:PlayerActor' }],
+            },
+          ],
+        };
+      }
+      return {
+        status: 'ambiguous',
+        candidates: [
+          {
+            uid: 'Class:Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.Visual.cs:PlayerActor',
+            kind: 'Class',
+            filePath: 'Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.Visual.cs',
+          },
+        ],
+      };
+    },
+    query: async () => ({ process_symbols: [] }),
+    impact: async () => ({ impactedCount: 0 }),
+    cypher: async () => ({ rows: [] }),
+  };
+
+  const out = await runSymbolScenario(runner as any, {
+    symbol: 'PlayerActor',
+    kind: 'partial-component',
+    contextFileHint: hint,
+    objectives: ['verify fallback'],
+    deepDivePlan: [{ tool: 'query', input: { query: 'PlayerActor resource binding' } }],
+  });
+
+  assert.equal(contextCalls.length, 3);
+  assert.equal(contextCalls[2]?.file_path, hint);
+  assert.equal(out.steps[1]?.output?.status, 'found');
+  assert.equal(out.assertions.pass, true);
+});
