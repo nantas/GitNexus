@@ -63,6 +63,9 @@ export async function processUnityResources(
   let skippedMissingCanonical = 0;
   let skippedNonCanonical = 0;
   let canonicalSelected = 0;
+  let serializedTypeEdgeCount = 0;
+  let serializedTypeMissCount = 0;
+  const serializedTypeSymbols = new Set<string>();
   const resolvedBySymbol = new Map<string, Awaited<ReturnType<typeof resolveUnityBindings>>>();
   const resolveErrorBySymbol = new Map<string, string>();
   let scanContextMs = 0;
@@ -95,6 +98,8 @@ export async function processUnityResources(
     }
     diagnostics.push(error instanceof Error ? error.message : String(error));
   }
+
+  const canonicalClassNodeBySymbol = buildCanonicalClassNodeIndex(classNodes, scanContext);
 
   for (const classNode of classNodes) {
     const symbol = String(classNode.properties.name || '').trim();
@@ -168,6 +173,20 @@ export async function processUnityResources(
           confidence: 1.0,
           reason: binding.bindingKind,
         });
+
+        const serializableTypeLinking = linkSerializableTypeEdges(
+          graph,
+          componentNode,
+          symbol,
+          binding,
+          scanContext,
+          canonicalClassNodeBySymbol,
+        );
+        serializedTypeEdgeCount += serializableTypeLinking.edgeCount;
+        serializedTypeMissCount += serializableTypeLinking.missCount;
+        for (const hitSymbol of serializableTypeLinking.symbols) {
+          serializedTypeSymbols.add(hitSymbol);
+        }
         graphWriteMs += performance.now() - tWriteStart;
       }
     } catch (error) {
@@ -182,6 +201,9 @@ export async function processUnityResources(
   }
   diagnostics.push(
     `canonical: selected=${canonicalSelected}, skip-non-canonical=${skippedNonCanonical}, missing-canonical=${skippedMissingCanonical}`,
+  );
+  diagnostics.push(
+    `serialized-type: edges=${serializedTypeEdgeCount}, symbols=${serializedTypeSymbols.size}, misses=${serializedTypeMissCount}`,
   );
   if (skippedMissingCanonical > 0) {
     diagnostics.push(`prefilter: skipped ${skippedMissingCanonical} symbol(s) missing canonical script mapping`);
@@ -301,6 +323,100 @@ function buildUnityPayload(
   }
 
   return payload;
+}
+
+function buildCanonicalClassNodeIndex(
+  classNodes: GraphNode[],
+  scanContext?: UnityScanContext,
+): Map<string, GraphNode> {
+  const index = new Map<string, GraphNode>();
+  for (const classNode of classNodes) {
+    const symbol = String(classNode.properties.name || '').trim();
+    if (!symbol || index.has(symbol)) continue;
+
+    const classPath = normalizePath(String(classNode.properties.filePath || '').trim());
+    const canonicalPath = scanContext ? getCanonicalScriptPath(scanContext, symbol) : undefined;
+    if (canonicalPath && classPath !== canonicalPath) {
+      continue;
+    }
+    index.set(symbol, classNode);
+  }
+  return index;
+}
+
+interface SerializableTypeLinkingStats {
+  edgeCount: number;
+  missCount: number;
+  symbols: Set<string>;
+}
+
+function linkSerializableTypeEdges(
+  graph: KnowledgeGraph,
+  componentNode: GraphNode,
+  hostSymbol: string,
+  binding: Awaited<ReturnType<typeof resolveUnityBindings>>['resourceBindings'][number],
+  scanContext: UnityScanContext | undefined,
+  canonicalClassNodeBySymbol: Map<string, GraphNode>,
+): SerializableTypeLinkingStats {
+  const stats: SerializableTypeLinkingStats = {
+    edgeCount: 0,
+    missCount: 0,
+    symbols: new Set<string>(),
+  };
+  if (!scanContext) return stats;
+
+  const serializableSymbols = (scanContext as { serializableSymbols?: Set<string> }).serializableSymbols;
+  const hostFieldTypeHints = (scanContext as { hostFieldTypeHints?: Map<string, Map<string, string>> }).hostFieldTypeHints;
+  if (!serializableSymbols || !hostFieldTypeHints) return stats;
+
+  const hostHints = hostFieldTypeHints.get(hostSymbol);
+  if (!hostHints || hostHints.size === 0) return stats;
+
+  const fieldSourceLayer = collectBindingFieldSources(binding);
+  if (fieldSourceLayer.size === 0) return stats;
+
+  for (const [fieldName, declaredType] of hostHints.entries()) {
+    if (!serializableSymbols.has(declaredType)) continue;
+
+    const sourceLayer = fieldSourceLayer.get(fieldName);
+    if (!sourceLayer) continue;
+
+    const serializableNode = canonicalClassNodeBySymbol.get(declaredType);
+    if (!serializableNode) {
+      stats.missCount += 1;
+      continue;
+    }
+
+    graph.addRelationship({
+      id: generateId('UNITY_SERIALIZED_TYPE_IN', `${serializableNode.id}->${componentNode.id}:${fieldName}`),
+      type: 'UNITY_SERIALIZED_TYPE_IN',
+      sourceId: serializableNode.id,
+      targetId: componentNode.id,
+      confidence: 1.0,
+      reason: JSON.stringify({ hostSymbol, fieldName, declaredType, sourceLayer }),
+    });
+    stats.edgeCount += 1;
+    stats.symbols.add(declaredType);
+  }
+
+  return stats;
+}
+
+function collectBindingFieldSources(
+  binding: Awaited<ReturnType<typeof resolveUnityBindings>>['resourceBindings'][number],
+): Map<string, string> {
+  const fieldSources = new Map<string, string>();
+  for (const field of binding.serializedFields.scalarFields) {
+    if (!fieldSources.has(field.name)) {
+      fieldSources.set(field.name, field.sourceLayer || 'unknown');
+    }
+  }
+  for (const field of binding.serializedFields.referenceFields) {
+    if (!fieldSources.has(field.name)) {
+      fieldSources.set(field.name, field.sourceLayer || 'unknown');
+    }
+  }
+  return fieldSources;
 }
 
 function roundMs(value: number): number {

@@ -75,6 +75,7 @@ export type RelationshipType =
   | 'STEP_IN_PROCESS'
   | 'UNITY_COMPONENT_IN'
   | 'UNITY_COMPONENT_INSTANCE'
+  | 'UNITY_SERIALIZED_TYPE_IN'
 
 export interface GraphNode {
   id:  string,
