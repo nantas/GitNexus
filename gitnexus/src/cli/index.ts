@@ -14,8 +14,11 @@ if (!process.env.NODE_OPTIONS?.includes('--max-old-space-size')) {
       });
       process.exit(0);
     } catch (e: any) {
-      // If the child exited with an error code, propagate it
-      process.exit(e.status ?? 1);
+      const resolved = resolveChildProcessExit(e, 1);
+      if (resolved.bySignal && resolved.signal) {
+        process.stderr.write(`gitnexus: child process terminated by signal ${resolved.signal}\n`);
+      }
+      process.exit(resolved.code);
     }
   }
 }
@@ -39,6 +42,7 @@ import { benchmarkUnityCommand } from './benchmark-unity.js';
 import { benchmarkAgentContextCommand } from './benchmark-agent-context.js';
 import { unityBindingsCommand } from './unity-bindings.js';
 import { benchmarkU2E2ECommand } from './benchmark-u2-e2e.js';
+import { resolveChildProcessExit } from './exit-code.js';
 
 function resolveCliVersion(): string {
   try {

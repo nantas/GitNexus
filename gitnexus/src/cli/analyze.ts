@@ -21,6 +21,8 @@ import fs from 'fs/promises';
 import { registerClaudeHook } from './claude-hooks.js';
 import { resolveEffectiveAnalyzeOptions } from './analyze-options.js';
 import { formatFallbackSummary, formatUnityDiagnosticsSummary } from './analyze-summary.js';
+import { resolveChildProcessExit } from './exit-code.js';
+import { shouldCloseKuzuOnAnalyzeExit } from './analyze-close-policy.js';
 
 const HEAP_MB = 8192;
 const HEAP_FLAG = `--max-old-space-size=${HEAP_MB}`;
@@ -39,7 +41,11 @@ function ensureHeap(): boolean {
       env: { ...process.env, NODE_OPTIONS: `${nodeOpts} ${HEAP_FLAG}`.trim() },
     });
   } catch (e: any) {
-    process.exitCode = e.status ?? 1;
+    const resolved = resolveChildProcessExit(e, 1);
+    if (resolved.bySignal && resolved.signal) {
+      console.error(`  analyze subprocess terminated by signal ${resolved.signal}`);
+    }
+    process.exitCode = resolved.code;
   }
   return true;
 }
@@ -177,6 +183,10 @@ export const analyzeCommand = async (
     aborted = true;
     bar.stop();
     console.log('\n  Interrupted — cleaning up...');
+    if (!shouldCloseKuzuOnAnalyzeExit()) {
+      process.exit(130);
+      return;
+    }
     closeKuzu().catch(() => {}).finally(() => process.exit(130));
   };
   process.on('SIGINT', sigintHandler);
@@ -393,7 +403,9 @@ export const analyzeCommand = async (
     skillScope: ((await loadCLIConfig()).setupScope === 'global') ? 'global' : 'project',
   });
 
-  await closeKuzu();
+  if (shouldCloseKuzuOnAnalyzeExit()) {
+    await closeKuzu();
+  }
   // Note: we intentionally do NOT call disposeEmbedder() here.
   // ONNX Runtime's native cleanup segfaults on macOS and some Linux configs.
   // Since the process exits immediately after, Node.js reclaims everything.
