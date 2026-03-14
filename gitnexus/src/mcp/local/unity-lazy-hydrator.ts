@@ -5,6 +5,7 @@ export interface HydrateLazyBindingsInput {
   pendingPaths: string[];
   config: UnityLazyConfig;
   resolveBatch: (paths: string[]) => Promise<Map<string, ResolvedUnityBinding[]>>;
+  dedupeKey?: string;
 }
 
 export interface HydrateLazyBindingsOutput {
@@ -13,7 +14,25 @@ export interface HydrateLazyBindingsOutput {
   elapsedMs: number;
 }
 
+const inFlightHydration = new Map<string, Promise<HydrateLazyBindingsOutput>>();
+
 export async function hydrateLazyBindings(input: HydrateLazyBindingsInput): Promise<HydrateLazyBindingsOutput> {
+  if (!input.dedupeKey) {
+    return runHydration(input);
+  }
+  const existing = inFlightHydration.get(input.dedupeKey);
+  if (existing) {
+    return existing;
+  }
+
+  const pending = runHydration(input).finally(() => {
+    inFlightHydration.delete(input.dedupeKey!);
+  });
+  inFlightHydration.set(input.dedupeKey, pending);
+  return pending;
+}
+
+async function runHydration(input: HydrateLazyBindingsInput): Promise<HydrateLazyBindingsOutput> {
   const pending = input.pendingPaths.slice(0, Math.max(0, input.config.maxPendingPathsPerRequest));
   const batchSize = Math.max(1, input.config.batchSize);
   const startedAt = Date.now();

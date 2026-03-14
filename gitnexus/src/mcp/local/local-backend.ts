@@ -1270,6 +1270,7 @@ export class LocalBackend {
         const { resolvedByPath: freshByPath } = await hydrateLazyBindings({
           pendingPaths,
           config: cfg,
+          dedupeKey: `${input.symbolUid}::${pendingPaths.slice().sort().join('|')}`,
           resolveBatch: async (resourcePaths) => {
             const scopedPaths = [
               input.symbolFilePath,
