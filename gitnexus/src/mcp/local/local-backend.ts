@@ -10,7 +10,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import { initKuzu, executeQuery, closeKuzu, isKuzuReady } from '../core/kuzu-adapter.js';
 import { parseUnityResourcesMode } from '../../core/unity/options.js';
-import { loadUnityContext } from './unity-enrichment.js';
+import { buildUnityScanContext } from '../../core/unity/scan-context.js';
+import { resolveUnityBindings, type ResolvedUnityBinding } from '../../core/unity/resolver.js';
+import { loadUnityContext, type UnityContextPayload } from './unity-enrichment.js';
+import { readUnityOverlayBindings, upsertUnityOverlayBindings } from './unity-lazy-overlay.js';
 // Embedding imports are lazy (dynamic import) to avoid loading onnxruntime-node
 // at MCP server startup — crashes on unsupported Node ABI versions (#89)
 // git utilities available if needed
@@ -36,6 +39,39 @@ function isTestFilePath(filePath: string): boolean {
     p.endsWith('_test.go') || p.endsWith('_test.py') ||
     p.includes('/test_') || p.includes('/conftest.')
   );
+}
+
+function normalizePath(filePath: string): string {
+  return String(filePath || '').replace(/\\/g, '/');
+}
+
+function mergeUnityBindings(
+  baseBindings: ResolvedUnityBinding[],
+  resolvedByPath: Map<string, ResolvedUnityBinding[]>,
+): ResolvedUnityBinding[] {
+  const merged: ResolvedUnityBinding[] = [];
+  const expandedPaths = new Set<string>();
+
+  for (const binding of baseBindings) {
+    const resourcePath = normalizePath(binding.resourcePath);
+    if (!binding.lightweight) {
+      merged.push(binding);
+      continue;
+    }
+
+    const expanded = resolvedByPath.get(resourcePath);
+    if (expanded && expanded.length > 0) {
+      if (!expandedPaths.has(resourcePath)) {
+        merged.push(...expanded.map((row) => ({ ...row, lightweight: false })));
+        expandedPaths.add(resourcePath);
+      }
+      continue;
+    }
+
+    merged.push(binding);
+  }
+
+  return merged;
 }
 
 /** Valid KuzuDB node labels for safe Cypher query construction */
@@ -1091,7 +1127,14 @@ export class LocalBackend {
     };
 
     if (unityResourcesMode !== 'off' && symNodeId && symKind === 'Class') {
-      Object.assign(result, await loadUnityContext(repo.id, symNodeId, (query) => executeQuery(repo.id, query)));
+      const unityContext = await loadUnityContext(repo.id, symNodeId, (query) => executeQuery(repo.id, query));
+      const hydratedUnityContext = await this.hydrateUnityContextLazy(repo, {
+        symbolUid: symNodeId,
+        symbolName: getRowValue<string>(sym, 'name', 1) || '',
+        symbolFilePath: symFilePath,
+        payload: unityContext,
+      });
+      Object.assign(result, hydratedUnityContext);
     }
 
     return result;
@@ -1187,6 +1230,88 @@ export class LocalBackend {
     }
     
     return { error: 'Invalid type. Use: symbol, cluster, or process' };
+  }
+
+  private async hydrateUnityContextLazy(
+    repo: RepoHandle,
+    input: {
+      symbolUid: string;
+      symbolName: string;
+      symbolFilePath: string;
+      payload: UnityContextPayload;
+    },
+  ): Promise<UnityContextPayload> {
+    const lightweightPaths = [...new Set(
+      input.payload.resourceBindings
+        .filter((binding) => binding.lightweight)
+        .map((binding) => normalizePath(binding.resourcePath))
+        .filter((value) => value.length > 0),
+    )];
+
+    if (lightweightPaths.length === 0) {
+      return input.payload;
+    }
+
+    const overlayHits = await readUnityOverlayBindings(
+      repo.storagePath,
+      repo.lastCommit,
+      input.symbolUid,
+      lightweightPaths,
+    );
+    const pendingPaths = lightweightPaths.filter((resourcePath) => !overlayHits.has(resourcePath));
+    const resolvedByPath = new Map<string, ResolvedUnityBinding[]>(overlayHits);
+    const unityDiagnostics = [...input.payload.unityDiagnostics];
+
+    if (pendingPaths.length > 0) {
+      try {
+        const scopedPaths = [
+          input.symbolFilePath,
+          `${input.symbolFilePath}.meta`,
+          ...pendingPaths,
+          ...pendingPaths.map((resourcePath) => `${resourcePath}.meta`),
+        ].map(normalizePath);
+
+        const scanContext = await buildUnityScanContext({
+          repoRoot: repo.repoPath,
+          scopedPaths,
+          symbolDeclarations: [{ symbol: input.symbolName, scriptPath: input.symbolFilePath }],
+        });
+
+        const resolved = await resolveUnityBindings({
+          repoRoot: repo.repoPath,
+          symbol: input.symbolName,
+          scanContext,
+          resourcePathAllowlist: pendingPaths,
+          deepParseLargeResources: true,
+        });
+
+        const freshByPath = new Map<string, ResolvedUnityBinding[]>();
+        for (const resourcePath of pendingPaths) {
+          freshByPath.set(resourcePath, resolved.resourceBindings.filter(
+            (binding) => normalizePath(binding.resourcePath) === normalizePath(resourcePath),
+          ));
+        }
+        await upsertUnityOverlayBindings(repo.storagePath, repo.lastCommit, input.symbolUid, freshByPath);
+        for (const [resourcePath, bindings] of freshByPath.entries()) {
+          resolvedByPath.set(resourcePath, bindings);
+        }
+        unityDiagnostics.push(...resolved.unityDiagnostics);
+      } catch (error) {
+        unityDiagnostics.push(
+          `lazy-expand failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    const mergedBindings = mergeUnityBindings(input.payload.resourceBindings, resolvedByPath);
+    return {
+      resourceBindings: mergedBindings,
+      serializedFields: {
+        scalarFields: mergedBindings.flatMap((binding) => binding.serializedFields.scalarFields),
+        referenceFields: mergedBindings.flatMap((binding) => binding.serializedFields.referenceFields),
+      },
+      unityDiagnostics,
+    };
   }
 
   /**

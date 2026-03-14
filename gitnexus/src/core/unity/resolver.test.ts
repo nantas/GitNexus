@@ -241,6 +241,62 @@ test('resolveUnityBindings keeps existing scene serializedFields stable when .as
   assert.equal(mainUIDocument?.guid, '44444444444444444444444444444444');
 });
 
+test('resolveUnityBindings supports resourcePathAllowlist filtering', async () => {
+  const result = await resolveUnityBindings({
+    repoRoot: fixtureRoot,
+    symbol: 'MainUIManager',
+    resourcePathAllowlist: ['Assets/Scene/NonExisting.unity'],
+  });
+  assert.equal(result.resourceBindings.length, 0);
+});
+
+test('resolveUnityBindings deepParseLargeResources can override lightweight fallback', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(path.dirname(fixtureRoot), 'tmp-large-unity-'));
+  const scriptsDir = path.join(tempRoot, 'Assets/Scripts');
+  const sceneDir = path.join(tempRoot, 'Assets/Scene');
+  await fs.mkdir(scriptsDir, { recursive: true });
+  await fs.mkdir(sceneDir, { recursive: true });
+
+  try {
+    const scriptPath = 'Assets/Scripts/LargeSymbol.cs';
+    const scenePath = 'Assets/Scene/LargeScene.unity';
+    const scriptGuid = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const padding = '#'.repeat(600 * 1024);
+
+    await fs.writeFile(path.join(tempRoot, scriptPath), 'public class LargeSymbol {}', 'utf-8');
+    await fs.writeFile(path.join(tempRoot, `${scriptPath}.meta`), `guid: ${scriptGuid}\n`, 'utf-8');
+    await fs.writeFile(
+      path.join(tempRoot, scenePath),
+      `--- !u!114 &11400000\nMonoBehaviour:\n  m_Script: {fileID: 11500000, guid: ${scriptGuid}, type: 3}\n  needPause: 1\n${padding}\n`,
+      'utf-8',
+    );
+
+    const scanContext = await buildUnityScanContext({
+      repoRoot: tempRoot,
+      scopedPaths: [scriptPath, `${scriptPath}.meta`, scenePath],
+      symbolDeclarations: [{ symbol: 'LargeSymbol', scriptPath }],
+    });
+
+    const lightweight = await resolveUnityBindings({
+      repoRoot: tempRoot,
+      symbol: 'LargeSymbol',
+      scanContext,
+    });
+    assert.equal(lightweight.resourceBindings[0]?.lightweight, true);
+
+    const expanded = await resolveUnityBindings({
+      repoRoot: tempRoot,
+      symbol: 'LargeSymbol',
+      scanContext,
+      deepParseLargeResources: true,
+    });
+    assert.equal(expanded.resourceBindings[0]?.lightweight, undefined);
+    assert.equal(expanded.resourceBindings[0]?.componentObjectId, '11400000');
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('extractAssetRefPathReferences parses nested _relativePath rows and marks sprite assets', () => {
   const refs = extractAssetRefPathReferences({
     scalarFields: [

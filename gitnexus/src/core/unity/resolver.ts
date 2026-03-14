@@ -15,6 +15,8 @@ export interface ResolveInput {
   repoRoot: string;
   symbol: string;
   scanContext?: UnityScanContext;
+  resourcePathAllowlist?: string[];
+  deepParseLargeResources?: boolean;
 }
 
 export interface UnityScalarField {
@@ -77,6 +79,7 @@ export interface ResolvedUnityBinding {
   resourceType: 'prefab' | 'scene' | 'asset';
   bindingKind: UnityBindingKind;
   componentObjectId: string;
+  lightweight?: boolean;
   evidence: UnityBindingEvidence;
   serializedFields: UnitySerializedFields;
   resolvedReferences: UnityResolvedReference[];
@@ -95,19 +98,21 @@ export interface ResolveOutput {
 export async function resolveUnityBindings(input: ResolveInput): Promise<ResolveOutput> {
   const scriptPath = await resolveSymbolScriptPath(input.repoRoot, input.symbol, input.scanContext);
   const scriptGuid = await resolveScriptGuid(input.repoRoot, scriptPath, input.scanContext);
-  const hits = input.scanContext
+  const rawHits = input.scanContext
     ? (input.scanContext.guidToResourceHits.get(scriptGuid) ?? [])
     : await findGuidHits(input.repoRoot, scriptGuid);
+  const hits = applyResourceAllowlist(rawHits, input.resourcePathAllowlist);
   const resourceBindings: ResolvedUnityBinding[] = [];
   const unityDiagnostics: string[] = [];
   const resourceSizeCache = new Map<string, boolean>();
 
   for (const hit of hits) {
-    const shouldUseLightweightBinding = await isLargeResourceForDeepParse(
-      input.repoRoot,
-      hit.resourcePath,
-      resourceSizeCache,
-    );
+    const shouldUseLightweightBinding = !input.deepParseLargeResources
+      && await isLargeResourceForDeepParse(
+        input.repoRoot,
+        hit.resourcePath,
+        resourceSizeCache,
+      );
     if (shouldUseLightweightBinding) {
       resourceBindings.push(createLightweightBinding(hit));
       continue;
@@ -151,12 +156,25 @@ export async function resolveUnityBindings(input: ResolveInput): Promise<Resolve
   };
 }
 
+function applyResourceAllowlist(
+  hits: UnityResourceGuidHit[],
+  allowlist?: string[],
+): UnityResourceGuidHit[] {
+  if (!allowlist || allowlist.length === 0) {
+    return hits;
+  }
+
+  const normalizedAllowlist = new Set(allowlist.map((value) => normalizePath(value)));
+  return hits.filter((hit) => normalizedAllowlist.has(normalizePath(hit.resourcePath)));
+}
+
 function createLightweightBinding(hit: UnityResourceGuidHit): ResolvedUnityBinding {
   return {
     resourcePath: hit.resourcePath,
     resourceType: hit.resourceType,
     bindingKind: hit.resourceType === 'scene' ? 'scene-override' : 'direct',
     componentObjectId: `line-${hit.line}`,
+    lightweight: true,
     evidence: {
       line: hit.line,
       lineText: hit.lineText,

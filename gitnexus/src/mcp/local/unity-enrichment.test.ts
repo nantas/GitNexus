@@ -138,3 +138,41 @@ _actorPrefabRef:
   assert.equal(refs[1]?.fieldName, '_actorPrefabRef');
   assert.equal(refs[1]?.isSprite, false);
 });
+
+test('projectUnityBindings preserves lightweight marker from payload', () => {
+  const out = projectUnityBindings([
+    {
+      resourcePath: 'Assets/Scene/LargeScene.unity',
+      payload: JSON.stringify({
+        resourcePath: 'Assets/Scene/LargeScene.unity',
+        resourceType: 'scene',
+        bindingKind: 'direct',
+        componentObjectId: 'line-200',
+        lightweight: true,
+        serializedFields: { scalarFields: [], referenceFields: [] },
+      }),
+    },
+  ]);
+
+  assert.equal(out.resourceBindings.length, 1);
+  assert.equal(out.resourceBindings[0]?.lightweight, true);
+});
+
+test('projectUnityBindings infers lightweight marker from legacy line-* component id', () => {
+  const out = projectUnityBindings([
+    {
+      resourcePath: 'Assets/Scene/LargeScene.unity',
+      payload: JSON.stringify({
+        resourcePath: 'Assets/Scene/LargeScene.unity',
+        resourceType: 'scene',
+        bindingKind: 'direct',
+        componentObjectId: 'line-54558',
+        serializedFields: { scalarFields: [], referenceFields: [] },
+        resolvedReferences: [],
+      }),
+    },
+  ]);
+
+  assert.equal(out.resourceBindings.length, 1);
+  assert.equal(out.resourceBindings[0]?.lightweight, true);
+});

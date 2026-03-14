@@ -308,6 +308,9 @@ function buildUnityPayload(
     bindingKind: binding.bindingKind,
     componentObjectId: binding.componentObjectId,
   };
+  if (binding.lightweight) {
+    payload.lightweight = true;
+  }
 
   if (binding.serializedFields.scalarFields.length > 0 || binding.serializedFields.referenceFields.length > 0) {
     payload.serializedFields = binding.serializedFields;

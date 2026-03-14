@@ -50,11 +50,19 @@ export function projectUnityBindings(rows: any[]): UnityContextPayload {
         assetRefPaths?: UnityAssetRefPathReference[];
       };
 
+      const lightweight = Boolean((parsed as any).lightweight)
+        || (
+          String(parsed.componentObjectId || '').startsWith('line-')
+          && ((parsed.serializedFields?.scalarFields?.length || 0) === 0)
+          && ((parsed.serializedFields?.referenceFields?.length || 0) === 0)
+        );
+
       const binding: ResolvedUnityBinding = {
         resourcePath: parsed.resourcePath || row?.resourcePath || row?.[0] || '',
         resourceType: parsed.resourceType || inferResourceType(parsed.resourcePath || row?.resourcePath || row?.[0] || ''),
         bindingKind: parsed.bindingKind || 'direct',
         componentObjectId: parsed.componentObjectId || '',
+        lightweight,
         evidence: parsed.evidence || buildSyntheticEvidence(row),
         serializedFields: parsed.serializedFields || { scalarFields: [], referenceFields: [] },
         resolvedReferences: parsed.resolvedReferences || [],
