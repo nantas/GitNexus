@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus MCP
 
-This project is indexed by GitNexus as **GitNexus** (2099 symbols, 5106 relationships, 149 execution flows).
+This project is indexed by GitNexus as **GitNexus** (2225 symbols, 5345 relationships, 155 execution flows).
 
 ## Always Start Here
 
@@ -9,7 +9,7 @@ This project is indexed by GitNexus as **GitNexus** (2099 symbols, 5106 relation
 2. **Match your task to a skill below** and **read that skill file**
 3. **Follow the skill's workflow and checklist**
 
-> If step 1 warns the index is stale, run `npx gitnexus analyze` in the terminal first.
+> If step 1 warns the index is stale, ask user whether to rebuild index via `npx -y gitnexus analyze` first (it reuses previous analyze scope/options by default; add `--no-reuse-options` to reset). If user declines, explicitly warn that retrieval may not reflect current codebase. For build/analyze/test commands, use a 10-30 minute timeout; on failure/timeout, report exact tool output and do not auto-retry or silently fall back to glob/grep.
 
 ## Skills
 

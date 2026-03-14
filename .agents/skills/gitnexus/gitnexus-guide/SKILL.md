@@ -15,13 +15,7 @@ For any task involving code understanding, debugging, impact analysis, or refact
 2. **Match your task to a skill below** and **read that skill file**
 3. **Follow the skill's workflow and checklist**
 
-> If step 1 warns the index is stale, ask user whether to rebuild index with `npx -y gitnexus analyze` first (default reuses previous analyze scope/options; add `--no-reuse-options` to reset). If user chooses not to rebuild, explicitly warn that retrieval may not reflect current codebase.
-
-## Execution Rules
-
-- For build/analyze/test commands, set command timeout to 10-30 minutes.
-- If a command fails or times out, do not auto-retry. Report the exact command and tool output to user immediately.
-- Do not silently switch to glob/grep fallback when GitNexus analyze/build fails. Ask user before any non-GitNexus fallback workflow.
+> If step 1 warns the index is stale, run `npx gitnexus analyze` in the terminal first.
 
 ## Skills
 

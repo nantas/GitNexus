@@ -22,13 +22,7 @@ description: "Use when the user is debugging a bug, tracing an error, or asking 
 4. gitnexus_cypher({query: "MATCH path..."})                 → Custom traces if needed
 ```
 
-> If "Index is stale" → first ask user whether to rebuild index with `npx -y gitnexus analyze` (default reuses previous analyze scope/options; add `--no-reuse-options` to reset). If user chooses not to rebuild, explicitly state debugging results may not reflect current codebase.
-
-## Execution Rules
-
-- For build/analyze/test commands, set command timeout to 10-30 minutes.
-- If a command fails or times out, do not auto-retry. Report the exact command and tool output to user immediately.
-- Do not silently switch to glob/grep fallback when GitNexus analyze/build fails. Ask user before any non-GitNexus fallback workflow.
+> If "Index is stale" → run `npx gitnexus analyze` in terminal.
 
 ## Checklist
 
