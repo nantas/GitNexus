@@ -15,6 +15,7 @@ const packageName = JSON.parse(
   await fs.readFile(path.join(packageRoot, 'package.json'), 'utf-8'),
 ) as { name?: string };
 const expectedMcpPackage = `${packageName.name || 'gitnexus'}@latest`;
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function runSetup(args: string[], env: NodeJS.ProcessEnv, cwd = packageRoot) {
   return execFileAsync(process.execPath, [cliPath, 'setup', ...args], { cwd, env });
@@ -274,6 +275,92 @@ test('setup --scope project --agent codex writes only .codex/config.toml', async
     assert.match(codexConfigRaw, /command = "npx"/);
     await assert.rejects(fs.access(projectMcpPath));
     await assert.rejects(fs.access(opencodeConfigPath));
+  } finally {
+    await fs.rm(fakeHome, { recursive: true, force: true });
+    await fs.rm(fakeRepo, { recursive: true, force: true });
+  }
+});
+
+test('setup --scope project --agent codex replaces existing gitnexus table without duplicate keys', async () => {
+  const fakeHome = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-setup-home-'));
+  const fakeRepo = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-setup-repo-'));
+
+  try {
+    await execFileAsync('git', ['init'], { cwd: fakeRepo });
+
+    const codexConfigPath = path.join(fakeRepo, '.codex', 'config.toml');
+    await fs.mkdir(path.dirname(codexConfigPath), { recursive: true });
+    await fs.writeFile(
+      codexConfigPath,
+      [
+        '[mcp_servers.gitnexus]',
+        'command = "npx"',
+        'args = ["-y", "oldpkg@latest", "mcp"]',
+        '',
+        '[profiles.default]',
+        'model = "gpt-5"',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    await runSetup(['--scope', 'project', '--agent', 'codex'], {
+      ...process.env,
+      HOME: fakeHome,
+      USERPROFILE: fakeHome,
+    }, fakeRepo);
+
+    const codexConfigRaw = await fs.readFile(codexConfigPath, 'utf-8');
+    const tableMatches = codexConfigRaw.match(/^\[mcp_servers\.gitnexus\]$/gm) || [];
+    assert.equal(tableMatches.length, 1);
+
+    const gitnexusTableMatch = codexConfigRaw.match(
+      /^\[mcp_servers\.gitnexus\][\s\S]*?(?=^\[[^\]]+\]|(?![\s\S]))/m,
+    );
+    assert.ok(gitnexusTableMatch, 'expected [mcp_servers.gitnexus] table');
+    const gitnexusTable = gitnexusTableMatch[0];
+
+    assert.equal((gitnexusTable.match(/^command\s*=/gm) || []).length, 1);
+    assert.equal((gitnexusTable.match(/^args\s*=/gm) || []).length, 1);
+    assert.match(gitnexusTable, new RegExp(escapeRegExp(expectedMcpPackage)));
+    assert.doesNotMatch(gitnexusTable, /oldpkg@latest/);
+    assert.match(codexConfigRaw, /^\[profiles\.default\]$/m);
+  } finally {
+    await fs.rm(fakeHome, { recursive: true, force: true });
+    await fs.rm(fakeRepo, { recursive: true, force: true });
+  }
+});
+
+test('setup --scope project --agent codex is idempotent across repeated runs', async () => {
+  const fakeHome = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-setup-home-'));
+  const fakeRepo = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-setup-repo-'));
+
+  try {
+    await execFileAsync('git', ['init'], { cwd: fakeRepo });
+
+    const env = {
+      ...process.env,
+      HOME: fakeHome,
+      USERPROFILE: fakeHome,
+    };
+
+    await runSetup(['--scope', 'project', '--agent', 'codex'], env, fakeRepo);
+    await runSetup(['--scope', 'project', '--agent', 'codex'], env, fakeRepo);
+
+    const codexConfigPath = path.join(fakeRepo, '.codex', 'config.toml');
+    const codexConfigRaw = await fs.readFile(codexConfigPath, 'utf-8');
+    const tableMatches = codexConfigRaw.match(/^\[mcp_servers\.gitnexus\]$/gm) || [];
+    assert.equal(tableMatches.length, 1);
+
+    const gitnexusTableMatch = codexConfigRaw.match(
+      /^\[mcp_servers\.gitnexus\][\s\S]*?(?=^\[[^\]]+\]|(?![\s\S]))/m,
+    );
+    assert.ok(gitnexusTableMatch, 'expected [mcp_servers.gitnexus] table');
+    const gitnexusTable = gitnexusTableMatch[0];
+
+    assert.equal((gitnexusTable.match(/^command\s*=/gm) || []).length, 1);
+    assert.equal((gitnexusTable.match(/^args\s*=/gm) || []).length, 1);
+    assert.match(gitnexusTable, new RegExp(escapeRegExp(expectedMcpPackage)));
   } finally {
     await fs.rm(fakeHome, { recursive: true, force: true });
     await fs.rm(fakeRepo, { recursive: true, force: true });

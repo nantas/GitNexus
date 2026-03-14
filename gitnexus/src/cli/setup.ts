@@ -195,10 +195,11 @@ function buildCodexMcpTable(): string {
 function mergeCodexConfig(existingRaw: string): string {
   const table = buildCodexMcpTable();
   const normalized = existingRaw.replace(/\r\n/g, '\n');
-  const tablePattern = /\[mcp_servers\.gitnexus\][\s\S]*?(?=\n\[[^\]]+\]|\s*$)/m;
+  const tablePattern = /^\[mcp_servers\.gitnexus\][\s\S]*?(?=^\[[^\]]+\]|(?![\s\S]))/m;
 
   if (tablePattern.test(normalized)) {
-    return normalized.replace(tablePattern, table).trimEnd() + '\n';
+    // Keep exactly one table by replacing the whole previous section block.
+    return normalized.replace(tablePattern, `${table}\n\n`).trimEnd() + '\n';
   }
 
   const trimmed = normalized.trimEnd();
