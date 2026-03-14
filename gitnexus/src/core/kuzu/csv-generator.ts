@@ -66,21 +66,22 @@ const isBinaryContent = (content: string): boolean => {
  * symbol defined in it. Sized generously so most files stay cached during
  * the single-pass node iteration.
  */
-class FileContentCache {
-  private cache = new Map<string, string>();
-  private accessOrder: string[] = [];
-  private maxSize: number;
-  private repoPath: string;
+export class FileContentCache {
+  private cache = new Map<string, { content: string; sizeBytes: number }>();
+  private currentBytes = 0;
 
-  constructor(repoPath: string, maxSize: number = 3000) {
-    this.repoPath = repoPath;
-    this.maxSize = maxSize;
-  }
+  constructor(
+    private repoPath: string,
+    private maxBytes: number = 128 * 1024 * 1024,
+  ) {}
 
   async get(relativePath: string): Promise<string> {
     if (!relativePath) return '';
     const cached = this.cache.get(relativePath);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      this.touch(relativePath, cached);
+      return cached.content;
+    }
     try {
       const fullPath = path.join(this.repoPath, relativePath);
       const content = await fs.readFile(fullPath, 'utf-8');
@@ -92,13 +93,42 @@ class FileContentCache {
     }
   }
 
-  private set(key: string, value: string) {
-    if (this.cache.size >= this.maxSize) {
-      const oldest = this.accessOrder.shift();
-      if (oldest) this.cache.delete(oldest);
-    }
+  setForTest(key: string, value: string): void {
+    this.set(key, value);
+  }
+
+  hasForTest(key: string): boolean {
+    return this.cache.has(key);
+  }
+
+  private touch(key: string, value: { content: string; sizeBytes: number }): void {
+    this.cache.delete(key);
     this.cache.set(key, value);
-    this.accessOrder.push(key);
+  }
+
+  private set(key: string, value: string): void {
+    const prev = this.cache.get(key);
+    if (prev) {
+      this.currentBytes -= prev.sizeBytes;
+      this.cache.delete(key);
+    }
+
+    const sizeBytes = Buffer.byteLength(value, 'utf-8');
+    this.cache.set(key, { content: value, sizeBytes });
+    this.currentBytes += sizeBytes;
+    this.evictIfNeeded();
+  }
+
+  private evictIfNeeded(): void {
+    while (this.currentBytes > this.maxBytes && this.cache.size > 0) {
+      const oldestKey = this.cache.keys().next().value as string | undefined;
+      if (!oldestKey) break;
+      const oldest = this.cache.get(oldestKey);
+      this.cache.delete(oldestKey);
+      if (oldest) {
+        this.currentBytes -= oldest.sizeBytes;
+      }
+    }
   }
 }
 
