@@ -1,6 +1,4 @@
 import fs from 'fs/promises';
-import { createReadStream } from 'fs';
-import { createInterface } from 'readline';
 import path from 'path';
 import kuzu from 'kuzu';
 import { KnowledgeGraph } from '../graph/types.js';
@@ -12,6 +10,7 @@ import {
   NodeTableName,
 } from './schema.js';
 import { streamAllCSVsToDisk } from './csv-generator.js';
+import { streamRelationshipPairBucketsFromCsv } from './relationship-pair-buckets.js';
 
 let db: kuzu.Database | null = null;
 let conn: kuzu.Connection | null = null;
@@ -174,35 +173,18 @@ export const loadGraphToKuzu = async (
   }
 
   // Bulk COPY relationships — split by FROM→TO label pair (KuzuDB requires it)
-  // Stream-read the relation CSV line by line to avoid exceeding V8 max string length
-  let relHeader = '';
-  const relsByPair = new Map<string, string[]>();
-  let skippedRels = 0;
-  let totalValidRels = 0;
-
-  await new Promise<void>((resolve, reject) => {
-    const rl = createInterface({ input: createReadStream(csvResult.relCsvPath, 'utf-8'), crlfDelay: Infinity });
-    let isFirst = true;
-    rl.on('line', (line) => {
-      if (isFirst) { relHeader = line; isFirst = false; return; }
-      if (!line.trim()) return;
-      const match = line.match(/"([^"]*)","([^"]*)"/);
-      if (!match) { skippedRels++; return; }
-      const fromLabel = getNodeLabel(match[1]);
-      const toLabel = getNodeLabel(match[2]);
-      if (!validTables.has(fromLabel) || !validTables.has(toLabel)) {
-        skippedRels++;
-        return;
-      }
-      const pairKey = `${fromLabel}|${toLabel}`;
-      let list = relsByPair.get(pairKey);
-      if (!list) { list = []; relsByPair.set(pairKey, list); }
-      list.push(line);
-      totalValidRels++;
-    });
-    rl.on('close', resolve);
-    rl.on('error', reject);
+  // Stream relation CSV into per-pair temporary CSV files to avoid retaining
+  // all relationship lines in memory at once.
+  const pairBucketResult = await streamRelationshipPairBucketsFromCsv({
+    relCsvPath: csvResult.relCsvPath,
+    csvDir,
+    validTables,
+    getNodeLabel,
   });
+  const relHeader = pairBucketResult.relHeader;
+  const relsByPair = pairBucketResult.buckets;
+  const skippedRels = pairBucketResult.skippedRels;
+  const totalValidRels = pairBucketResult.totalValidRels;
 
   const insertedRels = totalValidRels;
   const warnings: string[] = [];
@@ -213,17 +195,15 @@ export const loadGraphToKuzu = async (
 
     let pairIdx = 0;
     let failedPairEdges = 0;
-    const failedPairLines: string[] = [];
+    const failedPairCsvPaths: string[] = [];
 
-    for (const [pairKey, lines] of relsByPair) {
+    for (const [pairKey, bucket] of relsByPair) {
       pairIdx++;
       const [fromLabel, toLabel] = pairKey.split('|');
-      const pairCsvPath = path.join(csvDir, `rel_${fromLabel}_${toLabel}.csv`);
-      await fs.writeFile(pairCsvPath, relHeader + '\n' + lines.join('\n'), 'utf-8');
-      const normalizedPath = normalizeCopyPath(pairCsvPath);
+      const normalizedPath = normalizeCopyPath(bucket.csvPath);
       const copyQuery = `COPY ${REL_TABLE_NAME} FROM "${normalizedPath}" (from="${fromLabel}", to="${toLabel}", HEADER=true, ESCAPE='"', DELIM=',', QUOTE='"', PARALLEL=false, auto_detect=false)`;
 
-      if (pairIdx % 5 === 0 || lines.length > 1000) {
+      if (pairIdx % 5 === 0 || bucket.rowCount > 1000) {
         log(`Loading edges: ${pairIdx}/${relsByPair.size} types (${fromLabel} -> ${toLabel})`);
       }
 
@@ -235,17 +215,29 @@ export const loadGraphToKuzu = async (
           await conn.query(retryQuery);
         } catch (retryErr) {
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-          warnings.push(`${fromLabel}->${toLabel} (${lines.length} edges): ${retryMsg.slice(0, 80)}`);
-          failedPairEdges += lines.length;
-          failedPairLines.push(...lines);
+          warnings.push(`${fromLabel}->${toLabel} (${bucket.rowCount} edges): ${retryMsg.slice(0, 80)}`);
+          failedPairEdges += bucket.rowCount;
+          failedPairCsvPaths.push(bucket.csvPath);
         }
       }
-      try { await fs.unlink(pairCsvPath); } catch {}
     }
 
-    if (failedPairLines.length > 0) {
+    if (failedPairCsvPaths.length > 0) {
+      const failedPairLines: string[] = [relHeader];
+      for (const failedPairPath of failedPairCsvPaths) {
+        const raw = await fs.readFile(failedPairPath, 'utf-8');
+        const lines = raw
+          .split('\n')
+          .slice(1)
+          .filter(line => line.trim().length > 0);
+        failedPairLines.push(...lines);
+      }
       log(`Inserting ${failedPairEdges} edges individually (missing schema pairs)`);
-      fallbackStats = await fallbackRelationshipInserts([relHeader, ...failedPairLines], validTables, getNodeLabel);
+      fallbackStats = await fallbackRelationshipInserts(failedPairLines, validTables, getNodeLabel);
+    }
+
+    for (const [, bucket] of relsByPair) {
+      try { await fs.unlink(bucket.csvPath); } catch {}
     }
   }
 
