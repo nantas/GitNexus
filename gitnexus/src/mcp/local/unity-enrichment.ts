@@ -17,10 +17,13 @@ export async function loadUnityContext(
 ): Promise<UnityContextPayload> {
   const escapedSymbolId = symbolId.replace(/'/g, "''");
   const rows = await execute(`
-    MATCH (symbol {id: '${escapedSymbolId}'})-[r:CodeRelation]->(component:CodeElement)
-    WHERE r.type IN ['UNITY_COMPONENT_INSTANCE', 'UNITY_SERIALIZED_TYPE_IN']
-    RETURN component.filePath AS resourcePath, component.description AS payload, r.type AS relationType, r.reason AS relationReason
-    ORDER BY component.filePath, component.id
+    MATCH (symbol {id: '${escapedSymbolId}'})-[r:CodeRelation]->(target)
+    WHERE r.type IN ['UNITY_COMPONENT_INSTANCE', 'UNITY_SERIALIZED_TYPE_IN', 'UNITY_RESOURCE_SUMMARY']
+    RETURN target.filePath AS resourcePath,
+      CASE WHEN r.type = 'UNITY_RESOURCE_SUMMARY' THEN '' ELSE target.description END AS payload,
+      r.type AS relationType,
+      r.reason AS relationReason
+    ORDER BY target.filePath, target.id
   `);
 
   return projectUnityBindings(rows);
@@ -37,7 +40,33 @@ export function projectUnityBindings(rows: any[]): UnityContextPayload {
   const unityDiagnostics: string[] = [];
 
   for (const row of rows) {
+    const relationType = String(row?.relationType || '');
+    const relationReason = String(row?.relationReason || '');
+    const resourcePath = row?.resourcePath || row?.[0] || '';
     const rawPayload = row?.payload ?? row?.description ?? row?.[1];
+
+    if (relationType === 'UNITY_RESOURCE_SUMMARY') {
+      const summary = parseUnityResourceSummaryReason(relationReason);
+      const bindingKinds: ResolvedUnityBinding['bindingKind'][] = summary.bindingKinds.length > 0
+        ? summary.bindingKinds
+        : ['direct'];
+      const resourceType = summary.resourceType || inferResourceType(resourcePath);
+      for (const bindingKind of bindingKinds) {
+        resourceBindings.push({
+          resourcePath,
+          resourceType,
+          bindingKind,
+          componentObjectId: 'summary',
+          lightweight: summary.lightweight,
+          evidence: buildSyntheticEvidence(row),
+          serializedFields: { scalarFields: [], referenceFields: [] },
+          resolvedReferences: [],
+          assetRefPaths: [],
+        });
+      }
+      continue;
+    }
+
     if (typeof rawPayload !== 'string' || rawPayload.length === 0) {
       continue;
     }
@@ -62,7 +91,7 @@ export function projectUnityBindings(rows: any[]): UnityContextPayload {
         );
 
       const binding: ResolvedUnityBinding = {
-        resourcePath: parsed.resourcePath || row?.resourcePath || row?.[0] || '',
+        resourcePath: parsed.resourcePath || resourcePath,
         resourceType: parsed.resourceType || inferResourceType(parsed.resourcePath || row?.resourcePath || row?.[0] || ''),
         bindingKind: parsed.bindingKind || 'direct',
         componentObjectId: parsed.componentObjectId || '',
@@ -89,6 +118,46 @@ export function projectUnityBindings(rows: any[]): UnityContextPayload {
     },
     unityDiagnostics,
   };
+}
+
+function parseUnityResourceSummaryReason(input: string): {
+  resourceType: 'prefab' | 'scene' | 'asset';
+  bindingKinds: ResolvedUnityBinding['bindingKind'][];
+  lightweight: boolean;
+} {
+  const fallback = {
+    resourceType: 'scene' as const,
+    bindingKinds: [] as ResolvedUnityBinding['bindingKind'][],
+    lightweight: true,
+  };
+  if (!input) return fallback;
+  try {
+    const parsed = JSON.parse(input) as {
+      resourceType?: 'prefab' | 'scene' | 'asset';
+      bindingKinds?: string[];
+      lightweight?: boolean;
+    };
+
+    const bindingKinds = Array.isArray(parsed.bindingKinds)
+      ? parsed.bindingKinds
+        .map((value) => String(value || '').trim())
+        .filter((value): value is ResolvedUnityBinding['bindingKind'] => (
+          value === 'direct'
+          || value === 'prefab-instance'
+          || value === 'nested'
+          || value === 'variant'
+          || value === 'scene-override'
+        ))
+      : [];
+
+    return {
+      resourceType: parsed.resourceType || fallback.resourceType,
+      bindingKinds,
+      lightweight: parsed.lightweight !== false,
+    };
+  } catch {
+    return fallback;
+  }
 }
 
 function inferResourceType(resourcePath: string): 'prefab' | 'scene' | 'asset' {

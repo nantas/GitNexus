@@ -146,6 +146,22 @@ export async function processUnityResources(
 
       processedSymbols += 1;
 
+      for (const summary of collectResourceSummaryRows(resolved.resourceBindings)) {
+        const resourceFileId = generateId('File', summary.resourcePath);
+        graph.addRelationship({
+          id: generateId('UNITY_RESOURCE_SUMMARY', `${classNode.id}->${resourceFileId}`),
+          type: 'UNITY_RESOURCE_SUMMARY',
+          sourceId: classNode.id,
+          targetId: resourceFileId,
+          confidence: 1.0,
+          reason: JSON.stringify({
+            resourceType: summary.resourceType,
+            bindingKinds: summary.bindingKinds,
+            lightweight: summary.lightweight,
+          }),
+        });
+      }
+
       for (const binding of resolved.resourceBindings) {
         const tWriteStart = performance.now();
         bindingCount += 1;
@@ -412,6 +428,31 @@ function collectBindingFieldSources(
     }
   }
   return fieldSources;
+}
+
+function collectResourceSummaryRows(
+  bindings: Awaited<ReturnType<typeof resolveUnityBindings>>['resourceBindings'],
+): Array<{ resourcePath: string; resourceType: string; bindingKinds: string[]; lightweight: boolean }> {
+  const summaryByPath = new Map<string, { resourceType: string; bindingKinds: Set<string>; lightweight: boolean }>();
+  for (const binding of bindings) {
+    const resourcePath = normalizePath(binding.resourcePath);
+    const row = summaryByPath.get(resourcePath) || {
+      resourceType: binding.resourceType,
+      bindingKinds: new Set<string>(),
+      lightweight: true,
+    };
+    row.resourceType = binding.resourceType || row.resourceType;
+    row.bindingKinds.add(binding.bindingKind);
+    row.lightweight = row.lightweight && Boolean(binding.lightweight);
+    summaryByPath.set(resourcePath, row);
+  }
+
+  return [...summaryByPath.entries()].map(([resourcePath, value]) => ({
+    resourcePath,
+    resourceType: value.resourceType,
+    bindingKinds: [...value.bindingKinds.values()].sort(),
+    lightweight: value.lightweight,
+  }));
 }
 
 function roundMs(value: number): number {
