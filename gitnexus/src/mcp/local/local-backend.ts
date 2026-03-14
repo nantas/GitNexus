@@ -12,7 +12,9 @@ import { initKuzu, executeQuery, closeKuzu, isKuzuReady } from '../core/kuzu-ada
 import { parseUnityResourcesMode } from '../../core/unity/options.js';
 import { buildUnityScanContext } from '../../core/unity/scan-context.js';
 import { resolveUnityBindings, type ResolvedUnityBinding } from '../../core/unity/resolver.js';
-import { loadUnityContext, type UnityContextPayload } from './unity-enrichment.js';
+import { formatLazyHydrationBudgetDiagnostic, loadUnityContext, type UnityContextPayload } from './unity-enrichment.js';
+import { resolveUnityLazyConfig } from './unity-lazy-config.js';
+import { hydrateLazyBindings } from './unity-lazy-hydrator.js';
 import { readUnityOverlayBindings, upsertUnityOverlayBindings } from './unity-lazy-overlay.js';
 // Embedding imports are lazy (dynamic import) to avoid loading onnxruntime-node
 // at MCP server startup — crashes on unsupported Node ABI versions (#89)
@@ -1264,38 +1266,56 @@ export class LocalBackend {
 
     if (pendingPaths.length > 0) {
       try {
-        const scopedPaths = [
-          input.symbolFilePath,
-          `${input.symbolFilePath}.meta`,
-          ...pendingPaths,
-          ...pendingPaths.map((resourcePath) => `${resourcePath}.meta`),
-        ].map(normalizePath);
+        const cfg = resolveUnityLazyConfig(process.env);
+        const hydration = await hydrateLazyBindings({
+          pendingPaths,
+          config: cfg,
+          dedupeKey: `${input.symbolUid}::${pendingPaths.slice().sort().join('|')}`,
+          resolveBatch: async (resourcePaths) => {
+            const scopedPaths = [
+              input.symbolFilePath,
+              `${input.symbolFilePath}.meta`,
+              ...resourcePaths,
+              ...resourcePaths.map((resourcePath) => `${resourcePath}.meta`),
+            ].map(normalizePath);
 
-        const scanContext = await buildUnityScanContext({
-          repoRoot: repo.repoPath,
-          scopedPaths,
-          symbolDeclarations: [{ symbol: input.symbolName, scriptPath: input.symbolFilePath }],
+            const scanContext = await buildUnityScanContext({
+              repoRoot: repo.repoPath,
+              scopedPaths,
+              symbolDeclarations: [{ symbol: input.symbolName, scriptPath: input.symbolFilePath }],
+            });
+
+            const resolved = await resolveUnityBindings({
+              repoRoot: repo.repoPath,
+              symbol: input.symbolName,
+              scanContext,
+              resourcePathAllowlist: resourcePaths,
+              deepParseLargeResources: true,
+            });
+
+            unityDiagnostics.push(...resolved.unityDiagnostics);
+            const byPath = new Map<string, ResolvedUnityBinding[]>();
+            for (const resourcePath of resourcePaths) {
+              byPath.set(resourcePath, resolved.resourceBindings.filter(
+                (binding) => normalizePath(binding.resourcePath) === normalizePath(resourcePath),
+              ));
+            }
+            return byPath;
+          },
         });
-
-        const resolved = await resolveUnityBindings({
-          repoRoot: repo.repoPath,
-          symbol: input.symbolName,
-          scanContext,
-          resourcePathAllowlist: pendingPaths,
-          deepParseLargeResources: true,
-        });
-
-        const freshByPath = new Map<string, ResolvedUnityBinding[]>();
-        for (const resourcePath of pendingPaths) {
-          freshByPath.set(resourcePath, resolved.resourceBindings.filter(
-            (binding) => normalizePath(binding.resourcePath) === normalizePath(resourcePath),
-          ));
+        const freshByPath = hydration.resolvedByPath;
+        if (hydration.timedOut) {
+          unityDiagnostics.push(formatLazyHydrationBudgetDiagnostic(hydration.elapsedMs));
         }
+        const hydrationExtras = hydration.diagnostics.filter((diag) => !/budget exceeded/i.test(diag));
+        if (hydrationExtras.length > 0) {
+          unityDiagnostics.push(...hydrationExtras);
+        }
+
         await upsertUnityOverlayBindings(repo.storagePath, repo.lastCommit, input.symbolUid, freshByPath);
         for (const [resourcePath, bindings] of freshByPath.entries()) {
           resolvedByPath.set(resourcePath, bindings);
         }
-        unityDiagnostics.push(...resolved.unityDiagnostics);
       } catch (error) {
         unityDiagnostics.push(
           `lazy-expand failed: ${error instanceof Error ? error.message : String(error)}`,

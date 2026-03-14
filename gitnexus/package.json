@@ -54,6 +54,7 @@
     "benchmark:agent-context:quick": "npm run check:neonspark-target && npm run build && node dist/cli/index.js benchmark-agent-context ../benchmarks/agent-context/neonspark-refactor-v1 --profile quick --target-path \"$GITNEXUS_NEONSPARK_TARGET_PATH\" --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
     "benchmark:agent-context:full": "npm run check:neonspark-target && npm run build && node dist/cli/index.js benchmark-agent-context ../benchmarks/agent-context/neonspark-refactor-v1 --profile full --target-path \"$GITNEXUS_NEONSPARK_TARGET_PATH\" --repo-alias neonspark-v1-subset --scope-manifest ../benchmarks/unity-baseline/neonspark-v2/sync-manifest.txt",
     "benchmark:u2:sample": "npm run build && node dist/benchmark/u2-performance-sampler.js",
+    "benchmark:unity:lazy-context": "npm run build && node dist/benchmark/unity-lazy-context-sampler.js",
     "benchmark:u2:e2e": "npm run check:u2-e2e-target && npm run build && node dist/cli/index.js benchmark-u2-e2e --config ../benchmarks/u2-e2e/neonspark-full-u2-e2e.config.json"
   },
   "dependencies": {

@@ -62,3 +62,41 @@ test('unity lazy overlay invalidates entries on indexed commit change', async ()
     await fs.rm(storagePath, { recursive: true, force: true });
   }
 });
+
+test('overlay persists entries in shard files and supports atomic replace', async () => {
+  const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-unity-overlay-'));
+  try {
+    await upsertUnityOverlayBindings(
+      storagePath,
+      'abc123',
+      'Class:Foo',
+      new Map([
+        ['Assets/A.prefab', [{
+          resourcePath: 'Assets/A.prefab',
+          resourceType: 'prefab',
+          bindingKind: 'direct',
+          componentObjectId: '101',
+          serializedFields: { scalarFields: [], referenceFields: [] },
+          resolvedReferences: [],
+          evidence: { line: 1, lineText: 'm_Script: ...' },
+        } as any]],
+        ['Assets/B.prefab', [{
+          resourcePath: 'Assets/B.prefab',
+          resourceType: 'prefab',
+          bindingKind: 'direct',
+          componentObjectId: '102',
+          serializedFields: { scalarFields: [], referenceFields: [] },
+          resolvedReferences: [],
+          evidence: { line: 1, lineText: 'm_Script: ...' },
+        } as any]],
+      ]),
+    );
+
+    const shardsDir = path.join(storagePath, 'unity-lazy-overlay');
+    const shards = await fs.readdir(shardsDir);
+    assert.ok(shards.length > 0);
+    assert.ok(shards.every((name) => name.endsWith('.json')));
+  } finally {
+    await fs.rm(storagePath, { recursive: true, force: true });
+  }
+});

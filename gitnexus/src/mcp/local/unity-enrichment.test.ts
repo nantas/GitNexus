@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadUnityContext, projectUnityBindings } from './unity-enrichment.js';
+import { formatLazyHydrationBudgetDiagnostic, loadUnityContext, projectUnityBindings } from './unity-enrichment.js';
 
 test('projectUnityBindings restores graph-native Unity payload rows', () => {
   const out = projectUnityBindings([
@@ -175,4 +175,10 @@ test('projectUnityBindings infers lightweight marker from legacy line-* componen
 
   assert.equal(out.resourceBindings.length, 1);
   assert.equal(out.resourceBindings[0]?.lightweight, true);
+});
+
+test('formatLazyHydrationBudgetDiagnostic returns stable budget warning', () => {
+  const message = formatLazyHydrationBudgetDiagnostic(17);
+  assert.match(message, /budget exceeded/i);
+  assert.match(message, /17ms/);
 });

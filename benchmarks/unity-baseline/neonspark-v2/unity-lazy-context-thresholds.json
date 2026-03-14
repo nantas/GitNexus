@@ -1,0 +1,6 @@
+{
+  "coldMsMax": 20000,
+  "warmMsMax": 1000,
+  "coldMaxRssBytesMax": 2147483648,
+  "warmMaxRssBytesMax": 1073741824
+}

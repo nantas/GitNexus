@@ -1,0 +1,71 @@
+{
+  "date": "2026-03-14",
+  "repo": "neonnew-core",
+  "targetSymbol": {
+    "symbol": "DoorObj",
+    "file": "Assets/NEON/Code/Game/Doors/DoorObj.cs"
+  },
+  "baselineFromPlan": {
+    "analyze": { "realSec": 143.83, "maxRssBytes": 6320000000 },
+    "contextCold": { "realSec": 15.33, "maxRssBytes": 3700000000 },
+    "contextWarm": { "realSec": 0.51, "maxRssBytes": 640000000 }
+  },
+  "currentMeasured": {
+    "analyze": {
+      "command": "/usr/bin/time -l node .../dist/cli/index.js analyze --repo-alias neonnew-core",
+      "realSec": 141.47,
+      "maxRssBytes": 6379110400,
+      "log": "/tmp/gitnexus-unity-hardening-analyze.log"
+    },
+    "contextCold": {
+      "command": "/usr/bin/time -l node .../dist/cli/index.js context DoorObj --repo neonnew-core --file Assets/NEON/Code/Game/Doors/DoorObj.cs --unity-resources auto",
+      "realSec": 4.16,
+      "maxRssBytes": 1913307136,
+      "log": "/tmp/gitnexus-unity-hardening-context-cold.log"
+    },
+    "contextWarm": {
+      "command": "/usr/bin/time -l node .../dist/cli/index.js context DoorObj --repo neonnew-core --file Assets/NEON/Code/Game/Doors/DoorObj.cs --unity-resources auto",
+      "realSec": 2.04,
+      "maxRssBytes": 1002864640,
+      "log": "/tmp/gitnexus-unity-hardening-context-warm.log"
+    }
+  },
+  "samplerGate": {
+    "thresholds": "benchmarks/unity-baseline/neonspark-v2/unity-lazy-context-thresholds.json",
+    "samplerReport": "docs/reports/2026-03-14-unity-lazy-context-sampler-report.json",
+    "metrics": {
+      "coldMs": 2791,
+      "warmMs": 2008,
+      "coldMaxRssBytes": 900988928,
+      "warmMaxRssBytes": 978010112
+    },
+    "thresholdVerdict": {
+      "pass": false,
+      "failedChecks": ["warmMs"]
+    }
+  },
+  "u2Sampler": {
+    "commandFromPlan": "npm --prefix gitnexus run benchmark:u2:sample -- --target-path /Volumes/Shuttle/projects/neonnew",
+    "firstRun": {
+      "exitCode": 1,
+      "error": "[u2-sampler] failed: Missing required arg: --report <path>"
+    },
+    "executedWithReport": "npm --prefix gitnexus run benchmark:u2:sample -- --target-path /Volumes/Shuttle/projects/neonnew --report docs/reports/2026-03-14-u2-performance-sampling-hardening.json"
+  },
+  "targetedTests": {
+    "command": "npm --prefix gitnexus run build && node --test gitnexus/dist/mcp/local/unity-lazy-overlay.test.js gitnexus/dist/mcp/local/unity-lazy-hydrator.test.js gitnexus/dist/core/unity/resolver.test.js gitnexus/dist/mcp/local/unity-enrichment.test.js",
+    "pass": true,
+    "tests": 26,
+    "failures": 0
+  },
+  "conclusion": {
+    "coldHydrationMemoryGoalLt2GB": true,
+    "warmLatencyGoalLt1s": false,
+    "overlayAtomicShardEnabled": true,
+    "notes": [
+      "Cold context memory reduced below 2GB for the measured heavy symbol case.",
+      "Warm context remains above 1s in current real-repo measurements; threshold gate intentionally fails on warmMs.",
+      "Lazy hydration now supports chunking, budget caps, and in-flight dedupe; diagnostics include budget exceed signals."
+    ]
+  }
+}

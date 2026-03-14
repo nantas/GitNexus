@@ -109,3 +109,17 @@ cat docs/reports/<run-id>/final-verdict.md
 2. latest scheduled local real-repo gate run pass
 3. latest E2E report confirms three U3 hard gates
 4. project doc/DoD state updated
+
+## 8. Lazy Expand Hardening Knobs (2026-03-14)
+
+Environment variables (context lazy hydration path):
+
+- `GITNEXUS_UNITY_LAZY_MAX_PATHS`: max pending resource paths resolved in a single request. Default `120`.
+- `GITNEXUS_UNITY_LAZY_BATCH_SIZE`: per-batch hydration chunk size. Default `30`.
+- `GITNEXUS_UNITY_LAZY_MAX_MS`: max elapsed hydration budget before early stop. Default `5000`.
+
+Diagnostics interpretation:
+
+- `lazy-expand budget exceeded after <N>ms`: hydration stopped early by budget cap; output is partial but valid.
+- `lazy-expand failed: ...`: hydration failure (I/O, parse, or resolver error). Baseline lightweight payload is still returned.
+- Empty `unityDiagnostics` with non-empty `resourceBindings`: lazy hydration completed within budget and no resolver warnings surfaced.
