@@ -12,7 +12,7 @@ import { initKuzu, executeQuery, closeKuzu, isKuzuReady } from '../core/kuzu-ada
 import { parseUnityResourcesMode } from '../../core/unity/options.js';
 import { buildUnityScanContext } from '../../core/unity/scan-context.js';
 import { resolveUnityBindings, type ResolvedUnityBinding } from '../../core/unity/resolver.js';
-import { loadUnityContext, type UnityContextPayload } from './unity-enrichment.js';
+import { formatLazyHydrationBudgetDiagnostic, loadUnityContext, type UnityContextPayload } from './unity-enrichment.js';
 import { resolveUnityLazyConfig } from './unity-lazy-config.js';
 import { hydrateLazyBindings } from './unity-lazy-hydrator.js';
 import { readUnityOverlayBindings, upsertUnityOverlayBindings } from './unity-lazy-overlay.js';
@@ -1267,7 +1267,7 @@ export class LocalBackend {
     if (pendingPaths.length > 0) {
       try {
         const cfg = resolveUnityLazyConfig(process.env);
-        const { resolvedByPath: freshByPath } = await hydrateLazyBindings({
+        const hydration = await hydrateLazyBindings({
           pendingPaths,
           config: cfg,
           dedupeKey: `${input.symbolUid}::${pendingPaths.slice().sort().join('|')}`,
@@ -1303,6 +1303,14 @@ export class LocalBackend {
             return byPath;
           },
         });
+        const freshByPath = hydration.resolvedByPath;
+        if (hydration.timedOut) {
+          unityDiagnostics.push(formatLazyHydrationBudgetDiagnostic(hydration.elapsedMs));
+        }
+        const hydrationExtras = hydration.diagnostics.filter((diag) => !/budget exceeded/i.test(diag));
+        if (hydrationExtras.length > 0) {
+          unityDiagnostics.push(...hydrationExtras);
+        }
 
         await upsertUnityOverlayBindings(repo.storagePath, repo.lastCommit, input.symbolUid, freshByPath);
         for (const [resourcePath, bindings] of freshByPath.entries()) {

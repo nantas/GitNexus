@@ -12,6 +12,7 @@ export interface HydrateLazyBindingsOutput {
   resolvedByPath: Map<string, ResolvedUnityBinding[]>;
   timedOut: boolean;
   elapsedMs: number;
+  diagnostics: string[];
 }
 
 const inFlightHydration = new Map<string, Promise<HydrateLazyBindingsOutput>>();
@@ -38,6 +39,7 @@ async function runHydration(input: HydrateLazyBindingsInput): Promise<HydrateLaz
   const startedAt = Date.now();
   const resolvedByPath = new Map<string, ResolvedUnityBinding[]>();
   let timedOut = false;
+  const diagnostics: string[] = [];
 
   for (let i = 0; i < pending.length; i += batchSize) {
     if (Date.now() - startedAt > input.config.maxHydrationMs) {
@@ -52,9 +54,14 @@ async function runHydration(input: HydrateLazyBindingsInput): Promise<HydrateLaz
     }
   }
 
+  if (timedOut) {
+    diagnostics.push(`lazy-expand budget exceeded after ${Date.now() - startedAt}ms`);
+  }
+
   return {
     resolvedByPath,
     timedOut,
     elapsedMs: Date.now() - startedAt,
+    diagnostics,
   };
 }

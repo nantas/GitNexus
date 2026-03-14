@@ -36,3 +36,17 @@ test('parallel requests dedupe same hydration work', async () => {
 
   assert.equal(resolveCalls, 1);
 });
+
+test('context lazy hydration returns partial results when budget exceeded and reports diagnostics', async () => {
+  const out = await hydrateLazyBindings({
+    pendingPaths: ['a', 'b', 'c', 'd'],
+    config: { maxPendingPathsPerRequest: 4, batchSize: 2, maxHydrationMs: 1 },
+    resolveBatch: async (paths) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return new Map(paths.map((p) => [p, []]));
+    },
+  });
+
+  assert.equal(out.resolvedByPath.size, 2);
+  assert.match(((out as any).diagnostics || []).join('\n'), /budget exceeded/i);
+});

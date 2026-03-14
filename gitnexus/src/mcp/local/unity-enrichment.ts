@@ -26,6 +26,10 @@ export async function loadUnityContext(
   return projectUnityBindings(rows);
 }
 
+export function formatLazyHydrationBudgetDiagnostic(elapsedMs: number): string {
+  return `lazy-expand budget exceeded after ${elapsedMs}ms`;
+}
+
 export function projectUnityBindings(rows: any[]): UnityContextPayload {
   const resourceBindings: ResolvedUnityBinding[] = [];
   const scalarFields: UnitySerializedFields['scalarFields'] = [];
