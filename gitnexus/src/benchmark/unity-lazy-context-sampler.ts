@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 export interface UnityLazyContextMetrics {
   coldMs: number;
@@ -105,7 +106,9 @@ export async function runUnityLazyContextSampler(
 }
 
 async function runCliContextSample(input: UnityLazyContextSamplerConfig & { warm: boolean }): Promise<UnityLazyContextSample> {
-  const cliPath = path.join('gitnexus', 'dist', 'cli', 'index.js');
+  const thisFile = fileURLToPath(import.meta.url);
+  const thisDir = path.dirname(thisFile);
+  const cliPath = path.resolve(thisDir, '../cli/index.js');
   const args = [
     '-l',
     'node',
@@ -131,8 +134,8 @@ async function runCliContextSample(input: UnityLazyContextSamplerConfig & { warm
     proc.on('close', (code) => resolve(code ?? 1));
   });
 
-  const rssMatch = stderr.match(/maximum resident set size[^0-9]*([0-9]+)/i);
-  const maxRssBytes = rssMatch ? Number(rssMatch[1]) : 0;
+  const rssMatch = stderr.match(/maximum resident set size[^0-9]*([0-9]+)|([0-9]+)\s+maximum resident set size/i);
+  const maxRssBytes = rssMatch ? Number(rssMatch[1] || rssMatch[2] || 0) : 0;
 
   return {
     durationMs: Date.now() - startedAt,
