@@ -1,0 +1,52 @@
+{
+  "tier": 2,
+  "focus": [
+    "unity edge removal",
+    "component payload slimming"
+  ],
+  "measurements": {
+    "analyze": {
+      "command": "/usr/bin/time -l node gitnexus/dist/cli/index.js analyze /Volumes/Shuttle/projects/neonnew --repo-alias neonnew-core",
+      "realSec": 125.61,
+      "maxRssBytes": 6553534464,
+      "nodes": 174088,
+      "edges": 306606,
+      "kuzuSec": 51.9,
+      "ftsSec": 16.7
+    },
+    "queryCold": {
+      "command": "/usr/bin/time -l node gitnexus/dist/cli/index.js context DoorObj --repo neonnew-core --file Assets/NEON/Code/Game/Doors/DoorObj.cs --unity-resources auto",
+      "realSec": 2.44,
+      "maxRssBytes": 977043456,
+      "resourceBindings": 5189,
+      "unityDiagnostics": 0,
+      "status": "found"
+    },
+    "queryWarm": {
+      "command": "/usr/bin/time -l node gitnexus/dist/cli/index.js context DoorObj --repo neonnew-core --file Assets/NEON/Code/Game/Doors/DoorObj.cs --unity-resources auto",
+      "realSec": 2.42,
+      "maxRssBytes": 944717824,
+      "resourceBindings": 5189,
+      "unityDiagnostics": 0,
+      "status": "found"
+    }
+  },
+  "comparisonToTier1": {
+    "tier1Report": "docs/reports/2026-03-14-analyze-memory-tier1-summary.json",
+    "delta": {
+      "analyzeRealSec": -120.45,
+      "analyzeMaxRssBytes": 595591168,
+      "nodes": -2770,
+      "edges": -66978,
+      "coldQueryRealSec": 0.72,
+      "coldQueryMaxRssBytes": 102268928,
+      "warmQueryRealSec": 0.7,
+      "warmQueryMaxRssBytes": 72433664,
+      "resourceBindings": 361
+    }
+  },
+  "notes": [
+    "Tier 2 reduced graph size (nodes/edges), but full-analyze peak RSS increased versus Tier 1.",
+    "Unity query gates remained green: both cold and warm runs returned status=found, non-empty resourceBindings, and zero diagnostics."
+  ]
+}
