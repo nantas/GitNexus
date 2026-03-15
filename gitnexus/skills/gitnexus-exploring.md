@@ -20,7 +20,8 @@ description: "Use when the user asks how code works, wants to understand archite
 2. READ gitnexus://repo/{name}/context             → Codebase overview, check staleness
 3. gitnexus_query({query: "<what you want to understand>"})  → Find related execution flows
 4. gitnexus_context({name: "<symbol>"})            → Deep dive on specific symbol
-5. READ gitnexus://repo/{name}/process/{name}      → Trace full execution flow
+5. (Unity symbols) rerun context/query with unity params when needed
+6. READ gitnexus://repo/{name}/process/{name}      → Trace full execution flow
 ```
 
 > If step 2 says "Index is stale" → run `npx gitnexus analyze` in terminal.
@@ -32,6 +33,8 @@ description: "Use when the user asks how code works, wants to understand archite
 - [ ] gitnexus_query for the concept you want to understand
 - [ ] Review returned processes (execution flows)
 - [ ] gitnexus_context on key symbols for callers/callees
+- [ ] For Unity evidence, call context/query with `unity_resources: "on"` and `unity_hydration_mode: "compact"`
+- [ ] If `hydrationMeta.needsParityRetry === true`, rerun with `unity_hydration_mode: "parity"`
 - [ ] READ process resource for full execution traces
 - [ ] Read source files for implementation details
 ```
@@ -62,6 +65,17 @@ gitnexus_context({name: "validateUser"})
 → Incoming calls: loginHandler, apiMiddleware
 → Outgoing calls: checkToken, getUserById
 → Processes: LoginFlow (step 2/5), TokenRefresh (step 1/3)
+```
+
+**Unity-focused context/query** — use compact first, parity only when needed:
+
+```
+gitnexus_context({
+  name: "DoorObj",
+  unity_resources: "on",
+  unity_hydration_mode: "compact"
+})
+→ hydrationMeta.needsParityRetry ? rerun with unity_hydration_mode: "parity" : continue
 ```
 
 ## Example: "How does payment processing work?"

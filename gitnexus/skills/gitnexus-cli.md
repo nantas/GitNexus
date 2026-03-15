@@ -70,6 +70,24 @@ npx gitnexus list
 
 Lists all repositories registered in `~/.gitnexus/registry.json`. The MCP `list_repos` tool provides the same information.
 
+### query/context — Unity hydration mode
+
+For Unity resource retrieval:
+
+```bash
+npx gitnexus context DoorObj --repo neonnew-core --file Assets/NEON/Code/Game/Doors/DoorObj.cs --unity-resources on --unity-hydration compact
+```
+
+```bash
+npx gitnexus query "DoorObj binding" --repo neonnew-core --unity-resources on --unity-hydration compact
+```
+
+Rules:
+
+- `--unity-hydration compact` is the default (fast path).
+- If response `hydrationMeta.needsParityRetry=true`, rerun with `--unity-hydration parity`.
+- `--unity-hydration parity` is completeness-first mode for advanced verification.
+
 ## After Indexing
 
 1. **Read `gitnexus://repo/{name}/context`** to verify the index loaded

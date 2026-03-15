@@ -52,7 +52,12 @@ Returns results grouped by process (execution flow):
 - process_symbols: all symbols in those flows with file locations and module (functional area)
 - definitions: standalone types/interfaces not in any process
 
-Hybrid ranking: BM25 keyword + semantic vector search, ranked by Reciprocal Rank Fusion.`,
+Hybrid ranking: BM25 keyword + semantic vector search, ranked by Reciprocal Rank Fusion.
+
+Includes optional Unity retrieval contract:
+- Set unity_resources=on|auto to include Unity resource evidence.
+- Default unity_hydration_mode=compact (fast path).
+- Check response hydrationMeta: when needsParityRetry=true, rerun with unity_hydration_mode=parity for completeness.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -127,7 +132,12 @@ Shows categorized incoming/outgoing references (calls, imports, extends, impleme
 WHEN TO USE: After query() to understand a specific symbol in depth. When you need to know all callers, callees, and what execution flows a symbol participates in.
 AFTER THIS: Use impact() if planning changes, or READ gitnexus://repo/{name}/process/{processName} for full execution trace.
 
-Handles disambiguation: if multiple symbols share the same name, returns candidates for you to pick from. Use uid param for zero-ambiguity lookup from prior results.`,
+Handles disambiguation: if multiple symbols share the same name, returns candidates for you to pick from. Use uid param for zero-ambiguity lookup from prior results.
+
+Unity retrieval contract:
+- Set unity_resources=on|auto to include Unity resource evidence.
+- Default unity_hydration_mode=compact (fast path).
+- Check response hydrationMeta: when needsParityRetry=true, rerun with unity_hydration_mode=parity for completeness.`,
     inputSchema: {
       type: 'object',
       properties: {

@@ -18,8 +18,9 @@ description: "Use when the user is debugging a bug, tracing an error, or asking 
 ```
 1. gitnexus_query({query: "<error or symptom>"})            → Find related execution flows
 2. gitnexus_context({name: "<suspect>"})                    → See callers/callees/processes
-3. READ gitnexus://repo/{name}/process/{name}                → Trace execution flow
-4. gitnexus_cypher({query: "MATCH path..."})                 → Custom traces if needed
+3. (Unity symbols) use unity_resources + hydration contract
+4. READ gitnexus://repo/{name}/process/{name}                → Trace execution flow
+5. gitnexus_cypher({query: "MATCH path..."})                 → Custom traces if needed
 ```
 
 > If "Index is stale" → run `npx gitnexus analyze` in terminal.
@@ -31,6 +32,8 @@ description: "Use when the user is debugging a bug, tracing an error, or asking 
 - [ ] gitnexus_query for error text or related code
 - [ ] Identify the suspect function from returned processes
 - [ ] gitnexus_context to see callers and callees
+- [ ] For Unity retrieval, start with `unity_hydration_mode: "compact"` and inspect `hydrationMeta`
+- [ ] If `hydrationMeta.needsParityRetry === true`, rerun with `unity_hydration_mode: "parity"` before concluding root cause
 - [ ] Trace execution flow via process resource if applicable
 - [ ] gitnexus_cypher for custom call chain traces if needed
 - [ ] Read source files to confirm root cause
@@ -63,6 +66,17 @@ gitnexus_context({name: "validatePayment"})
 → Incoming calls: processCheckout, webhookHandler
 → Outgoing calls: verifyCard, fetchRates (external API!)
 → Processes: CheckoutFlow (step 3/7)
+```
+
+**Unity debug retrieval** — explicit completeness control:
+
+```
+gitnexus_context({
+  name: "DoorObj",
+  unity_resources: "on",
+  unity_hydration_mode: "compact"
+})
+→ if hydrationMeta.needsParityRetry then rerun with unity_hydration_mode: "parity"
 ```
 
 **gitnexus_cypher** — custom call chain traces:

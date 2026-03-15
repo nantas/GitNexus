@@ -40,6 +40,21 @@ For any task involving code understanding, debugging, impact analysis, or refact
 | `cypher`         | Raw graph queries (read `gitnexus://repo/{name}/schema` first)           |
 | `list_repos`     | Discover indexed repos                                                   |
 
+### Unity Retrieval Contract (query/context)
+
+When you need Unity resource evidence, pass:
+
+- `unity_resources: "on"` (or `"auto"` when you want adaptive behavior)
+- `unity_hydration_mode: "compact" | "parity"` (default: `"compact"`)
+
+Recommended default workflow:
+
+1. Call `context/query` with `unity_hydration_mode: "compact"` for speed.
+2. Inspect `hydrationMeta` in the response:
+   - `needsParityRetry: true` → rerun same call with `unity_hydration_mode: "parity"`
+   - `isComplete: true` → keep compact result
+3. Treat parity as the completeness path for advanced verification.
+
 ## Resources Reference
 
 Lightweight reads (~100-500 tokens) for navigation:

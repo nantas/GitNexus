@@ -19,7 +19,8 @@ description: "Use when the user wants to rename, extract, split, move, or restru
 1. gitnexus_impact({target: "X", direction: "upstream"})  → Map all dependents
 2. gitnexus_query({query: "X"})                            → Find execution flows involving X
 3. gitnexus_context({name: "X"})                           → See all incoming/outgoing refs
-4. Plan update order: interfaces → implementations → callers → tests
+4. (Unity symbols) validate compact/parity retrieval completeness
+5. Plan update order: interfaces → implementations → callers → tests
 ```
 
 > If "Index is stale" → run `npx gitnexus analyze` in terminal.
@@ -40,6 +41,8 @@ description: "Use when the user wants to rename, extract, split, move, or restru
 
 ```
 - [ ] gitnexus_context({name: target}) — see all incoming/outgoing refs
+- [ ] For Unity targets: `unity_resources: "on"`, `unity_hydration_mode: "compact"` first
+- [ ] If `hydrationMeta.needsParityRetry === true`, rerun with `unity_hydration_mode: "parity"` before extraction
 - [ ] gitnexus_impact({target, direction: "upstream"}) — find all external callers
 - [ ] Define new module interface
 - [ ] Extract code, update imports
@@ -51,6 +54,7 @@ description: "Use when the user wants to rename, extract, split, move, or restru
 
 ```
 - [ ] gitnexus_context({name: target}) — understand all callees
+- [ ] For Unity targets: ensure final verification run uses parity when compact requests retry
 - [ ] Group callees by responsibility
 - [ ] gitnexus_impact({target, direction: "upstream"}) — map callers to update
 - [ ] Create new functions/services
