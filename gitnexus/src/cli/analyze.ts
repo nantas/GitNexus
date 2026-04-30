@@ -74,7 +74,24 @@ export interface AnalyzeOptions {
 }
 
 /** Threshold: auto-skip embeddings for repos with more nodes than this */
-const EMBEDDING_NODE_LIMIT = 50_000;
+const DEFAULT_EMBEDDING_NODE_LIMIT = 50_000;
+
+export function getEmbeddingNodeLimit(): number {
+  const raw = process.env.GITNEXUS_EMBEDDING_NODE_LIMIT || process.env.GITNEXUS_EMBEDDING_MAX_NODES;
+  if (!raw) return DEFAULT_EMBEDDING_NODE_LIMIT;
+
+  const normalized = raw.trim().toLowerCase();
+  if (['0', 'none', 'off', 'unlimited', 'infinite', 'infinity'].includes(normalized)) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return DEFAULT_EMBEDDING_NODE_LIMIT;
+  }
+
+  return parsed;
+}
 
 const PHASE_LABELS: Record<string, string> = {
   extracting: 'Scanning files',
@@ -387,8 +404,9 @@ export const analyzeCommand = async (
   let embeddingSkipReason = 'off (use --embeddings to enable)';
 
   if (embeddingsEnabled) {
-    if (stats.nodes > EMBEDDING_NODE_LIMIT) {
-      embeddingSkipReason = `skipped (${stats.nodes.toLocaleString()} nodes > ${EMBEDDING_NODE_LIMIT.toLocaleString()} limit)`;
+    const embeddingNodeLimit = getEmbeddingNodeLimit();
+    if (Number.isFinite(embeddingNodeLimit) && stats.nodes > embeddingNodeLimit) {
+      embeddingSkipReason = `skipped (${stats.nodes.toLocaleString()} nodes > ${embeddingNodeLimit.toLocaleString()} limit)`;
     } else {
       embeddingSkipped = false;
     }

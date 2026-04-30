@@ -18,6 +18,7 @@ import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/tran
 import { existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
+import { homedir } from 'os';
 import { DEFAULT_EMBEDDING_CONFIG, type EmbeddingConfig, type ModelProgress } from './types.js';
 
 /**
@@ -58,6 +59,53 @@ let embedderInstance: FeatureExtractionPipeline | null = null;
 let isInitializing = false;
 let initPromise: Promise<FeatureExtractionPipeline> | null = null;
 let currentDevice: 'dml' | 'cuda' | 'cpu' | 'wasm' | null = null;
+
+const truthyEnvValues = new Set(['1', 'true', 'yes', 'on']);
+const falseyEnvValues = new Set(['0', 'false', 'no', 'off']);
+
+export function normalizeBooleanEnv(value: string | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (truthyEnvValues.has(normalized)) return true;
+  if (falseyEnvValues.has(normalized)) return false;
+  return undefined;
+}
+
+export function normalizeRemoteHost(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
+}
+
+export function configureTransformersEnvironment(): void {
+  const cacheDir =
+    process.env.GITNEXUS_TRANSFORMERS_CACHE ||
+    process.env.TRANSFORMERS_CACHE ||
+    (process.env.HF_HOME ? join(process.env.HF_HOME, 'transformers') : undefined) ||
+    join(homedir(), '.cache', 'gitnexus', 'transformers');
+
+  env.cacheDir = cacheDir;
+
+  const localModelPath = process.env.GITNEXUS_TRANSFORMERS_LOCAL_MODEL_PATH || process.env.TRANSFORMERS_LOCAL_MODEL_PATH;
+  if (localModelPath) {
+    env.localModelPath = localModelPath;
+  }
+
+  const remoteHost = process.env.GITNEXUS_HF_ENDPOINT || process.env.HF_ENDPOINT || process.env.HUGGINGFACE_HUB_URL;
+  if (remoteHost) {
+    env.remoteHost = normalizeRemoteHost(remoteHost);
+  }
+
+  const allowLocal = normalizeBooleanEnv(process.env.GITNEXUS_TRANSFORMERS_ALLOW_LOCAL);
+  env.allowLocalModels = allowLocal ?? true;
+
+  const localOnly =
+    normalizeBooleanEnv(process.env.GITNEXUS_TRANSFORMERS_LOCAL_ONLY) ||
+    normalizeBooleanEnv(process.env.TRANSFORMERS_OFFLINE) ||
+    normalizeBooleanEnv(process.env.HF_HUB_OFFLINE);
+  if (localOnly === true) {
+    env.allowRemoteModels = false;
+  }
+}
 
 /**
  * Progress callback type for model loading
@@ -106,8 +154,11 @@ export const initEmbedder = async (
 
   initPromise = (async () => {
     try {
-      // Configure transformers.js environment
-      env.allowLocalModels = false;
+      // Configure transformers.js environment. Use a stable user cache so
+      // global installs do not re-download models into node_modules, allow
+      // cached/local models by default, and let users select a Hugging Face
+      // compatible endpoint/mirror in restricted network environments.
+      configureTransformersEnvironment();
       
       const isDev = process.env.NODE_ENV === 'development';
       if (isDev) {
@@ -286,4 +337,3 @@ export const disposeEmbedder = async (): Promise<void> => {
     initPromise = null;
   }
 };
-
