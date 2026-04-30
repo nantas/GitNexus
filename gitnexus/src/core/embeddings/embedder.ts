@@ -81,7 +81,7 @@ export function configureTransformersEnvironment(): void {
     process.env.GITNEXUS_TRANSFORMERS_CACHE ||
     process.env.TRANSFORMERS_CACHE ||
     (process.env.HF_HOME ? join(process.env.HF_HOME, 'transformers') : undefined) ||
-    join(homedir(), '.cache', 'gitnexus', 'transformers');
+    join(homedir(), '.gitnexus', 'models', 'transformers');
 
   env.cacheDir = cacheDir;
 
