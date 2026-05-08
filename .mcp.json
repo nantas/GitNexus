@@ -2,7 +2,8 @@
   "mcpServers": {
     "gitnexus": {
       "command": "gitnexus",
-      "args": ["mcp"]
+      "args": ["mcp"],
+      "directTools": true
     }
   }
 }

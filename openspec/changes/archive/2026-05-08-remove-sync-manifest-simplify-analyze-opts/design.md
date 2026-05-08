@@ -39,7 +39,7 @@ GitNexus CLI 的 `analyze` 命令当前通过三层优先级（CLI > sync-manife
 - 移除 `parseScopeManifestConfig` import
 - `StoredAnalyzeOptions` 和 `EffectiveAnalyzeOptions` 新增 `csharpDefineCsproj?: string`
 - `resolveEffectiveAnalyzeOptions` 简化为 CLI > stored 两层，对 `csharpDefineCsproj` 同样适用
-- `resolveAnalyzeScopeRules` 简化为仅接受 scopePrefix 数组（不再读 manifest 文件）
+- `resolveAnalyzeScopeRules` 已完全移除；`scopeRules` 仅通过 stored layer（`meta.json.analyzeOptions.scopeRules`）复用，不再支持 CLI 输入路径
 - 新增 `validateStoredOptions(stored, repoPath)` 异步函数
 
 ### D3: `validateStoredOptions` 设计
@@ -91,9 +91,11 @@ async function validateStoredOptions(
 
 ### D8: 测试更新
 
-- `analyze-options.test.ts`: 移除 manifest 相关用例（`resolveAnalyzeScopeRules` manifest 测试、manifest directive 测试、CLI > manifest > stored 优先级测试、unknown directive 测试、`parseScopeManifestConfig` 测试）；新增 `validateStoredOptions` 用例；新增 `csharpDefineCsproj` 复用用例
-- `analyze.test.ts`: 移除 sync-manifest 相关用例；新增 `csharpDefineCsproj` 持久化用例
-- `repo-manager-alias.test.ts`: 更新 `analyzeOptions` 对象以包含 `csharpDefineCsproj`
+- `test/unit/analyze-options.test.ts`: 移除 manifest 相关用例；新增 `validateStoredOptions` 用例（valid-pass、invalid-alias、invalid-ext、csproj-missing、empty-rules、relative-csproj）；新增 `resolveEffectiveAnalyzeOptions` 用例（reuse-stored、reuse-false、cli-wins、defaults）
+- `test/unit/analyze-pipeline-options.test.ts`: 新增 `buildPipelineRunOptionsForAnalyze` `csharpDefineCsproj` 透传用例
+- `test/unit/repo-manager-alias.test.ts`: 更新 `analyzeOptions` 对象以包含 `csharpDefineCsproj`
+- `test/unit/cli-option-rejection.test.ts`: 新增 CLI 集成测试，验证 `--sync-manifest-policy`、`--scope-manifest`、`--scope-prefix` 在 `analyze` 和 `benchmark-unity` 上均被拒绝
+- `test/unit/clean-integration.test.ts`: 新增 CLI 集成测试，验证 `clean --force` 删除整个 `.gitnexus/`（含残留 `sync-manifest.txt`）以及在无 `.gitnexus/` 时成功
 
 ### D9: benchmark 子命令更新
 

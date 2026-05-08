@@ -63,66 +63,31 @@ Run from the project root. This parses all source files, builds the knowledge gr
 | Flag | Effect |
 |------|--------|
 | `--force` | Force full re-index even if up to date |
+| `--no-reuse-options` | Do not reuse stored analyze options from previous index |
 | `--embeddings` | Enable embedding generation (off by default) |
-| `--skills` | Generate repo-specific skill files from detected communities |
-
-**Two mutually exclusive paths. Choose one per rebuild.**
-
-#### Path A: sync-manifest managed (recommended for Unity / monorepo)
-
-If `.gitnexus/sync-manifest.txt` exists, `analyze` **auto-uses** it when you do **not** pass `--scope-prefix` or `--scope-manifest`.
-
-```bash
-# Unity project with an existing manifest — this is the normal rebuild command
-$GN analyze --force
-```
-
-The manifest controls scope rules, extensions, and repo alias. Example:
-
-```
-Assets/
-Packages/
-@extensions=.cs,.meta
-@repoAlias=neonspark-core
-```
-
-- Non-`@` lines = path-prefix scope rules
-- `@extensions=<csv>` = file extension filter
-- `@repoAlias=<name>` = stable repo alias
-- `@embeddings=<true|false>` = embedding toggle
-
-**Drift guard:** If you pass `--extensions` / `--repo-alias` / `--embeddings` while a manifest exists, CLI compares them. Use `--sync-manifest-policy` to control: `ask|update|keep|error` (default `ask`; non-TTY requires explicit policy).
-
-**Do not mix Path A and Path B.** Passing `--scope-prefix` or `--extensions` when a manifest exists triggers the drift guard and may error out in non-TTY environments.
-
-#### Path B: manual CLI flags (first-time or simple projects)
-
-Use when no sync-manifest exists:
-
-```bash
-# Unity project, first-time index
-$GN analyze --force --extensions ".cs,.meta" --scope-prefix Assets/ --repo-alias neonspark-core
-
-# Generic project
-$GN analyze --force --extensions ".ts,.tsx" --scope-prefix src/
-```
-
-| Manual flag | Effect |
-|-------------|--------|
 | `--extensions <ext>` | Comma-separated file extensions |
-| `--scope-prefix <prefix>` | Add a path prefix rule (repeatable) |
-| `--scope-manifest <file>` | Read scope rules from a manifest file |
 | `--repo-alias <name>` | Override indexed repository name |
 | `--csharp-define-csproj <path>` | Load C# `DefineConstants` from `.csproj` for `#if` normalization |
+| `--skills` | Generate repo-specific skill files from detected communities |
+| `--verbose` | Enable verbose ingestion warnings |
 
-**C# preprocessing (Unity):** For projects with heavy conditional compilation, add `--csharp-define-csproj /path/to/Assembly-CSharp.csproj` (neonspark: `/Volumes/Shuttle/projects/neonspark/Assembly-CSharp.csproj`). Without it, C# files are parsed raw and tree-sitter may mishandle `#if` branches.
+**Option persistence:** After a successful analyze, these options are saved to `meta.json.analyzeOptions` and automatically reused on the next run:
+- `includeExtensions` (from `--extensions`)
+- `scopeRules`
+- `repoAlias`
+- `embeddings`
+- `csharpDefineCsproj`
+
+Use `--no-reuse-options` to ignore stored values and start fresh.
+
+**C# preprocessing (Unity):** For projects with heavy conditional compilation, add `--csharp-define-csproj /path/to/Assembly-CSharp.csproj` (neonspark: `/Volumes/Shuttle/projects/neonspark/Assembly-CSharp.csproj`). This value is persisted to `meta.json` after the first run and reused automatically (with file-existence validation). Without it, C# files are parsed raw and tree-sitter may mishandle `#if` branches.
 
 #### Rebuild recovery — when analyze hangs or crashes
 
 If `analyze --force` hangs (no progress after 5+ minutes) or crashes leaving a corrupted index:
 
 ```bash
-# 1. Clean the corrupted index (preserves sync-manifest.txt)
+# 1. Clean the corrupted index
 $GN clean --force
 
 # 2. Rebuild
@@ -145,18 +110,20 @@ $GN status
 
 Shows whether the current repo has a GitNexus index, when it was last updated, and symbol/relationship counts. Use this to check if re-indexing is needed.
 
-### clean — Delete the index (preserves config)
+### clean — Delete the index
 
 ```bash
 $GN clean --force
 ```
 
-Removes the GitNexus index (graph, CSVs, LadybugDB) from `.gitnexus/` while **preserving `sync-manifest.txt`** and other configuration files. Use this to recover from a corrupted index before re-indexing.
+Removes the entire `.gitnexus/` directory (including `meta.json` and all index data). Also unregisters the repo from the global registry. Use this to recover from a corrupted index before re-indexing.
 
 | Flag      | Effect                                            |
 | --------- | ------------------------------------------------- |
 | `--force` | Skip confirmation prompt                          |
 | `--all`   | Clean all indexed repos, not just the current one |
+
+> **Note:** Configuration is now persisted in `meta.json.analyzeOptions`. After `clean`, these settings are lost and must be re-specified on the next `analyze`.
 
 ### wiki — Generate documentation from the graph
 
@@ -237,7 +204,8 @@ $GN unity-ui-trace "Assets/NEON/VeewoUI/Uxml/BarScreen/Patch/PatchItemPreview.ux
 - **"Not inside a git repository"**: Run from a directory inside a git repo
 - **Index is stale after re-analyzing**: Restart Claude Code to reload the MCP server
 - **Embeddings slow**: Omit `--embeddings` (it's off by default) or set `OPENAI_API_KEY` for faster API-based embedding
-- **`analyze --force` hangs or crashes**: Run `$GN clean --force` to remove the corrupted index (sync-manifest is preserved), then `$GN analyze --force` to rebuild. Common corruption signatures: `.gitnexus/csv/` exists but `relations.csv` is missing; `.gitnexus/lbug.wal` exists while `lbug` is only a few KB.
+- **`analyze --force` hangs or crashes**: Run `$GN clean --force` to remove the corrupted index, then `$GN analyze --force` to rebuild. Common corruption signatures: `.gitnexus/csv/` exists but `relations.csv` is missing; `.gitnexus/lbug.wal` exists while `lbug` is only a few KB.
+- **Stored options invalid warnings**: If `meta.json.analyzeOptions` contains invalid values (e.g., bad alias format, missing `.csproj` file), GitNexus will warn and fall back to defaults. Use `--no-reuse-options` to ignore all stored settings.
 
 ## Runtime-Chain Closure Guard
 

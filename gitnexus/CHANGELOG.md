@@ -4,6 +4,23 @@ All notable changes to GitNexus will be documented in this file.
 
 ## [Unreleased]
 
+### Breaking Changes
+- Removed `--sync-manifest-policy`, `--scope-manifest`, and `--scope-prefix` CLI options.
+  `sync-manifest.txt` is no longer auto-loaded. Use `--extensions` and stored
+  `meta.json.analyzeOptions` instead.
+- `clean` command no longer preserves `sync-manifest.txt`; the entire `.gitnexus/`
+  directory is removed.
+
+### Added
+- `--csharp-define-csproj` is now persisted to `meta.json.analyzeOptions` and
+  automatically reused on subsequent analyze runs (with file-existence validation).
+- Added `validateStoredOptions()` to validate stored analyze options before reuse,
+  emitting warnings and falling back to defaults for invalid fields.
+
+### Changed
+- Analyze options resolution simplified from three layers (CLI > manifest > stored)
+  to two layers (CLI > stored).
+
 ## [1.5.5] - 2026-05-08
 
 ### Fixed

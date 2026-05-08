@@ -99,10 +99,43 @@
 
 ---
 
+## 测试开发与验证强制流程
+
+### 背景
+
+`gitnexus/vitest.config.ts` 的 `include` 只匹配以下路径：
+- `test/**/*.test.ts`
+- `src/cli/rule-lab.test.ts`
+- `src/rule-lab/**/*.test.ts`
+- `src/mcp/local/process-confidence.test.ts`
+- `src/mcp/local/runtime-chain-*.test.ts`
+- `src/mcp/local/runtime-claim*.test.ts`
+
+**`src/cli/` 下除 `rule-lab.test.ts` 外的所有 `*.test.ts` 均不在测试范围内。** 过去多次出现将测试文件写在 `src/cli/` 下，导致 `npm test` 从未执行这些测试，但实施者误以为测试已覆盖。
+
+### 编写新测试时必须遵守
+
+1. **文件位置**：新测试文件必须放在 `test/unit/`（或 `test/integration/`）目录下，**禁止**放在 `src/` 子目录中，除非该路径已在 `vitest.config.ts` 的 `include` 中显式列出。
+2. **测试框架**：必须使用 **vitest API**，即 `import { describe, it, expect } from 'vitest';`，**禁止使用** `node:test` + `node:assert/strict`。
+3. **命名规范**：测试文件以 `.test.ts` 结尾。
+4. **运行前检查**：执行 `npm test` 后，必须对比输出中的 **Tests** 数量是否增加，确认新测试真正被包含在运行套件中。
+   - 正确示例：`Tests  1718 passed`（比修改前 +20）
+   - 错误示例：测试数量未变化，说明新测试文件未被 vitest 发现
+
+### 验证清单（提交前必须完成）
+
+- [ ] 新测试文件位于 `test/unit/`（或已列入 `vitest.config.ts` `include` 的路径）
+- [ ] 使用 `import { describe, it, expect } from 'vitest'` 而非 `node:test`
+- [ ] `npm test` 输出中，测试总数增加了新写入的用例数
+- [ ] `npx tsc --noEmit` 无编译错误
+- [ ] 旧测试无回归失败
+
+---
+
 ## 已知解析陷阱
 
 | 问题 | 参考文档 |
 |------|---------|
 | tree-sitter Unicode 标识符导致 Class 节点缺失、`HAS_METHOD` 边丢失；大文件 `Invalid argument` 崩溃；调用层常见错误 | [`docs/tree-sitter-parsing-pitfalls.md`](docs/tree-sitter-parsing-pitfalls.md) |
 
-> C# 含条件编译分支（`#if/#elif/#else/#endif`）时，执行 analyze 建议显式传入 `--csharp-define-csproj <path>`（Unity 项目优先 `Assembly-CSharp.csproj`；neonspark 使用 `/Volumes/Shuttle/projects/neonspark/Assembly-CSharp.csproj`），以便按 `DefineConstants` 做预处理归一化后再解析。
+> C# 含条件编译分支（`#if/#elif/#else/#endif`）时，执行 analyze 建议显式传入 `--csharp-define-csproj <path>`（Unity 项目优先 `Assembly-CSharp.csproj`；neonspark 使用 `/Volumes/Shuttle/projects/neonspark/Assembly-CSharp.csproj`）。该参数在首次 analyze 成功后自动持久化到 `meta.json.analyzeOptions`，后续运行会自动复用（文件存在性验证通过时）。若文件被移动或删除，系统会输出警告并跳过预处理归一化。
