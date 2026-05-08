@@ -20,7 +20,6 @@
     "knowledge-graph",
     "cursor",
     "claude",
-    "codex",
     "ai-agent",
     "gitnexus",
     "static-analysis",
@@ -35,22 +34,19 @@
     "hooks",
     "scripts",
     "skills",
-    "vendor",
-    "web"
+    "vendor"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc && chmod +x dist/cli/index.js",
     "dev": "tsx watch src/cli/index.ts",
     "test": "vitest run",
-    "test:unit": "vitest run test/unit",
-    "pretest:integration": "node scripts/build.js",
     "test:integration": "vitest run test/integration",
     "test:src:node": "npm run build && node scripts/run-node-tests.mjs",
     "test:all": "vitest run && npm run test:src:node",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "prepare": "npm run build",
-    "postinstall": "node scripts/patch-tree-sitter-swift.cjs",
+    "postinstall": "node scripts/build-tree-sitter-dart.cjs && node scripts/build-tree-sitter-proto.cjs",
     "prepack": "npm run build && chmod +x dist/cli/index.js",
     "check:release-paths": "node hooks/check-release-path-hygiene.mjs",
     "check:neonspark-target": "node -e \"const p=(process.env.GITNEXUS_NEONSPARK_TARGET_PATH||'').trim();if(!p){console.error('Missing env: GITNEXUS_NEONSPARK_TARGET_PATH');process.exit(1);}\"",
@@ -71,29 +67,34 @@
     "benchmark:analyze-memory:sample": "npm run build && node --test dist/benchmark/analyze-memory-sampler.test.js",
     "benchmark:unity:lazy-context": "npm run build && node dist/benchmark/unity-lazy-context-sampler.js",
     "benchmark:unity:hydration-gates": "npm run build && node dist/benchmark/unity-lazy-context-sampler.js",
-    "benchmark:u2:e2e": "npm run check:u2-e2e-target && npm run build && node dist/cli/index.js benchmark-u2-e2e --config ../benchmarks/u2-e2e/neonspark-full-u2-e2e.config.json"
+    "benchmark:u2:e2e": "npm run check:u2-e2e-target && npm run build && node dist/cli/index.js benchmark-u2-e2e --config ../benchmarks/u2-e2e/neonspark-full-u2-e2e.config.json",
+    "serve": "tsx src/cli/index.ts serve",
+    "test:unit": "vitest run test/unit",
+    "pretest:integration": "npm run build"
   },
   "dependencies": {
-    "@huggingface/transformers": "^4.1.0",
-    "@ladybugdb/core": "^0.16.1",
+    "@huggingface/transformers": "^3.0.0",
+    "@ladybugdb/core": "^0.15.1",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@scarf/scarf": "^1.4.0",
     "cli-progress": "^3.12.0",
-    "commander": "^14.0.3",
+    "commander": "^12.0.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "express-rate-limit": "^8.4.1",
-    "glob": "^13.0.6",
-    "graphology": "^0.26.0",
+    "glob": "^11.0.0",
+    "graphology": "^0.25.4",
     "graphology-indices": "^0.17.0",
     "graphology-utils": "^2.3.0",
     "ignore": "^7.0.5",
     "js-yaml": "^4.1.1",
     "jsonc-parser": "^3.3.1",
     "lru-cache": "^11.0.0",
-    "mnemonist": "^0.40.3",
+    "mnemonist": "^0.39.0",
     "onnxruntime-node": "^1.24.0",
     "pandemonium": "^2.4.0",
+    "pino": "^10.3.1",
+    "pino-pretty": "^13.1.3",
     "tree-sitter": "^0.21.1",
     "tree-sitter-c": "0.21.4",
     "tree-sitter-c-sharp": "0.23.1",
@@ -109,32 +110,25 @@
     "uuid": "^13.0.0"
   },
   "optionalDependencies": {
-    "node-addon-api": "^8.0.0",
-    "node-gyp-build": "^4.8.0",
-    "tree-sitter-dart": "file:./vendor/tree-sitter-dart",
+    "tree-sitter-gdscript": "^6.1.0",
     "tree-sitter-kotlin": "^0.3.8",
-    "tree-sitter-swift": "^0.6.0",
-    "tree-sitter-gdscript": "^6.1.0"
+    "tree-sitter-swift": "^0.6.0"
   },
   "devDependencies": {
     "@types/cli-progress": "^3.11.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.6.0",
-    "@types/uuid": "^11.0.0",
+    "@types/node": "^20.0.0",
+    "@types/uuid": "^10.0.0",
     "@vitest/coverage-v8": "^4.0.18",
     "gitnexus-shared": "file:../gitnexus-shared",
+    "graphology-types": "^0.24.8",
     "tsx": "^4.0.0",
     "typescript": "^5.4.5",
     "vitest": "^4.0.18"
   },
-  "overrides": {
-    "@huggingface/transformers": {
-      "onnxruntime-node": "$onnxruntime-node"
-    }
-  },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.0.0"
   }
 }

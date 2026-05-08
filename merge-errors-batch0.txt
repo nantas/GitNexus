@@ -1,0 +1,5 @@
+src/cli/ai-context.ts(320,5): error TS1128: Declaration or statement expected.
+src/cli/ai-context.ts(334,1): error TS1128: Declaration or statement expected.
+src/cli/analyze.ts(665,5): error TS1005: 'try' expected.
+src/cli/analyze.ts(923,1): error TS1005: '}' expected.
+src/core/tree-sitter/parser-loader.ts(128,1): error TS1128: Declaration or statement expected.
