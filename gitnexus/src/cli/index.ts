@@ -36,17 +36,8 @@ program
   .option('--extensions <list>', 'Comma-separated file extensions to include (e.g. .cs,.ts)')
   .option('--repo-alias <name>', 'Override indexed repository name with a stable alias')
   .option('--csharp-define-csproj <path>', 'Load C# DefineConstants from the specified .csproj and normalize conditional-compilation blocks before parsing')
-  .option(
-    '--sync-manifest-policy <policy>',
-    'When CLI options differ from sync manifest directives: ask|update|keep|error (default: ask)',
-  )
   .option('--skills', 'Generate repo-specific skill files from detected communities')
   .option('-v, --verbose', 'Enable verbose ingestion warnings (default: false)')
-  .option(
-    '--scope-manifest <path>',
-    'Manifest file with scope rules (supports comments and * wildcard; recommended: .gitnexus/sync-manifest.txt)',
-  )
-  .option('--scope-prefix <pathPrefix>', 'Add a scope path prefix rule (repeatable)', collectValues, [])
   .addHelpText('after', '\nEnvironment variables:\n  GITNEXUS_NO_GITIGNORE=1  Skip .gitignore parsing (still reads .gitnexusignore)')
   .action(createLazyAction(() => import('./analyze.js'), 'analyzeCommand'));
 
@@ -187,8 +178,6 @@ program
   .option('--target-path <path>', 'Path to analyze before evaluation (required unless --skip-analyze)')
   .option('--report-dir <path>', 'Output directory for benchmark-report.json and benchmark-summary.md', '.gitnexus/benchmark')
   .option('--extensions <list>', 'Analyze extension filter (comma-separated, optional)')
-  .option('--scope-manifest <path>', 'Analyze scope manifest file')
-  .option('--scope-prefix <pathPrefix>', 'Analyze scope path prefix (repeatable)', collectValues, [])
   .option('--skip-analyze', 'Skip analyze stage and evaluate current index only')
   .action(createLazyAction(() => import('./benchmark-unity.js'), 'benchmarkUnityCommand'));
 
@@ -205,8 +194,6 @@ program
     '.gitnexus/benchmark-agent-context',
   )
   .option('--extensions <list>', 'Analyze extension filter (comma-separated, optional)')
-  .option('--scope-manifest <path>', 'Analyze scope manifest file')
-  .option('--scope-prefix <pathPrefix>', 'Analyze scope path prefix (repeatable)', collectValues, [])
   .option('--skip-analyze', 'Skip analyze stage and evaluate current index only')
   .action(createLazyAction(() => import('./benchmark-agent-context.js'), 'benchmarkAgentContextCommand'));
 
@@ -223,8 +210,6 @@ program
     '.gitnexus/benchmark-agent-safe-query-context',
   )
   .option('--extensions <list>', 'Analyze extension filter (comma-separated, optional)')
-  .option('--scope-manifest <path>', 'Analyze scope manifest file')
-  .option('--scope-prefix <pathPrefix>', 'Analyze scope path prefix (repeatable)', collectValues, [])
   .option('--skip-analyze', 'Skip analyze stage and evaluate current index only')
   .action(createLazyAction(() => import('./benchmark-agent-safe-query-context.js'), 'benchmarkAgentSafeQueryContextCommand'));
 

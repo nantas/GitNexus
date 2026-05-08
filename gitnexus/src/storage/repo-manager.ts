@@ -20,6 +20,7 @@ export interface RepoMeta {
     scopeRules?: string[];
     repoAlias?: string;
     embeddings?: boolean;
+    csharpDefineCsproj?: string;
   };
   stats?: {
     files?: number;

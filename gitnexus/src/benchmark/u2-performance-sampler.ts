@@ -2,7 +2,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { runPipelineFromRepo } from '../core/ingestion/pipeline.js';
-import { resolveAnalyzeScopeRules } from '../cli/analyze-options.js';
 
 export interface NumericStats {
   mean: number;
@@ -50,8 +49,6 @@ interface SamplerArgs {
   runs: number;
   reportPath: string;
   thresholdsPath?: string;
-  scopeManifest?: string;
-  scopePrefix: string[];
 }
 
 export function computeNumericStats(values: number[]): NumericStats {
@@ -161,22 +158,13 @@ function parseArgs(argv: string[]): SamplerArgs {
   const targetPath = get('--target-path');
   const reportPath = get('--report');
   const thresholdsPath = get('--thresholds');
-  const scopeManifest = get('--scope-manifest');
   const runs = Number(get('--runs') || '3');
-
-  const scopePrefix: string[] = [];
-  for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '--scope-prefix' && i + 1 < argv.length) {
-      scopePrefix.push(argv[i + 1]);
-      i += 1;
-    }
-  }
 
   if (!targetPath) throw new Error('Missing required arg: --target-path <path>');
   if (!reportPath) throw new Error('Missing required arg: --report <path>');
   if (!Number.isFinite(runs) || runs <= 0) throw new Error('Invalid --runs, must be positive integer');
 
-  return { targetPath: path.resolve(targetPath), runs: Math.floor(runs), reportPath: path.resolve(reportPath), thresholdsPath: thresholdsPath ? path.resolve(thresholdsPath) : undefined, scopeManifest, scopePrefix };
+  return { targetPath: path.resolve(targetPath), runs: Math.floor(runs), reportPath: path.resolve(reportPath), thresholdsPath: thresholdsPath ? path.resolve(thresholdsPath) : undefined };
 }
 
 function round1(value: number): number {
@@ -185,10 +173,7 @@ function round1(value: number): number {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const scopeRules = await resolveAnalyzeScopeRules({
-    scopeManifest: args.scopeManifest,
-    scopePrefix: args.scopePrefix,
-  });
+  const scopeRules: string[] = [];
 
   const runs: RunSample[] = [];
   for (let run = 1; run <= args.runs; run += 1) {
@@ -219,8 +204,6 @@ async function main(): Promise<void> {
     targetPath: args.targetPath,
     runs: args.runs,
     scope: {
-      scopeManifest: args.scopeManifest || null,
-      scopePrefix: args.scopePrefix,
       scopeRuleCount: scopeRules.length,
     },
     samples: runs,

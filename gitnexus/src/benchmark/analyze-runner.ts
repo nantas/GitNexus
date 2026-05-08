@@ -3,8 +3,6 @@ import { spawn } from 'node:child_process';
 export interface AnalyzeRunOptions {
   extensions?: string;
   repoAlias?: string;
-  scopeManifest?: string;
-  scopePrefix?: string[];
 }
 
 export function parseAnalyzeSummary(output: string) {
@@ -33,13 +31,6 @@ export function buildAnalyzeArgs(repoPath: string, options: AnalyzeRunOptions): 
   if (options.repoAlias) {
     args.push('--repo-alias', options.repoAlias);
   }
-  if (options.scopeManifest) {
-    args.push('--scope-manifest', options.scopeManifest);
-  }
-  for (const prefix of options.scopePrefix || []) {
-    args.push('--scope-prefix', prefix);
-  }
-
   return args;
 }
 

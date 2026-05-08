@@ -17,8 +17,6 @@ export async function benchmarkAgentSafeQueryContextCommand(
     reportDir?: string;
     subagentRunsDir?: string;
     extensions?: string;
-    scopeManifest?: string;
-    scopePrefix?: string[];
     skipAnalyze?: boolean;
   },
   deps?: {
@@ -43,8 +41,6 @@ export async function benchmarkAgentSafeQueryContextCommand(
     await analyze(path.resolve(options.targetPath), {
       extensions: options.extensions,
       repoAlias: options.repoAlias,
-      scopeManifest: options.scopeManifest,
-      scopePrefix: options.scopePrefix,
     });
   }
 

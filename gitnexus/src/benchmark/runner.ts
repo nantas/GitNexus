@@ -25,8 +25,6 @@ interface RunBenchmarkOptions {
   profile: ProfileConfig;
   reportDir?: string;
   extensions: string;
-  scopeManifest?: string;
-  scopePrefix?: string[];
   skipAnalyze: boolean;
 }
 
@@ -294,8 +292,6 @@ export async function runBenchmark(ds: Dataset, options: RunBenchmarkOptions): P
     const analyze = await runAnalyze(path.resolve(options.targetPath), {
       extensions: options.extensions,
       repoAlias: options.repoAlias,
-      scopeManifest: options.scopeManifest,
-      scopePrefix: options.scopePrefix,
     });
     analyzeSummary = parseAnalyzeSummary(`${analyze.stdout}\n${analyze.stderr}`);
   }

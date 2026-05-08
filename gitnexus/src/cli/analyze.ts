@@ -19,7 +19,7 @@ import { getCurrentCommit, isGitRepo, getGitRoot } from '../storage/git.js';
 import { generateAIContextFiles } from './ai-context.js';
 import { generateSkillFiles, type GeneratedSkillInfo } from './skill-gen.js';
 import fs from 'fs/promises';
-import { resolveEffectiveAnalyzeOptions } from './analyze-options.js';
+import { resolveEffectiveAnalyzeOptions, validateStoredOptions } from './analyze-options.js';
 import {
   formatCSharpPreprocDiagnosticsSummary,
   formatFallbackSummary,
@@ -29,7 +29,6 @@ import {
 } from './analyze-summary.js';
 import { resolveChildProcessExit } from './exit-code.js';
 import { toPipelineRuntimeSummary } from './analyze-runtime-summary.js';
-import { enforceSyncManifestConsistency, resolveScopeManifestForAnalyze, type SyncManifestPolicy } from './sync-manifest.js';
 import type { PipelineResult } from '../types/pipeline.js';
 import type { UnityParitySeed } from '../core/ingestion/unity-parity-seed.js';
 
@@ -65,9 +64,6 @@ export interface AnalyzeOptions {
   extensions?: string;
   repoAlias?: string;
   csharpDefineCsproj?: string;
-  scopeManifest?: string;
-  scopePrefix?: string[];
-  syncManifestPolicy?: SyncManifestPolicy;
   reuseOptions?: boolean;
   skills?: boolean;
   verbose?: boolean;
@@ -146,33 +142,25 @@ export const analyzeCommand = async (
   let scopeRules: string[] = [];
   let repoAlias: string | undefined;
   let embeddingsEnabled = false;
+  let effectiveCsharpDefineCsproj: string | undefined;
   try {
-    const scopeManifest = await resolveScopeManifestForAnalyze(repoPath, {
-      scopeManifest: options?.scopeManifest,
-      scopePrefix: options?.scopePrefix,
-    });
-
-    await enforceSyncManifestConsistency({
-      manifestPath: scopeManifest,
-      extensions: options?.extensions,
-      repoAlias: options?.repoAlias,
-      embeddings: options?.embeddings,
-      policy: options?.syncManifestPolicy,
-      stdinIsTTY: Boolean(process.stdin.isTTY),
-    });
+    const validatedStored = await validateStoredOptions(
+      existingMeta?.analyzeOptions,
+      repoPath,
+    );
 
     const effectiveOptions = await resolveEffectiveAnalyzeOptions({
       extensions: options?.extensions,
-      scopeManifest,
-      scopePrefix: options?.scopePrefix,
       repoAlias: options?.repoAlias,
       embeddings: options?.embeddings,
       reuseOptions: options?.reuseOptions,
-    }, existingMeta?.analyzeOptions);
+      csharpDefineCsproj: options?.csharpDefineCsproj,
+    }, validatedStored);
     includeExtensions = effectiveOptions.includeExtensions;
     scopeRules = effectiveOptions.scopeRules;
     repoAlias = effectiveOptions.repoAlias;
     embeddingsEnabled = effectiveOptions.embeddings;
+    effectiveCsharpDefineCsproj = effectiveOptions.csharpDefineCsproj;
   } catch (error: any) {
     console.log(`  ${error?.message || String(error)}\n`);
     process.exitCode = 1;
@@ -184,15 +172,11 @@ export const analyzeCommand = async (
   }
 
   if (existingMeta && hasLbugIndex && !options?.force && existingMeta.lastCommit === currentCommit && !options?.skills) {
-    const hasScopePrefixInput = Array.isArray(options?.scopePrefix)
-      ? options.scopePrefix.length > 0
-      : Boolean(options?.scopePrefix);
     const hasCliOverrides =
       options?.extensions !== undefined ||
-      Boolean(options?.scopeManifest) ||
-      hasScopePrefixInput ||
       options?.repoAlias !== undefined ||
       options?.embeddings !== undefined ||
+      options?.csharpDefineCsproj !== undefined ||
       options?.reuseOptions === false;
 
     if (!hasCliOverrides) {
@@ -302,7 +286,7 @@ export const analyzeCommand = async (
   try {
     const pipelineRunOptions = buildPipelineRunOptionsForAnalyze(
       { includeExtensions, scopeRules },
-      options,
+      { csharpDefineCsproj: effectiveCsharpDefineCsproj },
     );
 
     pipelineResult = await runPipelineFromRepo(
@@ -431,6 +415,7 @@ export const analyzeCommand = async (
       scopeRules,
       repoAlias,
       embeddings: embeddingsEnabled,
+      csharpDefineCsproj: effectiveCsharpDefineCsproj,
     },
     stats: {
       files: pipelineRuntime.totalFileCount,

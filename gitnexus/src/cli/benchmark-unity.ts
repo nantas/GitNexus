@@ -18,8 +18,6 @@ export async function benchmarkUnityCommand(
     targetPath?: string;
     reportDir?: string;
     extensions?: string;
-    scopeManifest?: string;
-    scopePrefix?: string[];
     skipAnalyze?: boolean;
   },
 ) {
@@ -35,8 +33,6 @@ export async function benchmarkUnityCommand(
     profile: profileConfig,
     reportDir: options.reportDir,
     extensions: options.extensions,
-    scopeManifest: options.scopeManifest,
-    scopePrefix: options.scopePrefix,
     skipAnalyze: options.skipAnalyze ?? false,
   });
 

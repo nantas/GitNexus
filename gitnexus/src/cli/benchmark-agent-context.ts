@@ -30,8 +30,6 @@ export async function benchmarkAgentContextCommand(
     targetPath?: string;
     reportDir?: string;
     extensions?: string;
-    scopeManifest?: string;
-    scopePrefix?: string[];
     skipAnalyze?: boolean;
   },
   deps?: {
@@ -60,8 +58,6 @@ export async function benchmarkAgentContextCommand(
     const analyzeOptions = {
       extensions: options.extensions,
       repoAlias: options.repoAlias,
-      scopeManifest: options.scopeManifest,
-      scopePrefix: options.scopePrefix,
     };
 
     try {
