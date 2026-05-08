@@ -2,7 +2,7 @@
  * MCP Server (Multi-Repo)
  *
  * Model Context Protocol server that runs on stdio.
- * External AI tools (Cursor, Claude, Codex, etc.) spawn this process and
+ * External AI tools (Cursor, Claude) spawn this process and
  * communicate via stdin/stdout using the MCP protocol.
  *
  * Supports multiple indexed repositories via the global registry.

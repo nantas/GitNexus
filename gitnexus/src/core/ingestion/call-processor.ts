@@ -30,10 +30,11 @@ const defaultDispatchDecision = (
   return { primary: 'owner-scoped' };
 };
 import Parser from 'tree-sitter';
-import type { ResolutionContext } from './resolution-context.js';
-import { TIER_CONFIDENCE, type ResolutionTier } from './resolution-context.js';
-import { isLanguageAvailable, loadParser, loadLanguage, parseContent } from '../tree-sitter/parser-loader.js';
-import { LANGUAGE_QUERIES } from './tree-sitter-queries.js';
+import type { ResolutionContext } from './model/resolution-context.js';
+import { TIER_CONFIDENCE, type ResolutionTier } from './model/resolution-context.js';
+import type { TieredCandidates } from './model/resolution-context.js';
+import { isLanguageAvailable, loadParser, loadLanguage } from '../tree-sitter/parser-loader.js';
+import { getProvider } from './languages/index.js';
 import { generateId } from '../../lib/utils.js';
 import { getLanguageFromFilename, SupportedLanguages } from 'gitnexus-shared';
 import { isRegistryPrimary } from './registry-primary-flag.js';
@@ -551,18 +552,7 @@ const verifyConstructorBindings = (
 ): Map<string, string> => {
   const verified = new Map<string, string>();
 
-  for (const { scope, varName, calleeName, receiverClassName, inferredTypeName } of bindings) {
-    if (inferredTypeName) {
-      const inferred = ctx.resolve(inferredTypeName, filePath);
-      const isReceivableType = inferred?.candidates.some(def =>
-        def.type === 'Class' || def.type === 'Interface' || def.type === 'Struct' || def.type === 'Enum',
-      ) ?? false;
-      if (isReceivableType) {
-        verified.set(receiverKey(scope, varName), inferredTypeName);
-        continue;
-      }
-    }
-
+  for (const { scope, varName, calleeName, receiverClassName } of bindings) {
     const tiered = ctx.resolve(calleeName, filePath);
     const isClass = tiered?.candidates.some((def) => def.type === 'Class') ?? false;
 
@@ -703,11 +693,20 @@ function findInterfaceDispatchTargets(
 
 export const processCalls = async (
   graph: KnowledgeGraph,
-  files: { path: string; content: string; rawContent?: string }[],
+  files: { path: string; content: string }[],
   astCache: ASTCache,
   ctx: ResolutionContext,
   onProgress?: (current: number, total: number) => void,
-  onRawFallbackParse?: (count: number) => void,
+  exportedTypeMap?: ExportedTypeMap,
+  /** Phase 14: pre-resolved cross-file bindings to seed into buildTypeEnv. Keyed by filePath → Map<localName, typeName>. */
+  importedBindingsMap?: ReadonlyMap<string, ReadonlyMap<string, string>>,
+  /** Phase 14 E3: cross-file return types for imported callables. Keyed by filePath → Map<calleeName, returnType>.
+   *  Consulted ONLY when SymbolTable has no unambiguous match (local-first principle). */
+  importedReturnTypesMap?: ReadonlyMap<string, ReadonlyMap<string, string>>,
+  /** Phase 14 E3: cross-file RAW return types for for-loop element extraction. Keyed by filePath → Map<calleeName, rawReturnType>. */
+  importedRawReturnTypesMap?: ReadonlyMap<string, ReadonlyMap<string, string>>,
+  heritageMap?: HeritageMap,
+  bindingAccumulator?: BindingAccumulator,
 ): Promise<ExtractedHeritage[]> => {
   const parser = await loadParser();
   const collectedHeritage: ExtractedHeritage[] = [];
@@ -771,29 +770,11 @@ export const processCalls = async (
     let tree = astCache.get(file.path);
     if (!tree) {
       try {
-        tree = parseContent(file.content);
-      } catch {
-        if (file.rawContent && file.rawContent !== file.content) {
-          try {
-            tree = parseContent(file.rawContent);
-            onRawFallbackParse?.(1);
-          } catch {
-            continue;
-          }
-        } else {
-          continue;
-        }
-      }
-      if (file.rawContent && file.rawContent !== file.content && tree.rootNode?.hasError) {
-        try {
-          const rawTree = parseContent(file.rawContent);
-          if (!rawTree.rootNode?.hasError) {
-            tree = rawTree;
-            onRawFallbackParse?.(1);
-          }
-        } catch {
-          // Keep normalized parse result when raw fallback fails
-        }
+        tree = parser.parse(file.content, undefined, {
+          bufferSize: getTreeSitterBufferSize(file.content),
+        });
+      } catch (parseError) {
+        continue;
       }
       astCache.set(file.path, tree);
     }

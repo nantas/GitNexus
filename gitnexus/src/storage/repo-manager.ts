@@ -52,17 +52,18 @@ export const canonicalizePath = (p: string): string => {
 };
 
 export interface RepoMeta {
-  repoPath: string;
   repoId?: string;
+  repoPath: string;
   lastCommit: string;
   indexedAt: string;
-  analyzeOptions?: {
-    includeExtensions?: string[];
-    scopeRules?: string[];
-    repoAlias?: string;
-    embeddings?: boolean;
-    csharpDefineCsproj?: string;
-  };
+  /**
+   * Canonical `origin` remote URL captured at index time. Used to
+   * fingerprint the same logical repo across multiple on-disk clones
+   * (worktrees, agent workspaces, "clean clone for indexing"). When
+   * absent (no remote configured, git unavailable, etc.) the repo is
+   * treated as path-only and sibling-clone detection is skipped.
+   */
+  remoteUrl?: string;
   stats?: {
     files?: number;
     nodes?: number;
@@ -90,25 +91,9 @@ export interface RegistryEntry {
   storagePath: string;
   indexedAt: string;
   lastCommit: string;
-  sourceName?: string;
-  alias?: string;
+  /** See {@link RepoMeta.remoteUrl}. Mirrored from meta at register time. */
+  remoteUrl?: string;
   stats?: RepoMeta['stats'];
-}
-
-export interface RegisterRepoOptions {
-  repoAlias?: string;
-}
-
-const REPO_ALIAS_REGEX = /^[a-zA-Z0-9._-]{3,64}$/;
-
-function normalizeRepoAlias(repoAlias?: string): string | undefined {
-  if (!repoAlias) return undefined;
-  const trimmed = repoAlias.trim();
-  if (!trimmed) return undefined;
-  if (!REPO_ALIAS_REGEX.test(trimmed)) {
-    throw new Error('Invalid repo alias. Use ^[a-zA-Z0-9._-]{3,64}$');
-  }
-  return trimmed;
 }
 
 const GITNEXUS_DIR = '.gitnexus';
@@ -142,18 +127,6 @@ export const getStoragePaths = (repoPath: string) => {
 export const hasKuzuIndex = async (storagePath: string): Promise<boolean> => {
   try {
     await fs.stat(path.join(storagePath, 'kuzu'));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/**
- * Check whether a LadybugDB index exists in the given storage path.
- */
-export const hasLbugIndex = async (storagePath: string): Promise<boolean> => {
-  try {
-    await fs.stat(path.join(storagePath, 'lbug'));
     return true;
   } catch {
     return false;
@@ -314,10 +287,7 @@ const ensureGitInfoExclude = async (repoPath: string): Promise<void> => {
  * Get the path to the global GitNexus directory
  */
 export const getGlobalDir = (): string => {
-  if (process.env.GITNEXUS_HOME && process.env.GITNEXUS_HOME.trim()) {
-    return path.resolve(process.env.GITNEXUS_HOME);
-  }
-  return path.join(os.homedir(), '.gitnexus');
+  return process.env.GITNEXUS_HOME || path.join(os.homedir(), '.gitnexus');
 };
 
 /**
@@ -462,12 +432,18 @@ const hasCustomAlias = (entry: RegistryEntry, inferredName: string | null): bool
 export const registerRepo = async (
   repoPath: string,
   meta: RepoMeta,
-  options?: RegisterRepoOptions,
-): Promise<RegistryEntry> => {
+  opts?: RegisterRepoOptions,
+): Promise<string> => {
+  // Preserve the caller's chosen path form in the registry — don't
+  // canonicalise at write time. This matters for two reasons:
+  //   1. `list` and error messages show the path the user actually
+  //      knows (e.g. the 8.3 short form they typed), not a runtime-
+  //      resolved long form they've never seen.
+  //   2. Keeps pre-existing #829 test assertions that compare
+  //      `err.existingPath` against `path.resolve(tmpPath)` stable.
+  // Canonicalisation is applied at COMPARE points only (see below),
+  // which is where the cross-platform divergence actually matters.
   const resolved = path.resolve(repoPath);
-  const sourceName = path.basename(resolved);
-  const alias = normalizeRepoAlias(options?.repoAlias);
-  const name = alias || sourceName;
   const { storagePath } = getStoragePaths(resolved);
 
   // Canonical form used strictly for comparison — `realpathSync.native`
@@ -476,24 +452,16 @@ export const registerRepo = async (
   const canonicalInput = canonicalizePath(repoPath);
 
   const entries = await readRegistry();
-  if (alias) {
-    const aliasConflict = entries.find(
-      (e) => e.name === alias && (
-        process.platform === 'win32'
-          ? path.resolve(e.path).toLowerCase() !== resolved.toLowerCase()
-          : path.resolve(e.path) !== resolved
-      ),
-    );
-    if (aliasConflict) {
-      throw new Error(`Repo alias "${alias}" is already registered for ${aliasConflict.path}`);
-    }
-  }
-  const existing = entries.findIndex((e) => {
-    const a = path.resolve(e.path);
-    const b = resolved;
-    return process.platform === 'win32'
-      ? a.toLowerCase() === b.toLowerCase()
-      : a === b;
+  const existingIdx = entries.findIndex((e) => {
+    // Canonicalise the STORED entry too so pre-canonicalisation
+    // registries (written by older versions, or paths passed in a
+    // different form) still match correctly. `canonicalizePath` falls
+    // back to `path.resolve` when the path no longer exists on disk,
+    // so stale entries that have been rm'd externally still resolve
+    // to a stable key instead of throwing.
+    const a = canonicalizePath(e.path);
+    const b = canonicalInput;
+    return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
   });
   const existing = existingIdx >= 0 ? entries[existingIdx] : null;
 
@@ -552,8 +520,7 @@ export const registerRepo = async (
     storagePath,
     indexedAt: meta.indexedAt,
     lastCommit: meta.lastCommit,
-    sourceName,
-    alias,
+    remoteUrl: meta.remoteUrl,
     stats: meta.stats,
   };
 
@@ -564,7 +531,7 @@ export const registerRepo = async (
   }
 
   await writeRegistry(entries);
-  return entry;
+  return name;
 };
 
 /**
@@ -863,7 +830,6 @@ export const listRegisteredRepos = async (opts?: {
   for (const entry of entries) {
     try {
       await fs.access(path.join(entry.storagePath, 'meta.json'));
-      await fs.access(path.join(entry.storagePath, 'lbug'));
       valid.push(entry);
     } catch {
       // Index no longer exists — skip
@@ -882,8 +848,12 @@ export const listRegisteredRepos = async (opts?: {
 
 export interface CLIConfig {
   apiKey?: string;
+  provider?: string;
   model?: string;
   baseUrl?: string;
+  cursorModel?: string;
+  apiVersion?: string;
+  isReasoningModel?: boolean;
   setupScope?: 'global' | 'project';
   cliPackageSpec?: string;
   cliVersion?: string;

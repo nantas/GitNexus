@@ -3,10 +3,11 @@
  *
  * Shared types (NodeLabel, GraphNode, etc.) should be imported
  * directly from 'gitnexus-shared' at call sites.
- *
- * This file only defines the CLI's KnowledgeGraph with mutation methods.
  */
 import type { GraphNode, GraphRelationship, RelationshipType } from 'gitnexus-shared';
+
+// Re-export for consumers that haven't migrated to gitnexus-shared yet
+export type { GraphNode, GraphRelationship, RelationshipType };
 
 // CLI-specific: full KnowledgeGraph with mutation methods for incremental updates
 export interface KnowledgeGraph {

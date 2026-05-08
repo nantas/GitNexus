@@ -1,8 +1,8 @@
 import type { GraphNode, GraphRelationship, NodeLabel } from 'gitnexus-shared';
 import { KnowledgeGraph } from '../graph/types.js';
 import Parser from 'tree-sitter';
-import { loadParser, loadLanguage, isLanguageAvailable, parseContent } from '../tree-sitter/parser-loader.js';
-import { LANGUAGE_QUERIES } from './tree-sitter-queries.js';
+import { loadParser, loadLanguage, isLanguageAvailable } from '../tree-sitter/parser-loader.js';
+import { getProvider } from './languages/index.js';
 import { generateId } from '../../lib/utils.js';
 import type { SymbolTableReader, SymbolTableWriter, ExtractedHeritage } from './model/index.js';
 // SymbolTableReader is used for the FieldExtractorContext stub; the
@@ -79,40 +79,23 @@ export interface WorkerExtractedData {
   parsedFiles: ParsedFile[];
 }
 
-export interface ParsingFileInput {
-  path: string;
-  content: string;
-  rawContent?: string;
-}
-
-// isNodeExported imported from ./export-detection.js (shared module)
-// Re-export for backward compatibility with any external consumers
-export { isNodeExported } from './export-detection.js';
-
 // ============================================================================
 // Worker-based parallel parsing
 // ============================================================================
 
 const processParsingWithWorkers = async (
   graph: KnowledgeGraph,
-  files: ParsingFileInput[],
-  symbolTable: SymbolTable,
+  files: { path: string; content: string }[],
+  symbolTable: SymbolTableWriter,
   astCache: ASTCache,
   workerPool: WorkerPool,
   onFileProgress?: FileProgressCallback,
-  onRawFallbackParse?: (count: number) => void,
 ): Promise<WorkerExtractedData> => {
   // Filter to parseable files only
   const parseableFiles: ParseWorkerInput[] = [];
   for (const file of files) {
     const lang = getLanguageFromFilename(file.path);
-    if (lang) {
-      parseableFiles.push({
-        path: file.path,
-        content: file.content,
-        ...(file.rawContent ? { rawContent: file.rawContent } : {}),
-      });
-    }
+    if (lang) parseableFiles.push({ path: file.path, content: file.content });
   }
 
   if (parseableFiles.length === 0)
@@ -152,7 +135,8 @@ const processParsingWithWorkers = async (
   const allToolDefs: ExtractedToolDef[] = [];
   const allORMQueries: ExtractedORMQuery[] = [];
   const allConstructorBindings: FileConstructorBindings[] = [];
-  let rawFallbackCount = 0;
+  const fileScopeBindingsByFile: FileScopeBindings[] = [];
+  const allParsedFiles: ParsedFile[] = [];
   for (const result of chunkResults) {
     for (const node of result.nodes) {
       graph.addNode({
@@ -178,15 +162,24 @@ const processParsingWithWorkers = async (
       });
     }
 
-    allImports.push(...result.imports);
-    allCalls.push(...result.calls);
-    allHeritage.push(...result.heritage);
-    allRoutes.push(...result.routes);
-    allConstructorBindings.push(...result.constructorBindings);
-    rawFallbackCount += result.csharpPreprocFallbackFiles;
+    for (const item of result.imports) allImports.push(item);
+    for (const item of result.calls) allCalls.push(item);
+    for (const item of result.assignments) allAssignments.push(item);
+    for (const item of result.heritage) allHeritage.push(item);
+    for (const item of result.routes) allRoutes.push(item);
+    for (const item of result.fetchCalls) allFetchCalls.push(item);
+    for (const item of result.decoratorRoutes) allDecoratorRoutes.push(item);
+    for (const item of result.toolDefs) allToolDefs.push(item);
+    if (result.ormQueries) for (const item of result.ormQueries) allORMQueries.push(item);
+    for (const item of result.constructorBindings) allConstructorBindings.push(item);
+    if (result.fileScopeBindings)
+      for (const item of result.fileScopeBindings) fileScopeBindingsByFile.push(item);
+    // RFC #909 Ring 2: aggregate per-file scope artifacts. Tolerant of
+    // workers that don't emit the field yet (older worker builds or
+    // partial rollouts), since the additive contract means undefined =
+    // "this worker produced no ParsedFiles for this chunk".
+    if (result.parsedFiles) for (const item of result.parsedFiles) allParsedFiles.push(item);
   }
-
-  if (rawFallbackCount > 0) onRawFallbackParse?.(rawFallbackCount);
 
   // Merge and log skipped languages from workers
   const skippedLanguages = new Map<string, number>();
@@ -328,11 +321,11 @@ function seqGetFieldInfo(
 
 const processParsingSequential = async (
   graph: KnowledgeGraph,
-  files: ParsingFileInput[],
-  symbolTable: SymbolTable,
+  files: { path: string; content: string }[],
+  symbolTable: SymbolTableWriter,
   astCache: ASTCache,
+  scopeTreeCache: ASTCache | undefined,
   onFileProgress?: FileProgressCallback,
-  onRawFallbackParse?: (count: number) => void,
 ) => {
   const parser = await loadParser();
   const total = files.length;
@@ -363,10 +356,20 @@ const processParsingSequential = async (
       continue;
     }
 
-    // Skip files larger than the max tree-sitter buffer (32 MB).
-    // Use UTF-8 bytes, not JS string length, because tree-sitter buffer sizing
-    // is byte-oriented and multi-byte source can otherwise slip past the cap.
-    if (Buffer.byteLength(file.content, 'utf8') > TREE_SITTER_MAX_BUFFER) continue;
+    // Skip files larger than the max tree-sitter buffer (32 MB)
+    if (getTreeSitterContentByteLength(file.content) > TREE_SITTER_MAX_BUFFER) continue;
+
+    // Vue SFC preprocessing: extract <script> block content
+    let parseContent = file.content;
+    let lineOffset = 0;
+    let isVueSetup = false;
+    if (language === SupportedLanguages.Vue) {
+      const extracted = extractVueScript(file.content);
+      if (!extracted) continue; // skip .vue files with no script block
+      parseContent = extracted.scriptContent;
+      lineOffset = extracted.lineOffset;
+      isVueSetup = extracted.isSetup;
+    }
 
     try {
       await loadLanguage(language, file.path);
@@ -376,32 +379,12 @@ const processParsingSequential = async (
 
     let tree: Parser.Tree;
     try {
-      tree = parseContent(file.content);
-    } catch {
-      if (file.rawContent && file.rawContent !== file.content) {
-        try {
-          tree = parseContent(file.rawContent);
-          onRawFallbackParse?.(1);
-        } catch {
-          console.warn(`Skipping unparseable file: ${file.path}`);
-          continue;
-        }
-      } else {
-        console.warn(`Skipping unparseable file: ${file.path}`);
-        continue;
-      }
-    }
-
-    if (file.rawContent && file.rawContent !== file.content && tree.rootNode?.hasError) {
-      try {
-        const rawTree = parseContent(file.rawContent);
-        if (!rawTree.rootNode?.hasError) {
-          tree = rawTree;
-          onRawFallbackParse?.(1);
-        }
-      } catch {
-        // Keep normalized parse result when raw fallback fails
-      }
+      tree = parser.parse(parseContent, undefined, {
+        bufferSize: getTreeSitterBufferSize(parseContent),
+      });
+    } catch (parseError) {
+      logger.warn(`Skipping unparseable file: ${file.path}`);
+      continue;
     }
 
     astCache.set(file.path, tree);
@@ -610,8 +593,12 @@ const processParsingSequential = async (
         properties: {
           name: nodeName,
           filePath: file.path,
-          startLine: nameNode.startPosition.row + 1,
-          endLine: nameNode.endPosition.row + 1,
+          startLine: definitionNodeForRange
+            ? definitionNodeForRange.startPosition.row + lineOffset
+            : startLine,
+          endLine: definitionNodeForRange
+            ? definitionNodeForRange.endPosition.row + lineOffset
+            : startLine,
           language: language,
           isExported:
             language === SupportedLanguages.Vue && isVueSetup
@@ -728,8 +715,8 @@ const processParsingSequential = async (
 
 export const processParsing = async (
   graph: KnowledgeGraph,
-  files: ParsingFileInput[],
-  symbolTable: SymbolTable,
+  files: { path: string; content: string }[],
+  symbolTable: SymbolTableWriter,
   astCache: ASTCache,
   /**
    * Persistent tree cache (separate from `astCache`, which the caller
@@ -741,7 +728,6 @@ export const processParsing = async (
   scopeTreeCache: ASTCache | undefined,
   onFileProgress?: FileProgressCallback,
   workerPool?: WorkerPool,
-  onRawFallbackParse?: (count: number) => void,
 ): Promise<WorkerExtractedData | null> => {
   let lastProgress = 0;
   const reportProgress: FileProgressCallback | undefined = onFileProgress
@@ -762,7 +748,14 @@ export const processParsing = async (
       );
     }
     try {
-      return await processParsingWithWorkers(graph, files, symbolTable, astCache, workerPool, onFileProgress, onRawFallbackParse);
+      return await processParsingWithWorkers(
+        graph,
+        files,
+        symbolTable,
+        astCache,
+        workerPool,
+        reportProgress,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn({ message }, 'Worker pool parsing stopped; continuing with sequential parser:');
@@ -775,6 +768,13 @@ export const processParsing = async (
   }
 
   // Fallback: sequential parsing (no pre-extracted data)
-  await processParsingSequential(graph, files, symbolTable, astCache, onFileProgress, onRawFallbackParse);
+  await processParsingSequential(
+    graph,
+    files,
+    symbolTable,
+    astCache,
+    scopeTreeCache,
+    reportProgress,
+  );
   return null;
 };

@@ -70,7 +70,7 @@ export const isBinaryContent = (content: string): boolean => {
  * symbol defined in it. Sized generously so most files stay cached during
  * the single-pass node iteration.
  */
-export class FileContentCache {
+class FileContentCache {
   private cache = new Map<string, string>();
   private accessOrder: string[] = [];
   private maxSize: number;
@@ -79,14 +79,6 @@ export class FileContentCache {
   constructor(repoPath: string, maxSize: number = 3000) {
     this.repoPath = repoPath;
     this.maxSize = maxSize;
-  }
-
-  setForTest(relativePath: string, content: string): void {
-    this.set(relativePath, content);
-  }
-
-  hasForTest(relativePath: string): boolean {
-    return this.cache.has(relativePath);
   }
 
   async get(relativePath: string): Promise<string> {
@@ -122,23 +114,7 @@ export class FileContentCache {
   }
 }
 
-export const toCodeElementCsvRow = async (node: GraphNode): Promise<string> => {
-  return [
-    escapeCSVField(node.id),
-    escapeCSVField(node.properties.name || ''),
-    escapeCSVField(node.properties.filePath || ''),
-    escapeCSVNumber(node.properties.startLine, -1),
-    escapeCSVNumber(node.properties.endLine, -1),
-    node.properties.isExported ? 'true' : 'false',
-    escapeCSVField(''),
-    escapeCSVField((node.properties as any).description || ''),
-  ].join(',');
-};
-
-const extractContent = async (
-  node: GraphNode,
-  contentCache: FileContentCache
-): Promise<string> => {
+const extractContent = async (node: GraphNode, contentCache: FileContentCache): Promise<string> => {
   const filePath = node.properties.filePath;
   const content = await contentCache.get(filePath);
   if (!content) return '';
@@ -271,11 +247,35 @@ export const streamAllCSVsToDisk = async (
   const methodHeader =
     'id,name,filePath,startLine,endLine,isExported,content,description,parameterCount,returnType';
   const methodWriter = new BufferedCSVWriter(path.join(csvDir, 'method.csv'), methodHeader);
-  const codeElemWriter = new BufferedCSVWriter(path.join(csvDir, 'codeelement.csv'), codeElementHeader);
-  const communityWriter = new BufferedCSVWriter(path.join(csvDir, 'community.csv'), 'id,label,heuristicLabel,keywords,description,enrichedBy,cohesion,symbolCount');
+  const codeElemWriter = new BufferedCSVWriter(
+    path.join(csvDir, 'codeelement.csv'),
+    codeElementHeader,
+  );
+  const communityWriter = new BufferedCSVWriter(
+    path.join(csvDir, 'community.csv'),
+    'id,label,heuristicLabel,keywords,description,enrichedBy,cohesion,symbolCount',
+  );
   const processWriter = new BufferedCSVWriter(
     path.join(csvDir, 'process.csv'),
-    'id,label,heuristicLabel,processType,processSubtype,runtimeChainConfidence,sourceReasons,sourceConfidences,stepCount,communities,entryPointId,terminalId',
+    'id,label,heuristicLabel,processType,stepCount,communities,entryPointId,terminalId',
+  );
+
+  // Section nodes have an extra 'level' column
+  const sectionWriter = new BufferedCSVWriter(
+    path.join(csvDir, 'section.csv'),
+    'id,name,filePath,startLine,endLine,level,content,description',
+  );
+
+  // Route nodes for API endpoint mapping
+  const routeWriter = new BufferedCSVWriter(
+    path.join(csvDir, 'route.csv'),
+    'id,name,filePath,responseKeys,errorKeys,middleware',
+  );
+
+  // Tool nodes for MCP tool definitions
+  const toolWriter = new BufferedCSVWriter(
+    path.join(csvDir, 'tool.csv'),
+    'id,name,filePath,description',
   );
 
   // Multi-language node types share the same CSV shape (no isExported column)
@@ -368,26 +368,18 @@ export const streamAllCSVsToDisk = async (
       case 'Process': {
         const communities = node.properties.communities || [];
         const communitiesStr = `[${communities.map((c: string) => `'${c.replace(/'/g, "''")}'`).join(',')}]`;
-        const sourceReasons = (node.properties as any).sourceReasons || [];
-        const sourceReasonsStr = `[${sourceReasons.map((reason: string) => `'${String(reason).replace(/'/g, "''")}'`).join(',')}]`;
-        const sourceConfidences = (node.properties as any).sourceConfidences || [];
-        const sourceConfidencesStr = `[${sourceConfidences
-          .map((confidence: number) => Number.isFinite(confidence) ? String(confidence) : '0')
-          .join(',')}]`;
-        await processWriter.addRow([
-          escapeCSVField(node.id),
-          escapeCSVField(node.properties.name || ''),
-          escapeCSVField((node.properties as any).heuristicLabel || ''),
-          escapeCSVField((node.properties as any).processType || ''),
-          escapeCSVField((node.properties as any).processSubtype || ''),
-          escapeCSVField((node.properties as any).runtimeChainConfidence || ''),
-          escapeCSVField(sourceReasonsStr),
-          escapeCSVField(sourceConfidencesStr),
-          escapeCSVNumber((node.properties as any).stepCount, 0),
-          escapeCSVField(communitiesStr),
-          escapeCSVField((node.properties as any).entryPointId || ''),
-          escapeCSVField((node.properties as any).terminalId || ''),
-        ].join(','));
+        await processWriter.addRow(
+          [
+            escapeCSVField(node.id),
+            escapeCSVField(node.properties.name || ''),
+            escapeCSVField(node.properties.heuristicLabel || ''),
+            escapeCSVField(node.properties.processType || ''),
+            escapeCSVNumber(node.properties.stepCount, 0),
+            escapeCSVField(communitiesStr),
+            escapeCSVField(node.properties.entryPointId || ''),
+            escapeCSVField(node.properties.terminalId || ''),
+          ].join(','),
+        );
         break;
       }
       case 'Method': {

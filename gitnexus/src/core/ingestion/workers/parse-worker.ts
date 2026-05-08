@@ -26,8 +26,25 @@ import type { ExtractedHeritage } from '../model/heritage-map.js';
 /** Language grammar type accepted by Parser.setLanguage(). */
 type TreeSitterLanguage = Parameters<typeof Parser.prototype.setLanguage>[0];
 
+// tree-sitter-swift is an optionalDependency — may not be installed
 const _require = createRequire(import.meta.url);
+let Swift: TreeSitterLanguage | null = null;
+try {
+  Swift = _require('tree-sitter-swift');
+} catch {}
 
+// tree-sitter-dart is an optionalDependency — may not be installed
+let Dart: TreeSitterLanguage | null = null;
+try {
+  Dart = _require('tree-sitter-dart');
+} catch {}
+
+// tree-sitter-kotlin is an optionalDependency — may not be installed
+let Kotlin: TreeSitterLanguage | null = null;
+try {
+  Kotlin = _require('tree-sitter-kotlin');
+} catch {}
+import { getLanguageFromFilename } from 'gitnexus-shared';
 import {
   FUNCTION_NODE_TYPES,
   getDefinitionNodeFromCaptures,
@@ -270,14 +287,12 @@ export interface ParseWorkerResult {
    */
   parsedFiles: ParsedFile[];
   skippedLanguages: Record<string, number>;
-  csharpPreprocFallbackFiles: number;
   fileCount: number;
 }
 
 export interface ParseWorkerInput {
   path: string;
   content: string;
-  rawContent?: string;
 }
 
 type WorkerIncomingMessage =
@@ -291,7 +306,7 @@ type WorkerIncomingMessage =
 
 const parser = new Parser();
 
-const requiredLanguageMap: Record<string, any> = {
+const languageMap: Record<string, TreeSitterLanguage> = {
   [SupportedLanguages.JavaScript]: JavaScript,
   [SupportedLanguages.TypeScript]: TypeScript.typescript,
   [`${SupportedLanguages.TypeScript}:tsx`]: TypeScript.tsx,
@@ -302,63 +317,12 @@ const requiredLanguageMap: Record<string, any> = {
   [SupportedLanguages.CSharp]: CSharp,
   [SupportedLanguages.Go]: Go,
   [SupportedLanguages.Rust]: Rust,
+  ...(Kotlin ? { [SupportedLanguages.Kotlin]: Kotlin } : {}),
   [SupportedLanguages.PHP]: PHP.php_only,
   [SupportedLanguages.Ruby]: Ruby,
-};
-
-const optionalLanguagePackages: Partial<Record<SupportedLanguages, string>> = {
-  [SupportedLanguages.GDScript]: 'tree-sitter-gdscript',
-  [SupportedLanguages.Swift]: 'tree-sitter-swift',
-  [SupportedLanguages.Kotlin]: 'tree-sitter-kotlin',
-};
-
-const optionalLanguageCache = new Map<SupportedLanguages, any | null>();
-const optionalAvailabilityCache = new Map<SupportedLanguages, boolean>();
-
-const isOptionalLanguageInstalled = (language: SupportedLanguages): boolean => {
-  if (optionalAvailabilityCache.has(language)) {
-    return optionalAvailabilityCache.get(language)!;
-  }
-  const packageName = optionalLanguagePackages[language];
-  if (!packageName) {
-    optionalAvailabilityCache.set(language, false);
-    return false;
-  }
-  try {
-    _require.resolve(packageName);
-    optionalAvailabilityCache.set(language, true);
-    return true;
-  } catch {
-    optionalAvailabilityCache.set(language, false);
-    return false;
-  }
-};
-
-const loadOptionalLanguage = (language: SupportedLanguages): any | null => {
-  if (optionalLanguageCache.has(language)) {
-    return optionalLanguageCache.get(language);
-  }
-  const packageName = optionalLanguagePackages[language];
-  if (!packageName) {
-    optionalLanguageCache.set(language, null);
-    return null;
-  }
-  try {
-    const grammar = _require(packageName);
-    optionalLanguageCache.set(language, grammar);
-    return grammar;
-  } catch {
-    optionalLanguageCache.set(language, null);
-    optionalAvailabilityCache.set(language, false);
-    return null;
-  }
-};
-
-const resolveLanguage = (key: string, language: SupportedLanguages): any | null => {
-  if (key in requiredLanguageMap) {
-    return requiredLanguageMap[key];
-  }
-  return loadOptionalLanguage(language);
+  [SupportedLanguages.Vue]: TypeScript.typescript,
+  ...(Dart ? { [SupportedLanguages.Dart]: Dart } : {}),
+  ...(Swift ? { [SupportedLanguages.Swift]: Swift } : {}),
 };
 
 /**
@@ -368,17 +332,19 @@ const resolveLanguage = (key: string, language: SupportedLanguages): any | null 
  * under the same SupportedLanguages.TypeScript key).
  */
 const isLanguageAvailable = (language: SupportedLanguages, filePath: string): boolean => {
-  const key = language === SupportedLanguages.TypeScript && filePath.endsWith('.tsx')
-    ? `${language}:tsx`
-    : language;
-  return key in requiredLanguageMap || isOptionalLanguageInstalled(language);
+  const key =
+    language === SupportedLanguages.TypeScript && filePath.endsWith('.tsx')
+      ? `${language}:tsx`
+      : language;
+  return key in languageMap && languageMap[key] != null;
 };
 
 const setLanguage = (language: SupportedLanguages, filePath: string): void => {
-  const key = language === SupportedLanguages.TypeScript && filePath.endsWith('.tsx')
-    ? `${language}:tsx`
-    : language;
-  const lang = resolveLanguage(key, language);
+  const key =
+    language === SupportedLanguages.TypeScript && filePath.endsWith('.tsx')
+      ? `${language}:tsx`
+      : language;
+  const lang = languageMap[key];
   if (!lang) throw new Error(`Unsupported language: ${language}`);
   parser.setLanguage(lang);
 };
@@ -780,7 +746,6 @@ const processBatch = (
     fileScopeBindings: [],
     parsedFiles: [],
     skippedLanguages: {},
-    csharpPreprocFallbackFiles: 0,
     fileCount: 0,
   };
 
@@ -1427,50 +1392,36 @@ const processFileGroup = (
   }
 
   for (const file of files) {
-    // Skip files larger than the max tree-sitter buffer (32 MB).
-    // tree-sitter buffer sizing is byte-oriented; JS string length undercounts
-    // UTF-8 multi-byte source and can route oversized input into native code.
-    if (Buffer.byteLength(file.content, 'utf8') > TREE_SITTER_MAX_BUFFER) continue;
+    // Skip files larger than the max tree-sitter buffer (32 MB)
+    if (getTreeSitterContentByteLength(file.content) > TREE_SITTER_MAX_BUFFER) continue;
 
-    let tree;
-    let usedRawContentFallback = false;
-    try {
-      tree = parser.parse(file.content, null, {
-        bufferSize: getTreeSitterBufferSize(Buffer.byteLength(file.content, 'utf8')),
-      });
-    } catch (err) {
-      if (file.rawContent && file.rawContent !== file.content) {
-        try {
-          tree = parser.parse(file.rawContent, null, {
-            bufferSize: getTreeSitterBufferSize(Buffer.byteLength(file.rawContent, 'utf8')),
-          });
-          usedRawContentFallback = true;
-        } catch {
-          console.warn(`Failed to parse file ${file.path}: ${err instanceof Error ? err.message : String(err)}`);
-          continue;
-        }
-      } else {
-        console.warn(`Failed to parse file ${file.path}: ${err instanceof Error ? err.message : String(err)}`);
-        continue;
-      }
+    // Vue SFC preprocessing: extract <script> block content
+    let parseContent = file.content;
+    let lineOffset = 0;
+    let isVueSetup = false;
+    if (language === SupportedLanguages.Vue) {
+      const extracted = extractVueScript(file.content);
+      if (!extracted) continue; // skip .vue files with no script block
+      parseContent = extracted.scriptContent;
+      lineOffset = extracted.lineOffset;
+      isVueSetup = extracted.isSetup;
     }
 
-    if (file.rawContent && file.rawContent !== file.content && tree.rootNode?.hasError) {
-      try {
-        const rawTree = parser.parse(file.rawContent, null, {
-          bufferSize: getTreeSitterBufferSize(Buffer.byteLength(file.rawContent, 'utf8')),
-        });
-        if (!rawTree.rootNode?.hasError) {
-          tree = rawTree;
-          usedRawContentFallback = true;
-        }
-      } catch {
-        // Keep normalized parse result when raw fallback parsing fails
-      }
+    clearCaches(); // Reset memoization before each new file
+
+    let tree;
+    try {
+      tree = parser.parse(parseContent, undefined, {
+        bufferSize: getTreeSitterBufferSize(parseContent),
+      });
+    } catch (err) {
+      logger.warn(
+        `Failed to parse file ${file.path}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      continue;
     }
 
     result.fileCount++;
-    if (usedRawContentFallback) result.csharpPreprocFallbackFiles += 1;
     onFileProcessed?.();
 
     let matches;
@@ -2269,8 +2220,8 @@ const processFileGroup = (
         properties: {
           name: nodeName,
           filePath: file.path,
-          startLine: nameNode.startPosition.row + 1,
-          endLine: nameNode.endPosition.row + 1,
+          startLine: definitionNode ? definitionNode.startPosition.row + lineOffset : startLine,
+          endLine: definitionNode ? definitionNode.endPosition.row + lineOffset : startLine,
           language: language,
           isExported:
             language === SupportedLanguages.Vue && isVueSetup
@@ -2378,8 +2329,23 @@ const processFileGroup = (
 
 /** Accumulated result across sub-batches */
 let accumulated: ParseWorkerResult = {
-  nodes: [], relationships: [], symbols: [],
-  imports: [], calls: [], heritage: [], routes: [], constructorBindings: [], skippedLanguages: {}, csharpPreprocFallbackFiles: 0, fileCount: 0,
+  nodes: [],
+  relationships: [],
+  symbols: [],
+  imports: [],
+  calls: [],
+  assignments: [],
+  heritage: [],
+  routes: [],
+  fetchCalls: [],
+  decoratorRoutes: [],
+  toolDefs: [],
+  ormQueries: [],
+  constructorBindings: [],
+  fileScopeBindings: [],
+  parsedFiles: [],
+  skippedLanguages: {},
+  fileCount: 0,
 };
 let cumulativeProcessed = 0;
 
@@ -2409,7 +2375,6 @@ const mergeResult = (target: ParseWorkerResult, src: ParseWorkerResult) => {
   for (const [lang, count] of Object.entries(src.skippedLanguages)) {
     target.skippedLanguages[lang] = (target.skippedLanguages[lang] || 0) + count;
   }
-  target.csharpPreprocFallbackFiles += src.csharpPreprocFallbackFiles;
   target.fileCount += src.fileCount;
 };
 
@@ -2443,7 +2408,25 @@ parentPort!.on('message', (msg: WorkerIncomingMessage) => {
     if (msg.type === 'flush') {
       parentPort!.postMessage({ type: 'result', data: accumulated });
       // Reset for potential reuse
-      accumulated = { nodes: [], relationships: [], symbols: [], imports: [], calls: [], heritage: [], routes: [], constructorBindings: [], skippedLanguages: {}, csharpPreprocFallbackFiles: 0, fileCount: 0 };
+      accumulated = {
+        nodes: [],
+        relationships: [],
+        symbols: [],
+        imports: [],
+        calls: [],
+        assignments: [],
+        heritage: [],
+        routes: [],
+        fetchCalls: [],
+        decoratorRoutes: [],
+        toolDefs: [],
+        ormQueries: [],
+        constructorBindings: [],
+        fileScopeBindings: [],
+        parsedFiles: [],
+        skippedLanguages: {},
+        fileCount: 0,
+      };
       cumulativeProcessed = 0;
       return;
     }

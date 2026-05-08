@@ -4,7 +4,7 @@
  * Shows the indexing status of the current repository.
  */
 
-import { findRepo, getStoragePaths, hasKuzuIndex, hasLbugIndex } from '../storage/repo-manager.js';
+import { findRepo, getStoragePaths, hasKuzuIndex, hasIndex } from '../storage/repo-manager.js';
 import { getCurrentCommit, isGitRepo, getGitRoot } from '../storage/git.js';
 
 export const statusCommand = async () => {
@@ -32,7 +32,7 @@ export const statusCommand = async () => {
 
   const currentCommit = getCurrentCommit(repo.repoPath);
   const isUpToDate = currentCommit === repo.meta.lastCommit;
-  const lbugReady = await hasLbugIndex(repo.storagePath);
+  const lbugReady = await hasIndex(repo.storagePath);
 
   if (!lbugReady) {
     console.log(`Repository: ${repo.repoPath}`);

@@ -6,10 +6,7 @@
  */
 
 import type { LocalBackend } from './local/local-backend.js';
-import { getDerivedProcessDetailResource } from './local/derived-process-reader.js';
 import { checkStaleness } from './staleness.js';
-import { loadCLIConfig } from '../storage/repo-manager.js';
-import { buildNpxCommand, resolveCliSpec } from '../config/cli-spec.js';
 
 export interface ResourceDefinition {
   uri: string;
@@ -84,13 +81,7 @@ export function getResourceTemplates(): ResourceTemplate[] {
     {
       uriTemplate: 'gitnexus://repo/{name}/process/{processName}',
       name: 'Process Trace',
-      description: 'Step-by-step execution trace with lifecycle subtype and step evidence when available',
-      mimeType: 'text/yaml',
-    },
-    {
-      uriTemplate: 'gitnexus://repo/{name}/derived-process/{id}',
-      name: 'Derived Process Trace',
-      description: 'Readable trace metadata for derived process references',
+      description: 'Step-by-step execution trace',
       mimeType: 'text/yaml',
     },
     {
@@ -225,9 +216,6 @@ export function parseResourceUri(uri: string): ParsedGitnexusResource {
         param: rest.replace(/^process\//, ''),
       };
     }
-    if (rest.startsWith('derived-process/')) {
-      return { repoName, resourceType: 'derived-process', param: decodeURIComponent(rest.replace('derived-process/', '')) };
-    }
 
     return { kind: 'repo', repoName, resourceType: rest };
   }
@@ -271,17 +259,9 @@ export async function readResource(uri: string, backend: LocalBackend): Promise<
       return getClusterDetailResource(parsed.param!, backend, repoName);
     case 'process':
       return getProcessDetailResource(parsed.param!, backend, repoName);
-    case 'derived-process':
-      return getDerivedProcessDetailResource(parsed.param!, backend, repoName);
     default:
       throw new Error(`Unknown resource: ${uri}`);
   }
-}
-
-async function resolveAnalyzeNpxCommand(): Promise<string> {
-  const config = await loadCLIConfig();
-  const packageSpec = resolveCliSpec({ config }).packageSpec;
-  return buildNpxCommand(packageSpec, 'analyze');
 }
 
 // ─── Resource Implementations ─────────────────────────────────────────
@@ -360,8 +340,7 @@ async function getContextResource(backend: LocalBackend, repoName?: string): Pro
   lines.push('  - cypher: Raw graph queries');
   lines.push('  - list_repos: Discover all indexed repositories');
   lines.push('');
-  const analyzeCmd = await resolveAnalyzeNpxCommand();
-  lines.push(`re_index: If data is stale, ask user whether to run \`gitnexus analyze\` when local CLI exists; otherwise run \`${analyzeCmd}\` (reuses previous analyze scope/options unless \`--no-reuse-options\` is passed). If user declines, clearly state retrieval may not reflect current code. For build/analyze/test commands, use 10-30 minute timeout; on failure/timeout, report exact tool output and do not auto-retry or silently switch to glob/grep fallback.`);
+  lines.push('re_index: Run `npx gitnexus analyze` in terminal if data is stale');
   lines.push('');
   lines.push('resources_available:');
   lines.push('  - gitnexus://repos: All indexed repositories');
@@ -369,8 +348,11 @@ async function getContextResource(backend: LocalBackend, repoName?: string): Pro
   lines.push(`  - gitnexus://repo/${context.projectName}/processes: All execution flows`);
   lines.push(`  - gitnexus://repo/${context.projectName}/cluster/{name}: Module details`);
   lines.push(`  - gitnexus://repo/${context.projectName}/process/{name}: Process trace`);
-  lines.push(`  - gitnexus://repo/${context.projectName}/derived-process/{id}: Derived process trace metadata`);
-  
+  lines.push(
+    '  - gitnexus://group/{name}/contracts: Group contract registry (optional ?type=&repo=&unmatchedOnly=)',
+  );
+  lines.push('  - gitnexus://group/{name}/status: Group index / contract staleness');
+
   return lines.join('\n');
 }
 
@@ -430,12 +412,6 @@ async function getProcessesResource(backend: LocalBackend, repoName?: string): P
       lines.push(`  - name: "${label}"`);
       lines.push(`    type: ${proc.processType || 'unknown'}`);
       lines.push(`    steps: ${proc.stepCount || 0}`);
-      if (proc.processSubtype) {
-        lines.push(`    subtype: ${proc.processSubtype}`);
-      }
-      if (proc.runtimeChainConfidence) {
-        lines.push(`    runtime_chain_confidence: ${proc.runtimeChainConfidence}`);
-      }
     }
 
     if (result.processes.length > displayLimit) {
@@ -580,8 +556,6 @@ async function getProcessDetailResource(
     const lines: string[] = [
       `name: "${proc.heuristicLabel || proc.label || proc.id}"`,
       `type: ${proc.processType || 'unknown'}`,
-      `subtype: ${proc.processSubtype || 'static_calls'}`,
-      `runtime_chain_confidence: ${proc.runtimeChainConfidence || 'high'}`,
       `step_count: ${proc.stepCount || steps.length}`,
     ];
 
@@ -589,9 +563,7 @@ async function getProcessDetailResource(
       lines.push('');
       lines.push('trace:');
       for (const step of steps) {
-        const reason = step.reason ? ` reason=${step.reason}` : '';
-        const confidence = step.confidence !== undefined ? ` confidence=${step.confidence}` : '';
-        lines.push(`  ${step.step}: ${step.name} (${step.filePath})${reason}${confidence}`);
+        lines.push(`  ${step.step}: ${step.name} (${step.filePath})`);
       }
     }
 
@@ -607,10 +579,9 @@ async function getProcessDetailResource(
  */
 async function getSetupResource(backend: LocalBackend): Promise<string> {
   const repos = await backend.listRepos();
-  const analyzeCmd = await resolveAnalyzeNpxCommand();
 
   if (repos.length === 0) {
-    return `# GitNexus\n\nNo repositories indexed. Run: \`gitnexus analyze\` when local CLI exists; otherwise \`${analyzeCmd}\` in a repository.`;
+    return '# GitNexus\n\nNo repositories indexed. Run: `npx gitnexus analyze` in a repository.';
   }
 
   const sections: string[] = [];

@@ -1,23 +1,8 @@
 import type { KnowledgeGraph } from '../core/graph/types.js';
 import { CommunityDetectionResult } from '../core/ingestion/community-processor.js';
 import { ProcessDetectionResult } from '../core/ingestion/process-processor.js';
-import type { UnityResourceProcessingResult } from '../core/ingestion/unity-resource-processor.js';
-import type { UnityRuntimeBindingResult } from '../core/ingestion/unity-runtime-binding-rules.js';
-import type { ScopeSelectionDiagnostics } from '../core/ingestion/scope-filter.js';
 
-export type PipelinePhase = 'idle' | 'extracting' | 'structure' | 'parsing' | 'imports' | 'calls' | 'heritage' | 'communities' | 'processes' | 'enriching' | 'complete' | 'error';
-
-export interface PipelineProgress {
-  phase: PipelinePhase;
-  percent: number;
-  message: string;
-  detail?: string;
-  stats?: {
-    filesProcessed: number;
-    totalFiles: number;
-    nodesCreated: number;
-  };
-}
+// ── Fork pipeline options ───────────────────────────────────────────────
 
 export interface PipelineRunOptions {
   includeExtensions?: string[];
@@ -36,7 +21,19 @@ export interface CSharpPreprocDiagnostics {
   undefinedSymbols: string[];
 }
 
-// Original result type (used internally in pipeline)
+export interface UnityRuntimeProcessResult {
+  hostCount: number;
+  syntheticEdgeCount: number;
+  rejectedHostCount: number;
+  processedSymbols?: number;
+  bindingCount?: number;
+  diagnostics?: { errors: number; warnings: number; length?: number; some?: (fn: (d: unknown) => boolean) => boolean };
+  timingsMs?: { scan: number; bind: number; enrich: number; scanContext?: number; resolve?: number; graphWrite?: number; total?: number };
+}
+
+// ── Pipeline result ─────────────────────────────────────────────────────
+
+// CLI-specific: in-memory result with graph + detection results
 export interface PipelineResult {
   graph: KnowledgeGraph;
   /** Absolute path to the repo root — used for lazy file reads during LadybugDB loading */
@@ -45,54 +42,30 @@ export interface PipelineResult {
   totalFileCount: number;
   communityResult?: CommunityDetectionResult;
   processResult?: ProcessDetectionResult;
-  unityResult?: UnityResourceProcessingResult;
-  unityRuleBindingResult?: UnityRuntimeBindingResult;
-  scopeDiagnostics?: ScopeSelectionDiagnostics;
+  /**
+   * True if the parse phase spawned a worker pool for this run. False means
+   * the sequential fallback handled every chunk. Primarily a test affordance
+   * so regression suites can prove which path executed.
+   */
+  usedWorkerPool: boolean;
+  // Fork additions
+  unityResult?: UnityRuntimeProcessResult;
+  unityRuleBindingResult?: { ruleCount: number; bindingCount: number; edgesInjected?: number };
   csharpPreprocDiagnostics?: CSharpPreprocDiagnostics;
-}
-
-export interface PipelineRuntimeSummary {
-  totalFileCount: number;
-  communityResult?: CommunityDetectionResult;
-  processResult?: ProcessDetectionResult;
-  unityResult?: UnityResourceProcessingResult;
-  unityRuleBindingResult?: UnityRuntimeBindingResult;
-  scopeDiagnostics?: ScopeSelectionDiagnostics;
-  csharpPreprocDiagnostics?: CSharpPreprocDiagnostics;
-}
-
-// Serializable version for Web Worker communication
-// Maps and functions cannot be transferred via postMessage
-export interface SerializablePipelineResult {
-  nodes: GraphNode[];
-  relationships: GraphRelationship[];
-  repoPath: string;
-  totalFileCount: number;
-  unityResult?: UnityResourceProcessingResult;
-}
-
-// Helper to convert PipelineResult to serializable format
-export const serializePipelineResult = (result: PipelineResult): SerializablePipelineResult => ({
-  nodes: [...result.graph.iterNodes()],
-  relationships: [...result.graph.iterRelationships()],
-  repoPath: result.repoPath,
-  totalFileCount: result.totalFileCount,
-  unityResult: result.unityResult,
-});
-
-// Helper to reconstruct from serializable format (used in main thread)
-export const deserializePipelineResult = (
-  serialized: SerializablePipelineResult,
-  createGraph: () => KnowledgeGraph
-): PipelineResult => {
-  const graph = createGraph();
-  serialized.nodes.forEach(node => graph.addNode(node));
-  serialized.relationships.forEach(rel => graph.addRelationship(rel));
-
-  return {
-    graph,
-    repoPath: serialized.repoPath,
-    totalFileCount: serialized.totalFileCount,
-    unityResult: serialized.unityResult,
+  scopeDiagnostics?: {
+    scopeRuleCount: number;
+    filteredFiles: number;
+    includedFiles: number;
+    appliedRuleCount?: number;
+    matchedFiles?: number;
+    overlapFiles?: number;
+    dedupedMatchCount?: number;
+    normalizedCollisions?: number;
   };
-};
+}
+
+/** Fork: lightweight summary of PipelineResult for CLI output */
+export type PipelineRuntimeSummary = Pick<
+  PipelineResult,
+  'totalFileCount' | 'communityResult' | 'processResult' | 'unityResult' | 'unityRuleBindingResult' | 'scopeDiagnostics' | 'csharpPreprocDiagnostics'
+>;
