@@ -294,10 +294,12 @@ export async function generateAIContextFiles(
   _storagePath: string,
   projectName: string,
   stats: RepoStats,
+  generatedSkills?: GeneratedSkillInfo[],
   options?: {
     skillScope?: SkillScope;
+    skipAgentsMd?: boolean;
+    noStats?: boolean;
   },
-  generatedSkills?: GeneratedSkillInfo[]
 ): Promise<{ files: string[] }> {
   const skillScope: SkillScope = options?.skillScope === 'global' ? 'global' : 'project';
   const content = generateGitNexusContent(
@@ -313,14 +315,10 @@ export async function generateAIContextFiles(
   const agentsResult = await upsertGitNexusSection(agentsPath, content);
   createdFiles.push(`AGENTS.md (${agentsResult})`);
 
-    // Create CLAUDE.md (for Claude Code)
-    const claudePath = path.join(repoPath, 'CLAUDE.md');
-    const claudeResult = await upsertGitNexusSection(claudePath, content);
-    createdFiles.push(`CLAUDE.md (${claudeResult})`);
-  } else {
-    createdFiles.push('AGENTS.md (skipped via --skip-agents-md)');
-    createdFiles.push('CLAUDE.md (skipped via --skip-agents-md)');
-  }
+  // Create CLAUDE.md (for Claude Code)
+  const claudePath = path.join(repoPath, 'CLAUDE.md');
+  const claudeResult = await upsertGitNexusSection(claudePath, content);
+  createdFiles.push(`CLAUDE.md (${claudeResult})`);
 
   // Install repo-local skills only when project scope is selected.
   if (skillScope === 'project') {

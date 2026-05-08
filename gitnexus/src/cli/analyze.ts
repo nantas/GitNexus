@@ -12,29 +12,60 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import v8 from 'v8';
 import cliProgress from 'cli-progress';
-import { runPipelineFromRepo } from '../core/ingestion/pipeline.js';
-import { initLbug, loadGraphToLbug, getLbugStats, executeQuery, executeWithReusedStatement, closeLbug, createFTSIndex, loadCachedEmbeddings } from '../core/lbug/lbug-adapter.js';
-// Embedding imports are lazy (dynamic import) so onnxruntime-node is never
-// loaded when embeddings are not requested. This avoids crashes on Node
-// versions whose ABI is not yet supported by the native binary (#89).
-// disposeEmbedder intentionally not called — ONNX Runtime segfaults on cleanup (see #38)
-import { getStoragePaths, saveMeta, loadMeta, addToGitignore, registerRepo, getGlobalRegistryPath, loadCLIConfig, cleanupOldKuzuFiles, type RepoMeta } from '../storage/repo-manager.js';
-import { getCurrentCommit, isGitRepo, getGitRoot } from '../storage/git.js';
-import { generateAIContextFiles } from './ai-context.js';
-import { generateSkillFiles, type GeneratedSkillInfo } from './skill-gen.js';
-import fs from 'fs/promises';
-import { resolveEffectiveAnalyzeOptions, validateStoredOptions } from './analyze-options.js';
+import { closeLbug } from '../core/lbug/lbug-adapter.js';
 import {
-  formatCSharpPreprocDiagnosticsSummary,
-  formatFallbackSummary,
-  formatUnityDiagnosticsSummary,
-  formatUnityRuleBindingSummary,
-  resolveFallbackStats,
-} from './analyze-summary.js';
-import { resolveChildProcessExit } from './exit-code.js';
-import { toPipelineRuntimeSummary } from './analyze-runtime-summary.js';
-import type { PipelineResult } from '../types/pipeline.js';
-import type { UnityParitySeed } from '../core/ingestion/unity-parity-seed.js';
+  getStoragePaths,
+  getGlobalRegistryPath,
+  RegistryNameCollisionError,
+  AnalysisNotFinalizedError,
+  assertAnalysisFinalized,
+} from '../storage/repo-manager.js';
+import { getGitRoot, hasGitDir } from '../storage/git.js';
+import { runFullAnalysis } from '../core/run-analyze.js';
+import { getMaxFileSizeBannerMessage } from '../core/ingestion/utils/max-file-size.js';
+import { warnMissingOptionalGrammars } from './optional-grammars.js';
+import { glob } from 'glob';
+import fs from 'fs/promises';
+import { cliError } from './cli-message.js';
+import { isHfDownloadFailure } from '../core/embeddings/hf-env.js';
+
+// Capture stderr.write at module load BEFORE anything (LadybugDB native
+// init, progress bar, console redirection) can monkey-patch it. The
+// fatal handlers below MUST reach the user even when the analyze path
+// has redirected console.* through the progress bar's bar.log() — the
+// previous behaviour silently swallowed stack traces and made #1169
+// indistinguishable from a no-op success on Windows.
+const realStderrWrite = process.stderr.write.bind(process.stderr);
+
+const writeFatalToStderr = (label: string, err: unknown): void => {
+  const isErr = err instanceof Error;
+  const message = isErr ? err.message : String(err);
+  realStderrWrite(`\n  ${label}: ${message}\n`);
+  if (isErr && err.stack) realStderrWrite(`${err.stack}\n`);
+};
+
+let fatalHandlersInstalled = false;
+
+/**
+ * Install one-shot `unhandledRejection` / `uncaughtException` handlers
+ * that surface the failure to the real stderr (bypassing any console
+ * redirection installed by the progress bar) and force a non-zero exit
+ * code. Without these, an async error escaping {@link analyzeCommand}'s
+ * try/catch was reported as exit 0 with no diagnostic — the silent
+ * failure mode tracked in #1169.
+ */
+const installFatalHandlers = (): void => {
+  if (fatalHandlersInstalled) return;
+  fatalHandlersInstalled = true;
+  process.on('unhandledRejection', (err) => {
+    writeFatalToStderr('Analysis failed (unhandled rejection)', err);
+    process.exit(1);
+  });
+  process.on('uncaughtException', (err) => {
+    writeFatalToStderr('Analysis failed (uncaught exception)', err);
+    process.exit(1);
+  });
+};
 
 const HEAP_MB = 8192;
 const HEAP_FLAG = `--max-old-space-size=${HEAP_MB}`;
@@ -61,22 +92,27 @@ function ensureHeap(): boolean {
       env: { ...process.env, NODE_OPTIONS: `${nodeOpts} ${HEAP_FLAG}`.trim() },
     });
   } catch (e: any) {
-    const resolved = resolveChildProcessExit(e, 1);
-    if (resolved.bySignal && resolved.signal) {
-      console.error(`  analyze subprocess terminated by signal ${resolved.signal}`);
-    }
-    process.exitCode = resolved.code;
+    process.exitCode = e.status ?? 1;
   }
   return true;
 }
 
 export interface AnalyzeOptions {
   force?: boolean;
-  embeddings?: boolean;
-  extensions?: string;
-  repoAlias?: string;
-  csharpDefineCsproj?: string;
-  reuseOptions?: boolean;
+  /**
+   * Embedding generation toggle. Commander parses `--embeddings [limit]` as:
+   *   - `undefined` when the flag is omitted
+   *   - `true` when passed without an argument (use default 50K node cap)
+   *   - a string when passed with an argument (`--embeddings 0` disables the
+   *     cap, `--embeddings <n>` uses `<n>` as the cap)
+   */
+  embeddings?: boolean | string;
+  /**
+   * Explicitly drop existing embeddings on rebuild instead of preserving
+   * them. Without this flag, a routine `analyze` keeps any embeddings
+   * already present in the index even when `--embeddings` is omitted.
+   */
+  dropEmbeddings?: boolean;
   skills?: boolean;
   verbose?: boolean;
   /** Skip AGENTS.md and CLAUDE.md gitnexus block updates. */
@@ -241,73 +277,32 @@ export const analyzeCommand = async (inputPath?: string, options?: AnalyzeOption
     );
   }
 
-  const currentCommit = getCurrentCommit(repoPath);
-  const existingMeta = await loadMeta(storagePath);
-  let hasLbugIndex = false;
+  // If the target repo contains files an optional grammar would parse but
+  // that grammar's native binding is absent, warn before analysis so users
+  // learn why those files end up unparsed instead of silently getting a
+  // degraded index.
   try {
-    await fs.stat(lbugPath);
-    hasLbugIndex = true;
+    const matches = await glob(['**/*.dart', '**/*.proto'], {
+      cwd: repoPath,
+      ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**'],
+      dot: false,
+      nodir: true,
+      absolute: false,
+    });
+    if (matches.length > 0) {
+      const present = new Set<string>();
+      for (const m of matches) {
+        const ext = path.extname(m).toLowerCase();
+        if (ext) present.add(ext);
+      }
+      warnMissingOptionalGrammars({ context: 'analyze', relevantExtensions: present });
+    }
   } catch {
-    hasLbugIndex = false;
+    // Best-effort warning \u2014 never block analyze on the precheck.
   }
 
-  let includeExtensions: string[] = [];
-  let scopeRules: string[] = [];
-  let repoAlias: string | undefined;
-  let embeddingsEnabled = false;
-  let effectiveCsharpDefineCsproj: string | undefined;
-  try {
-    const validatedStored = await validateStoredOptions(
-      existingMeta?.analyzeOptions,
-      repoPath,
-    );
-
-    const effectiveOptions = await resolveEffectiveAnalyzeOptions({
-      extensions: options?.extensions,
-      repoAlias: options?.repoAlias,
-      embeddings: options?.embeddings,
-      reuseOptions: options?.reuseOptions,
-      csharpDefineCsproj: options?.csharpDefineCsproj,
-    }, validatedStored);
-    includeExtensions = effectiveOptions.includeExtensions;
-    scopeRules = effectiveOptions.scopeRules;
-    repoAlias = effectiveOptions.repoAlias;
-    embeddingsEnabled = effectiveOptions.embeddings;
-    effectiveCsharpDefineCsproj = effectiveOptions.csharpDefineCsproj;
-  } catch (error: any) {
-    console.log(`  ${error?.message || String(error)}\n`);
-    process.exitCode = 1;
-    return;
-  }
-
-  if (existingMeta && !hasLbugIndex && !options?.force) {
-    console.log('  Existing metadata found, but LadybugDB index file is missing — rebuilding index...\n');
-  }
-
-  if (existingMeta && hasLbugIndex && !options?.force && existingMeta.lastCommit === currentCommit && !options?.skills) {
-    const hasCliOverrides =
-      options?.extensions !== undefined ||
-      options?.repoAlias !== undefined ||
-      options?.embeddings !== undefined ||
-      options?.csharpDefineCsproj !== undefined ||
-      options?.reuseOptions === false;
-
-    if (!hasCliOverrides) {
-      console.log('  Already up to date\n');
-      return;
-    }
-
-    if (
-      options?.reuseOptions !== false &&
-      includeExtensions.length === 0 &&
-      scopeRules.length === 0 &&
-      !repoAlias &&
-      !embeddingsEnabled
-    ) {
-      console.log('  Already up to date\n');
-      return;
-    }
-  }
+  // KuzuDB migration cleanup is handled by runFullAnalysis internally.
+  // Note: --skills is handled after runFullAnalysis using the returned pipelineResult.
 
   if (process.env.GITNEXUS_NO_GITIGNORE) {
     console.log(
@@ -402,177 +397,54 @@ export const analyzeCommand = async (inputPath?: string, options?: AnalyzeOption
 
   const t0 = Date.now();
 
-  // ── Cache embeddings from existing index before rebuild ────────────
-  let cachedEmbeddingNodeIds = new Set<string>();
-  let cachedEmbeddings: Array<{ nodeId: string; embedding: number[] }> = [];
-
-  if (embeddingsEnabled && existingMeta && !options?.force) {
-    try {
-      updateBar(0, 'Caching embeddings...');
-      await initLbug(lbugPath);
-      const cached = await loadCachedEmbeddings();
-      cachedEmbeddingNodeIds = cached.embeddingNodeIds;
-      cachedEmbeddings = cached.embeddings;
-      await closeLbug();
-    } catch {
-      try { await closeLbug(); } catch {}
-    }
-  }
-
-  // ── Phase 1: Full Pipeline (0–60%) ─────────────────────────────────
-  let pipelineResult: PipelineResult | undefined;
+  // ── Run shared analysis orchestrator ───────────────────────────────
   try {
-    const pipelineRunOptions = buildPipelineRunOptionsForAnalyze(
-      { includeExtensions, scopeRules },
-      { csharpDefineCsproj: effectiveCsharpDefineCsproj },
-    );
-
-    pipelineResult = await runPipelineFromRepo(
+    const result = await runFullAnalysis(
       repoPath,
-      (progress) => {
-        const phaseLabel = PHASE_LABELS[progress.phase] || progress.phase;
-        const scaled = Math.round(progress.percent * 0.6);
-        updateBar(scaled, phaseLabel);
+      {
+        // Pipeline re-index — OR'd with --skills because skill generation
+        // needs a fresh pipelineResult. Has no bearing on the registry
+        // collision guard (see allowDuplicateName below).
+        force: options?.force || options?.skills,
+        embeddings: embeddingsEnabled,
+        embeddingsNodeLimit,
+        dropEmbeddings: options?.dropEmbeddings,
+        skipGit: options?.skipGit,
+        skipAgentsMd: options?.skipAgentsMd,
+        noStats: options?.noStats,
+        registryName: options?.name,
+        // Registry-collision bypass — its own CLI flag, intentionally NOT
+        // overloading --force. A user who hits the collision guard should
+        // be able to accept the duplicate name without also paying the
+        // cost of a full pipeline re-index. See #829 review round 2.
+        allowDuplicateName: options?.allowDuplicateName,
       },
-      pipelineRunOptions,
-    );
-  } catch (error: any) {
-    clearInterval(elapsedTimer);
-    process.removeListener('SIGINT', sigintHandler);
-    console.log = origLog;
-    console.warn = origWarn;
-    console.error = origError;
-    bar.stop();
-    console.log(`\n  ${error?.message || String(error)}\n`);
-    process.exitCode = 1;
-    return;
-  }
-
-  // ── Phase 2: LadybugDB (60–85%) ──────────────────────────────────────
-  updateBar(60, 'Loading into LadybugDB...');
-
-  await closeLbug();
-  const lbugFiles = [lbugPath, `${lbugPath}.wal`, `${lbugPath}.lock`];
-  for (const f of lbugFiles) {
-    try { await fs.rm(f, { recursive: true, force: true }); } catch {}
-  }
-
-  const t0Lbug = Date.now();
-  await initLbug(lbugPath);
-  let lbugMsgCount = 0;
-  const lbugResult = await loadGraphToLbug(pipelineResult.graph, pipelineResult.repoPath, storagePath, (msg) => {
-    lbugMsgCount++;
-    const progress = Math.min(84, 60 + Math.round((lbugMsgCount / (lbugMsgCount + 10)) * 24));
-    updateBar(progress, msg);
-  });
-  const pipelineForSkills = pipelineResult;
-  const pipelineRuntime = toPipelineRuntimeSummary(pipelineResult);
-  pipelineResult = undefined;
-  const lbugTime = ((Date.now() - t0Lbug) / 1000).toFixed(1);
-  const lbugWarnings = lbugResult.warnings;
-
-  // ── Phase 3: FTS (85–90%) ─────────────────────────────────────────
-  updateBar(85, 'Creating search indexes...');
-
-  const t0Fts = Date.now();
-  try {
-    await createFTSIndex('File', 'file_fts', ['name', 'content']);
-    await createFTSIndex('Function', 'function_fts', ['name', 'content']);
-    await createFTSIndex('Class', 'class_fts', ['name', 'content']);
-    await createFTSIndex('Method', 'method_fts', ['name', 'content']);
-    await createFTSIndex('Interface', 'interface_fts', ['name', 'content']);
-  } catch (e: any) {
-    // Non-fatal — FTS is best-effort
-  }
-  const ftsTime = ((Date.now() - t0Fts) / 1000).toFixed(1);
-
-  // ── Phase 3.5: Re-insert cached embeddings ────────────────────────
-  if (cachedEmbeddings.length > 0) {
-    updateBar(88, `Restoring ${cachedEmbeddings.length} cached embeddings...`);
-    const EMBED_BATCH = 200;
-    for (let i = 0; i < cachedEmbeddings.length; i += EMBED_BATCH) {
-      const batch = cachedEmbeddings.slice(i, i + EMBED_BATCH);
-      const paramsList = batch.map(e => ({ nodeId: e.nodeId, embedding: e.embedding }));
-      try {
-        await executeWithReusedStatement(
-          `CREATE (e:CodeEmbedding {nodeId: $nodeId, embedding: $embedding})`,
-          paramsList,
-        );
-      } catch { /* some may fail if node was removed, that's fine */ }
-    }
-  }
-
-  // ── Phase 4: Embeddings (90–98%) ──────────────────────────────────
-  const stats = await getLbugStats();
-  let embeddingTime = '0.0';
-  let embeddingSkipped = true;
-  let embeddingSkipReason = 'off (use --embeddings to enable)';
-
-  if (embeddingsEnabled) {
-    if (stats.nodes > EMBEDDING_NODE_LIMIT) {
-      embeddingSkipReason = `skipped (${stats.nodes.toLocaleString()} nodes > ${EMBEDDING_NODE_LIMIT.toLocaleString()} limit)`;
-    } else {
-      embeddingSkipped = false;
-    }
-  }
-
-  if (!embeddingSkipped) {
-    updateBar(90, 'Loading embedding model...');
-    const t0Emb = Date.now();
-    const { runEmbeddingPipeline } = await import('../core/embeddings/embedding-pipeline.js');
-    await runEmbeddingPipeline(
-      executeQuery,
-      executeWithReusedStatement,
-      (progress) => {
-        const scaled = 90 + Math.round((progress.percent / 100) * 8);
-        const label = progress.phase === 'loading-model' ? 'Loading embedding model...' : `Embedding ${progress.nodesProcessed || 0}/${progress.totalNodes || '?'}`;
-        updateBar(scaled, label);
+      {
+        onProgress: (_phase, percent, message) => {
+          updateBar(percent, message);
+        },
+        onLog: barLog,
       },
     );
 
-  // ── Phase 5: Finalize (98–100%) ───────────────────────────────────
-  updateBar(98, 'Saving metadata...');
-
-  // Count embeddings in the index (cached + newly generated)
-  let embeddingCount = 0;
-  try {
-    const embResult = await executeQuery(`MATCH (e:CodeEmbedding) RETURN count(e) AS cnt`);
-    embeddingCount = embResult?.[0]?.cnt ?? 0;
-  } catch { /* table may not exist if embeddings never ran */ }
-
-  const meta: RepoMeta = {
-    repoPath,
-    lastCommit: currentCommit,
-    indexedAt: new Date().toISOString(),
-    analyzeOptions: {
-      includeExtensions,
-      scopeRules,
-      repoAlias,
-      embeddings: embeddingsEnabled,
-      csharpDefineCsproj: effectiveCsharpDefineCsproj,
-    },
-    stats: {
-      files: pipelineRuntime.totalFileCount,
-      nodes: stats.nodes,
-      edges: stats.edges,
-      communities: pipelineRuntime.communityResult?.stats.totalCommunities,
-      processes: pipelineRuntime.processResult?.stats.totalProcesses,
-      embeddings: embeddingCount,
-    },
-  };
-  const registeredRepo = await registerRepo(repoPath, meta, { repoAlias });
-  meta.repoId = registeredRepo.name;
-  await saveMeta(storagePath, meta);
-  await persistUnityParitySeed(storagePath, pipelineRuntime.unityResult?.paritySeed);
-  await addToGitignore(repoPath);
-
-  const projectName = path.basename(repoPath);
-  let aggregatedClusterCount = 0;
-  if (pipelineRuntime.communityResult?.communities) {
-    const groups = new Map<string, number>();
-    for (const c of pipelineRuntime.communityResult.communities) {
-      const label = c.heuristicLabel || c.label || 'Unknown';
-      groups.set(label, (groups.get(label) || 0) + c.symbolCount);
+    if (result.alreadyUpToDate) {
+      // Even the fast path must prove the repo is discoverable. A prior
+      // run can write meta.json and then fail before registerRepo(); in
+      // that half-finalized state, runFullAnalysis returns alreadyUpToDate
+      // on the next invocation unless we check the registry here too.
+      await assertAnalysisFinalized(repoPath);
+      clearInterval(elapsedTimer);
+      process.removeListener('SIGINT', sigintHandler);
+      console.log = origLog;
+      // eslint-disable-next-line no-console -- restoring after intentional progress-bar routing
+      console.warn = origWarn;
+      // eslint-disable-next-line no-console -- restoring after intentional progress-bar routing
+      console.error = origError;
+      bar.stop();
+      console.log('  Already up to date\n');
+      // Safe to return without process.exit(0) — the early-return path in
+      // runFullAnalysis never opens LadybugDB, so no native handles prevent exit.
+      return;
     }
 
     // Post-finalize invariant (#1169): runFullAnalysis nominally writes
@@ -784,139 +656,8 @@ export const analyzeCommand = async (inputPath?: string, options?: AnalyzeOption
     return;
   }
 
-  let generatedSkills: GeneratedSkillInfo[] = [];
-  if (options?.skills && pipelineForSkills.communityResult) {
-    updateBar(99, 'Generating skill files...');
-    const skillResult = await generateSkillFiles(repoPath, projectName, pipelineForSkills);
-    generatedSkills = skillResult.skills;
-  }
-
-  const cliConfig = await loadCLIConfig();
-  const aiContext = await generateAIContextFiles(repoPath, storagePath, projectName, {
-    files: pipelineRuntime.totalFileCount,
-    nodes: stats.nodes,
-    edges: stats.edges,
-    communities: pipelineRuntime.communityResult?.stats.totalCommunities,
-    clusters: aggregatedClusterCount,
-    processes: pipelineRuntime.processResult?.stats.totalProcesses,
-  }, {
-    skillScope: (cliConfig.setupScope === 'global') ? 'global' : 'project',
-  }, generatedSkills);
-
-  await closeLbug();
-  // Note: we intentionally do NOT call disposeEmbedder() here.
-  // ONNX Runtime's native cleanup segfaults on macOS and some Linux configs.
-  // Since the process exits immediately after, Node.js reclaims everything.
-
-  const totalTime = ((Date.now() - t0Global) / 1000).toFixed(1);
-
-  clearInterval(elapsedTimer);
-  process.removeListener('SIGINT', sigintHandler);
-
-  console.log = origLog;
-  console.warn = origWarn;
-  console.error = origError;
-
-  bar.update(100, { phase: 'Done' });
-  bar.stop();
-
-  // ── Summary ───────────────────────────────────────────────────────
-  const embeddingsCached = cachedEmbeddings.length > 0;
-  console.log(`\n  Repository indexed successfully (${totalTime}s)${embeddingsCached ? ` [${cachedEmbeddings.length} embeddings cached]` : ''}\n`);
-  console.log(`  Repo Name: ${registeredRepo.name}`);
-  console.log(`  Repo Alias: ${registeredRepo.alias || 'none'}`);
-  console.log(`  Scope Rules: ${scopeRules.length}`);
-  console.log(`  Scoped Files: ${pipelineRuntime.totalFileCount}`);
-  if (scopeRules.length > 0 && pipelineRuntime.scopeDiagnostics) {
-    const diagnostics = pipelineRuntime.scopeDiagnostics;
-    console.log(`  Scope Overlap Files: ${diagnostics.overlapFiles} (${diagnostics.dedupedMatchCount} duplicate matches removed)`);
-    if (diagnostics.normalizedCollisions.length === 0) {
-      console.log('  Scope Collisions: none');
-    } else {
-      console.warn(`  Scope Collisions: ${diagnostics.normalizedCollisions.length} normalized path conflict(s) detected`);
-      diagnostics.normalizedCollisions.slice(0, 5).forEach((collision) => {
-        console.warn(`    - ${collision.normalizedPath} <= ${collision.paths.join(' | ')}`);
-      });
-      if (diagnostics.normalizedCollisions.length > 5) {
-        console.warn(`    ... ${diagnostics.normalizedCollisions.length - 5} more`);
-      }
-    }
-  }
-  const unitySummaryLines = formatUnityDiagnosticsSummary(pipelineRuntime.unityResult?.diagnostics);
-  for (const line of unitySummaryLines) {
-    console.log(`  ${line}`);
-  }
-  const unityRuleBindingSummaryLines = formatUnityRuleBindingSummary(pipelineRuntime.unityRuleBindingResult);
-  for (const line of unityRuleBindingSummaryLines) {
-    console.log(`  ${line}`);
-  }
-  const csharpPreprocSummaryLines = formatCSharpPreprocDiagnosticsSummary(pipelineRuntime.csharpPreprocDiagnostics);
-  for (const line of csharpPreprocSummaryLines) {
-    console.log(`  ${line}`);
-  }
-  console.log(`  ${stats.nodes.toLocaleString()} nodes | ${stats.edges.toLocaleString()} edges | ${pipelineRuntime.communityResult?.stats.totalCommunities || 0} clusters | ${pipelineRuntime.processResult?.stats.totalProcesses || 0} flows`);
-  console.log(`  LadybugDB ${lbugTime}s | FTS ${ftsTime}s | Embeddings ${embeddingSkipped ? embeddingSkipReason : embeddingTime + 's'}`);
-  if (includeExtensions.length > 0) {
-    console.log(`  File filter: ${includeExtensions.join(', ')}`);
-  }
-  console.log(`  ${repoPath}`);
-
-  if (aiContext.files.length > 0) {
-    console.log(`  Context: ${aiContext.files.join(', ')}`);
-  }
-
-  if (lbugWarnings.length > 0) {
-    const fallbackStats = resolveFallbackStats(lbugWarnings, lbugResult.fallbackInsertStats);
-    const fallbackLines = formatFallbackSummary(
-      lbugWarnings,
-      fallbackStats,
-    );
-    for (const line of fallbackLines) {
-      console.log(`  ${line}`);
-    }
-  }
-
-  try {
-    await fs.access(getGlobalRegistryPath());
-  } catch {
-    console.log('\n  Tip: Run `gitnexus setup` to configure MCP for your editor.');
-  }
-
-  console.log('');
-
   // LadybugDB's native module holds open handles that prevent Node from exiting.
   // ONNX Runtime also registers native atexit hooks that segfault on some
   // platforms (#38, #40). Force-exit to ensure clean termination.
   process.exit(0);
 };
-
-export function buildPipelineRunOptionsForAnalyze(
-  resolvedOptions: { includeExtensions: string[]; scopeRules: string[] },
-  options?: AnalyzeOptions,
-): {
-  includeExtensions: string[];
-  scopeRules: string[];
-  csharpDefineCsproj?: string;
-} {
-  return {
-    includeExtensions: resolvedOptions.includeExtensions,
-    scopeRules: resolvedOptions.scopeRules,
-    ...(options?.csharpDefineCsproj
-      ? { csharpDefineCsproj: options.csharpDefineCsproj }
-      : {}),
-  };
-}
-
-async function persistUnityParitySeed(
-  storagePath: string,
-  seed: UnityParitySeed | undefined,
-): Promise<void> {
-  const seedPath = path.join(storagePath, 'unity-parity-seed.json');
-  if (!seed) {
-    try {
-      await fs.rm(seedPath, { force: true });
-    } catch {}
-    return;
-  }
-  await fs.writeFile(seedPath, JSON.stringify(seed), 'utf-8');
-}
