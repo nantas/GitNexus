@@ -1,27 +1,91 @@
 /**
  * Embedding Pipeline Module
- * 
+ *
  * Orchestrates the background embedding process:
  * 1. Query embeddable nodes from LadybugDB
- * 2. Generate text representations
- * 3. Batch embed using transformers.js
- * 4. Update LadybugDB with embeddings
+ * 2. Generate text representations with enriched metadata
+ * 3. Chunk long nodes, batch embed
+ * 4. Update LadybugDB with chunk-aware embeddings
  * 5. Create vector index for semantic search
  */
 
-import { initEmbedder, embedBatch, embedText, embeddingToArray, isEmbedderReady } from './embedder.js';
-import { generateBatchEmbeddingTexts, generateEmbeddingText } from './text-generator.js';
+import { createHash } from 'crypto';
+import {
+  initEmbedder,
+  embedBatch,
+  embedText,
+  embeddingToArray,
+  isEmbedderReady,
+} from './embedder.js';
+import { generateEmbeddingText } from './text-generator.js';
+import { chunkNode, characterChunk } from './chunker.js';
+import { extractStructuralNames } from './structural-extractor.js';
 import {
   type EmbeddingProgress,
   type EmbeddingConfig,
   type EmbeddableNode,
   type SemanticSearchResult,
   type ModelProgress,
-  DEFAULT_EMBEDDING_CONFIG,
+  type EmbeddingContext,
   EMBEDDABLE_LABELS,
+  isShortLabel,
+  LABEL_METHOD,
+  LABELS_WITH_EXPORTED,
+  STRUCTURAL_LABELS,
+  collectBestChunks,
 } from './types.js';
+import { resolveEmbeddingConfig } from './config.js';
+import { rankExactEmbeddingRows, type ExactEmbeddingRow } from './exact-search.js';
+import {
+  EMBEDDING_TABLE_NAME,
+  EMBEDDING_INDEX_NAME,
+  CREATE_VECTOR_INDEX_QUERY,
+  STALE_HASH_SENTINEL,
+} from '../lbug/schema.js';
+import { loadVectorExtension } from '../lbug/lbug-adapter.js';
+import { getExactScanLimit } from '../platform/capabilities.js';
+import { logger } from '../logger.js';
 
 const isDev = process.env.NODE_ENV === 'development';
+
+const vectorUnavailableMessage =
+  'VECTOR extension is unavailable for this LadybugDB runtime; semantic search will use exact scan when embeddings exist.';
+
+const ensureVectorExtensionAvailable = async (): Promise<boolean> => {
+  const vectorReady = await loadVectorExtension();
+  if (!vectorReady) {
+    return false;
+  }
+  return true;
+};
+/**
+ * Bump this when the embedding text template changes in a way that should
+ * invalidate existing vectors, such as metadata/header shape changes,
+ * structural container context changes, or preceding-context formatting rules.
+ */
+export const EMBEDDING_TEXT_VERSION = 'v2';
+
+/**
+ * Compute a stable content fingerprint for an embeddable node.
+ * Used to detect when the underlying text has changed so stale vectors
+ * can be replaced (DELETE-then-INSERT, the Kuzu-sanctioned pattern for
+ * vector-indexed rows).
+ */
+export const contentHashForNode = (
+  node: EmbeddableNode,
+  config: Partial<EmbeddingConfig> = {},
+): string => {
+  // Hash must be deterministic across runs, so exclude methodNames/fieldNames
+  // which are populated during the batch loop via AST extraction.
+  // Using only node.content ensures the hash stays stable.
+  // NOTE: A change to extractStructuralNames behavior requires bumping EMBEDDING_TEXT_VERSION.
+  const text = generateEmbeddingText(
+    { ...node, methodNames: undefined, fieldNames: undefined },
+    node.content,
+    config,
+  );
+  return createHash('sha1').update(EMBEDDING_TEXT_VERSION).update('\n').update(text).digest('hex');
+};
 
 /**
  * Progress callback type
@@ -30,37 +94,50 @@ export type EmbeddingProgressCallback = (progress: EmbeddingProgress) => void;
 
 /**
  * Query all embeddable nodes from LadybugDB
- * Uses table-specific queries (File has different schema than code elements)
+ * Uses table-specific queries for different label types
  */
 const queryEmbeddableNodes = async (
-  executeQuery: (cypher: string) => Promise<any[]>
+  executeQuery: (cypher: string) => Promise<any[]>,
 ): Promise<EmbeddableNode[]> => {
   const allNodes: EmbeddableNode[] = [];
-  
-  // Query each embeddable table with table-specific columns
+
   for (const label of EMBEDDABLE_LABELS) {
     try {
       let query: string;
-      
-      if (label === 'File') {
-        // File nodes don't have startLine/endLine
+
+      if (label === LABEL_METHOD) {
+        // Method has parameterCount and returnType
         query = `
-          MATCH (n:File)
-          RETURN n.id AS id, n.name AS name, 'File' AS label, 
-                 n.filePath AS filePath, n.content AS content
+          MATCH (n:Method)
+          RETURN n.id AS id, n.name AS name, 'Method' AS label,
+                 n.filePath AS filePath, n.content AS content,
+                 n.startLine AS startLine, n.endLine AS endLine,
+                 n.isExported AS isExported, n.description AS description,
+                 n.parameterCount AS parameterCount, n.returnType AS returnType
+        `;
+      } else if (LABELS_WITH_EXPORTED.has(label)) {
+        // Function, Class, Interface have isExported and description
+        query = `
+          MATCH (n:\`${label}\`)
+          RETURN n.id AS id, n.name AS name, '${label}' AS label,
+                 n.filePath AS filePath, n.content AS content,
+                 n.startLine AS startLine, n.endLine AS endLine,
+                 n.isExported AS isExported, n.description AS description
         `;
       } else {
-        // Code elements have startLine/endLine
+        // Multi-language tables (Struct, Enum, etc.) — have description but no isExported
         query = `
-          MATCH (n:${label})
-          RETURN n.id AS id, n.name AS name, '${label}' AS label, 
+          MATCH (n:\`${label}\`)
+          RETURN n.id AS id, n.name AS name, '${label}' AS label,
                  n.filePath AS filePath, n.content AS content,
-                 n.startLine AS startLine, n.endLine AS endLine
+                 n.startLine AS startLine, n.endLine AS endLine,
+                 n.description AS description
         `;
       }
-      
+
       const rows = await executeQuery(query);
       for (const row of rows) {
+        const hasExportedColumn = label === LABEL_METHOD || LABELS_WITH_EXPORTED.has(label);
         allNodes.push({
           id: row.id ?? row[0],
           name: row.name ?? row[1],
@@ -69,12 +146,19 @@ const queryEmbeddableNodes = async (
           content: row.content ?? row[4] ?? '',
           startLine: row.startLine ?? row[5],
           endLine: row.endLine ?? row[6],
+          isExported: hasExportedColumn ? (row.isExported ?? row[7]) : undefined,
+          description: row.description ?? (hasExportedColumn ? row[8] : row[7]),
+          ...(label === LABEL_METHOD
+            ? {
+                parameterCount: row.parameterCount ?? row[9],
+                returnType: row.returnType ?? row[10],
+              }
+            : {}),
         });
       }
     } catch (error) {
-      // Table might not exist or be empty, continue
       if (isDev) {
-        console.warn(`Query for ${label} nodes failed:`, error);
+        logger.warn({ error }, `Query for ${label} nodes failed:`);
       }
     }
   }
@@ -83,77 +167,100 @@ const queryEmbeddableNodes = async (
 };
 
 /**
- * Batch INSERT embeddings into separate CodeEmbedding table
- * Using a separate lightweight table avoids copy-on-write overhead
- * that occurs when UPDATEing nodes with large content fields
+ * Batch INSERT chunk-aware embeddings into CodeEmbedding table
  */
-const batchInsertEmbeddings = async (
+export const batchInsertEmbeddings = async (
   executeWithReusedStatement: (
     cypher: string,
-    paramsList: Array<Record<string, any>>
+    paramsList: Array<Record<string, any>>,
   ) => Promise<void>,
-  updates: Array<{ id: string; embedding: number[] }>
+  updates: Array<{
+    nodeId: string;
+    chunkIndex: number;
+    startLine: number;
+    endLine: number;
+    embedding: number[];
+    contentHash?: string;
+  }>,
 ): Promise<void> => {
-  // INSERT into separate embedding table - much more memory efficient!
-  const cypher = `CREATE (e:CodeEmbedding {nodeId: $nodeId, embedding: $embedding})`;
-  const paramsList = updates.map(u => ({ nodeId: u.id, embedding: u.embedding }));
+  const cypher = `CREATE (e:${EMBEDDING_TABLE_NAME} {id: $id, nodeId: $nodeId, chunkIndex: $chunkIndex, startLine: $startLine, endLine: $endLine, embedding: $embedding, contentHash: $contentHash})`;
+  const paramsList = updates.map((u) => ({
+    id: `${u.nodeId}:${u.chunkIndex}`,
+    nodeId: u.nodeId,
+    chunkIndex: u.chunkIndex,
+    startLine: u.startLine,
+    endLine: u.endLine,
+    embedding: u.embedding,
+    contentHash: u.contentHash ?? STALE_HASH_SENTINEL,
+  }));
   await executeWithReusedStatement(cypher, paramsList);
 };
 
 /**
  * Create the vector index for semantic search
- * Now indexes the separate CodeEmbedding table
+
+ * Now indexes the separate CodeEmbedding table.
+ * Delegates extension loading to lbug-adapter's loadVectorExtension(),
+ * which owns the VECTOR extension lifecycle and state tracking.
+
  */
-let vectorExtensionLoaded = false;
-
 const createVectorIndex = async (
-  executeQuery: (cypher: string) => Promise<any[]>
-): Promise<void> => {
-  // LadybugDB v0.15+ requires explicit VECTOR extension loading (once per session)
-  if (!vectorExtensionLoaded) {
-    try {
-      await executeQuery('INSTALL VECTOR');
-      await executeQuery('LOAD EXTENSION VECTOR');
-      vectorExtensionLoaded = true;
-    } catch {
-      // Extension may already be loaded — CREATE_VECTOR_INDEX will fail clearly if not
-      vectorExtensionLoaded = true;
-    }
-  }
-
-  const cypher = `
-    CALL CREATE_VECTOR_INDEX('CodeEmbedding', 'code_embedding_idx', 'embedding', metric := 'cosine')
-  `;
-
+  executeQuery: (cypher: string) => Promise<any[]>,
+): Promise<boolean> => {
+  if (!(await ensureVectorExtensionAvailable())) return false;
   try {
-    await executeQuery(cypher);
+    await executeQuery(CREATE_VECTOR_INDEX_QUERY);
+    return true;
   } catch (error) {
-    // Index might already exist
     if (isDev) {
-      console.warn('Vector index creation warning:', error);
+      logger.warn({ error }, 'Vector index creation warning:');
     }
+    return false;
   }
 };
 
+export interface EmbeddingPipelineResult {
+  nodesProcessed: number;
+  chunksProcessed: number;
+  vectorIndexReady: boolean;
+  semanticMode: 'vector-index' | 'exact-scan';
+}
+
 /**
  * Run the embedding pipeline
- * 
+ *
  * @param executeQuery - Function to execute Cypher queries against LadybugDB
  * @param executeWithReusedStatement - Function to execute with reused prepared statement
  * @param onProgress - Callback for progress updates
  * @param config - Optional configuration override
  * @param skipNodeIds - Optional set of node IDs that already have embeddings (incremental mode)
+ * @param context - Optional repo/server context for metadata enrichment
+ * @param existingEmbeddings - Optional map of nodeId → contentHash for incremental mode.
+ *        Nodes whose hash matches are skipped; nodes with a changed hash are DELETE'd
+ *        and re-embedded; nodes not in the map are embedded fresh.
+
  */
 export const runEmbeddingPipeline = async (
   executeQuery: (cypher: string) => Promise<any[]>,
-  executeWithReusedStatement: (cypher: string, paramsList: Array<Record<string, any>>) => Promise<void>,
+  executeWithReusedStatement: (
+    cypher: string,
+    paramsList: Array<Record<string, any>>,
+  ) => Promise<void>,
   onProgress: EmbeddingProgressCallback,
   config: Partial<EmbeddingConfig> = {},
   skipNodeIds?: Set<string>,
-): Promise<void> => {
-  const finalConfig = { ...DEFAULT_EMBEDDING_CONFIG, ...config };
+  context?: EmbeddingContext,
+  existingEmbeddings?: Map<string, string>,
+): Promise<EmbeddingPipelineResult> => {
+  const finalConfig = resolveEmbeddingConfig(config);
+  let totalChunks = 0;
 
   try {
+    const vectorAvailable = await ensureVectorExtensionAvailable();
+    if (!vectorAvailable && isDev) {
+      logger.warn(vectorUnavailableMessage);
+    }
+
     // Phase 1: Load embedding model
     onProgress({
       phase: 'loading-model',
@@ -161,14 +268,16 @@ export const runEmbeddingPipeline = async (
       modelDownloadPercent: 0,
     });
 
-    await initEmbedder((modelProgress: ModelProgress) => {
-      const downloadPercent = modelProgress.progress ?? 0;
-      onProgress({
-        phase: 'loading-model',
-        percent: Math.round(downloadPercent * 0.2),
-        modelDownloadPercent: downloadPercent,
-      });
-    }, finalConfig);
+    if (!isEmbedderReady()) {
+      await initEmbedder((modelProgress: ModelProgress) => {
+        const downloadPercent = modelProgress.progress ?? 0;
+        onProgress({
+          phase: 'loading-model',
+          percent: Math.round(downloadPercent * 0.2),
+          modelDownloadPercent: downloadPercent,
+        });
+      }, finalConfig);
+    }
 
     onProgress({
       phase: 'loading-model',
@@ -177,40 +286,105 @@ export const runEmbeddingPipeline = async (
     });
 
     if (isDev) {
-      console.log('🔍 Querying embeddable nodes...');
+      logger.info('🔍 Querying embeddable nodes...');
     }
 
     // Phase 2: Query embeddable nodes
     let nodes = await queryEmbeddableNodes(executeQuery);
 
-    // Incremental mode: filter out nodes that already have embeddings
-    if (skipNodeIds && skipNodeIds.size > 0) {
+    // Apply context metadata
+    if (context?.repoName) {
+      for (const node of nodes) {
+        node.repoName = context.repoName;
+        node.serverName = context.serverName;
+      }
+    }
+
+    // Incremental mode: compare content hashes, delete stale rows, skip fresh ones.
+    // Computed hashes for stale nodes are cached so batchInsertEmbeddings can reuse them
+    // (avoids double computation).
+    const computedStaleHashes = new Map<string, string>();
+    if (existingEmbeddings && existingEmbeddings.size > 0) {
       const beforeCount = nodes.length;
-      nodes = nodes.filter(n => !skipNodeIds.has(n.id));
+      const staleNodeIds: string[] = [];
+      nodes = nodes.filter((n) => {
+        const existingHash = existingEmbeddings.get(n.id);
+        if (existingHash === undefined) {
+          // New node — needs embedding
+          return true;
+        }
+        const currentHash = contentHashForNode(n, finalConfig);
+        if (currentHash !== existingHash) {
+          // Content changed — cache hash for reuse during insert, mark for DELETE + re-embed
+          computedStaleHashes.set(n.id, currentHash);
+          staleNodeIds.push(n.id);
+          return true;
+        }
+        // Hash matches — skip (fresh); no need to cache hash for skipped nodes
+        return false;
+      });
+
+      // DELETE stale embedding rows so they can be re-inserted
+      // (Kuzu forbids SET on vector-indexed properties; DELETE-then-INSERT is the sanctioned pattern)
+      if (staleNodeIds.length > 0) {
+        if (isDev) {
+          logger.info(`🔄 Deleting ${staleNodeIds.length} stale embedding rows for re-embed`);
+        }
+        try {
+          await executeWithReusedStatement(
+            `MATCH (e:${EMBEDDING_TABLE_NAME} {nodeId: $nodeId}) DELETE e`,
+            staleNodeIds.map((nodeId) => ({ nodeId })),
+          );
+        } catch (err) {
+          // "does not exist" = rows already gone — safe to proceed.
+          // All other errors risk vector-index corruption (Kuzu requires DELETE-before-INSERT
+          // for vector-indexed properties) — propagate so the pipeline aborts cleanly.
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!msg.includes('does not exist')) {
+            throw new Error(
+              `[embed] Failed to delete stale embedding rows — aborting to prevent vector-index corruption: ${msg}`,
+            );
+          }
+        }
+      }
+
       if (isDev) {
-        console.log(`📦 Incremental embeddings: ${beforeCount} total, ${skipNodeIds.size} cached, ${nodes.length} to embed`);
+        logger.info(
+          `📦 Incremental embeddings: ${beforeCount} total, ${existingEmbeddings.size} cached, ${staleNodeIds.length} stale, ${nodes.length} to embed`,
+        );
       }
     }
 
     const totalNodes = nodes.length;
 
     if (isDev) {
-      console.log(`📊 Found ${totalNodes} embeddable nodes`);
+      logger.info(`📊 Found ${totalNodes} embeddable nodes`);
     }
 
     if (totalNodes === 0) {
+      // Ensure the vector index exists even when no new nodes need embedding.
+      // A prior crash or first-time incremental run may have left CodeEmbedding
+      // rows without ever reaching index creation.
+      const vectorIndexReady = await createVectorIndex(executeQuery);
+
       onProgress({
         phase: 'ready',
         percent: 100,
         nodesProcessed: 0,
         totalNodes: 0,
       });
-      return;
+      return {
+        nodesProcessed: 0,
+        chunksProcessed: 0,
+        vectorIndexReady,
+        semanticMode: vectorIndexReady ? 'vector-index' : 'exact-scan',
+      };
     }
 
-    // Phase 3: Batch embed nodes
+    // Phase 3: Chunk + embed nodes
     const batchSize = finalConfig.batchSize;
-    const totalBatches = Math.ceil(totalNodes / batchSize);
+    const chunkSize = finalConfig.chunkSize;
+    const overlap = finalConfig.overlap;
     let processedNodes = 0;
 
     onProgress({
@@ -219,39 +393,124 @@ export const runEmbeddingPipeline = async (
       nodesProcessed: 0,
       totalNodes,
       currentBatch: 0,
-      totalBatches,
+      totalBatches: Math.ceil(totalNodes / batchSize),
     });
 
-    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-      const start = batchIndex * batchSize;
-      const end = Math.min(start + batchSize, totalNodes);
-      const batch = nodes.slice(start, end);
+    // Process in batches of nodes
+    for (let batchIndex = 0; batchIndex < totalNodes; batchIndex += batchSize) {
+      const batch = nodes.slice(batchIndex, batchIndex + batchSize);
 
-      // Generate texts for this batch
-      const texts = generateBatchEmbeddingTexts(batch, finalConfig);
+      // Chunk each node and generate text
+      const allTexts: string[] = [];
+      const allUpdates: Array<{
+        nodeId: string;
+        chunkIndex: number;
+        startLine: number;
+        endLine: number;
+        contentHash: string;
+      }> = [];
 
-      // Embed the batch
-      const embeddings = await embedBatch(texts);
+      for (const node of batch) {
+        const isShort = isShortLabel(node.label);
+        const startLine = node.startLine ?? 0;
+        const endLine = node.endLine ?? 0;
 
-      // Update LadybugDB with embeddings
-      const updates = batch.map((node, i) => ({
-        id: node.id,
-        embedding: embeddingToArray(embeddings[i]),
-      }));
+        // Extract structural names for class-like nodes via AST extractors
+        if (!isShort && STRUCTURAL_LABELS.has(node.label)) {
+          try {
+            const names = await extractStructuralNames(node.content, node.filePath);
+            node.methodNames = names.methodNames;
+            node.fieldNames = names.fieldNames;
+          } catch {
+            // AST extraction failed — names stay undefined, text-generator handles gracefully
+          }
+        }
 
-      await batchInsertEmbeddings(executeWithReusedStatement, updates);
+        // Compute content hash once per node (re-use cached value for stale nodes)
+        const hash = computedStaleHashes.get(node.id) ?? contentHashForNode(node, finalConfig);
+
+        let chunks: Array<{ text: string; chunkIndex: number; startLine: number; endLine: number }>;
+        if (isShort) {
+          chunks = [{ text: node.content, chunkIndex: 0, startLine, endLine }];
+        } else {
+          try {
+            chunks = await chunkNode(
+              node.label,
+              node.content,
+              node.filePath,
+              startLine,
+              endLine,
+              chunkSize,
+              overlap,
+            );
+          } catch (chunkErr) {
+            if (isDev) {
+              logger.warn(
+                { chunkErr },
+                `⚠️ AST chunking failed for ${node.label} "${node.name}" (${node.filePath}), falling back to character-based chunking:`,
+              );
+            }
+            chunks = characterChunk(node.content, startLine, endLine, chunkSize, overlap);
+          }
+        }
+
+        let prevTail = '';
+        for (const chunk of chunks) {
+          const text = generateEmbeddingText(
+            node,
+            chunk.text,
+            finalConfig,
+            chunk.chunkIndex,
+            prevTail,
+          );
+          allTexts.push(text);
+          allUpdates.push({
+            nodeId: node.id,
+            chunkIndex: chunk.chunkIndex,
+            startLine: chunk.startLine,
+            endLine: chunk.endLine,
+            contentHash: hash,
+          });
+          prevTail = overlap > 0 ? chunk.text.slice(-overlap) : '';
+        }
+      }
+
+      // Embed chunk texts in sub-batches to control memory
+      const EMBED_SUB_BATCH = finalConfig.subBatchSize;
+      for (let si = 0; si < allTexts.length; si += EMBED_SUB_BATCH) {
+        const subTexts = allTexts.slice(si, si + EMBED_SUB_BATCH);
+        const subUpdates = allUpdates.slice(si, si + EMBED_SUB_BATCH);
+
+        let embeddings: Float32Array[];
+        try {
+          embeddings = await embedBatch(subTexts);
+        } catch (embedErr) {
+          logger.error(
+            { embedErr },
+            `❌ embedBatch failed for ${subTexts.length} texts (first: "${subTexts[0]?.substring(0, 80)}..."):`,
+          );
+          throw embedErr;
+        }
+
+        const dbUpdates = subUpdates.map((u, i) => ({
+          ...u,
+          embedding: embeddingToArray(embeddings[i]),
+        }));
+
+        await batchInsertEmbeddings(executeWithReusedStatement, dbUpdates);
+      }
 
       processedNodes += batch.length;
+      totalChunks += allUpdates.length;
 
-      // Report progress (20-90% for embedding phase)
-      const embeddingProgress = 20 + ((processedNodes / totalNodes) * 70);
+      const embeddingProgress = 20 + (processedNodes / totalNodes) * 70;
       onProgress({
         phase: 'embedding',
         percent: Math.round(embeddingProgress),
         nodesProcessed: processedNodes,
         totalNodes,
-        currentBatch: batchIndex + 1,
-        totalBatches,
+        currentBatch: Math.floor(batchIndex / batchSize) + 1,
+        totalBatches: Math.ceil(totalNodes / batchSize),
       });
     }
 
@@ -264,12 +523,11 @@ export const runEmbeddingPipeline = async (
     });
 
     if (isDev) {
-      console.log('📇 Creating vector index...');
+      logger.info('📇 Creating vector index...');
     }
 
-    await createVectorIndex(executeQuery);
+    const vectorIndexReady = await createVectorIndex(executeQuery);
 
-    // Complete
     onProgress({
       phase: 'ready',
       percent: 100,
@@ -278,13 +536,21 @@ export const runEmbeddingPipeline = async (
     });
 
     if (isDev) {
-      console.log('✅ Embedding pipeline complete!');
+      logger.info(
+        `✅ Embedding pipeline complete! (${totalChunks} chunks from ${totalNodes} nodes)`,
+      );
     }
+    return {
+      nodesProcessed: totalNodes,
+      chunksProcessed: totalChunks,
+      vectorIndexReady,
+      semanticMode: vectorIndexReady ? 'vector-index' : 'exact-scan',
+    };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    
+
     if (isDev) {
-      console.error('❌ Embedding pipeline error:', error);
+      logger.error({ error }, '❌ Embedding pipeline error:');
     }
 
     onProgress({
@@ -298,78 +564,115 @@ export const runEmbeddingPipeline = async (
 };
 
 /**
- * Perform semantic search using the vector index
- * 
- * Uses CodeEmbedding table and queries each node table to get metadata
- * 
- * @param executeQuery - Function to execute Cypher queries
- * @param query - Search query text
- * @param k - Number of results to return (default: 10)
- * @param maxDistance - Maximum distance threshold (default: 0.5)
- * @returns Array of search results ordered by relevance
+ * Perform semantic search using the vector index with chunk deduplication
  */
 export const semanticSearch = async (
   executeQuery: (cypher: string) => Promise<any[]>,
   query: string,
   k: number = 10,
-  maxDistance: number = 0.5
+  maxDistance: number = 0.5,
 ): Promise<SemanticSearchResult[]> => {
   if (!isEmbedderReady()) {
     throw new Error('Embedding model not initialized. Run embedding pipeline first.');
   }
 
-  // Embed the query
   const queryEmbedding = await embedText(query);
   const queryVec = embeddingToArray(queryEmbedding);
   const queryVecStr = `[${queryVec.join(',')}]`;
 
-  // Query the vector index on CodeEmbedding to get nodeIds and distances
-  const vectorQuery = `
-    CALL QUERY_VECTOR_INDEX('CodeEmbedding', 'code_embedding_idx', 
-      CAST(${queryVecStr} AS FLOAT[384]), ${k})
-    YIELD node AS emb, distance
-    WITH emb, distance
-    WHERE distance < ${maxDistance}
-    RETURN emb.nodeId AS nodeId, distance
-    ORDER BY distance
-  `;
+  let bestChunks = new Map<
+    string,
+    { distance: number; chunkIndex: number; startLine: number; endLine: number }
+  >();
+  if (await loadVectorExtension()) {
+    try {
+      bestChunks = await collectBestChunks(k, async (fetchLimit) => {
+        const vectorQuery = `
+          CALL QUERY_VECTOR_INDEX('${EMBEDDING_TABLE_NAME}', '${EMBEDDING_INDEX_NAME}',
+            CAST(${queryVecStr} AS FLOAT[${queryVec.length}]), ${fetchLimit})
+          YIELD node AS emb, distance
+          WITH emb, distance
+          WHERE distance < ${maxDistance}
+          RETURN emb.nodeId AS nodeId, emb.chunkIndex AS chunkIndex,
+                 emb.startLine AS startLine, emb.endLine AS endLine, distance
+          ORDER BY distance
+        `;
 
-  const embResults = await executeQuery(vectorQuery);
-  
-  if (embResults.length === 0) {
+        const embResults = await executeQuery(vectorQuery);
+        return embResults.map((row) => ({
+          nodeId: row.nodeId ?? row[0],
+          chunkIndex: row.chunkIndex ?? row[1] ?? 0,
+          startLine: row.startLine ?? row[2] ?? 0,
+          endLine: row.endLine ?? row[3] ?? 0,
+          distance: row.distance ?? row[4],
+        }));
+      });
+    } catch {
+      bestChunks = new Map();
+    }
+  }
+
+  if (bestChunks.size === 0) {
+    const countRows = await executeQuery(
+      `MATCH (e:${EMBEDDING_TABLE_NAME}) RETURN count(e) AS cnt`,
+    );
+    const countRow = countRows[0];
+    const embeddingCount = Number(countRow?.cnt ?? countRow?.[0] ?? 0);
+    const exactLimit = getExactScanLimit();
+    if (embeddingCount > 0 && embeddingCount <= exactLimit) {
+      const rows = await executeQuery(`
+        MATCH (e:${EMBEDDING_TABLE_NAME})
+        RETURN e.nodeId AS nodeId, e.chunkIndex AS chunkIndex,
+               e.startLine AS startLine, e.endLine AS endLine, e.embedding AS embedding
+      `);
+      const exactRows: ExactEmbeddingRow[] = rows.map((row) => ({
+        nodeId: row.nodeId ?? row[0],
+        chunkIndex: row.chunkIndex ?? row[1] ?? 0,
+        startLine: row.startLine ?? row[2] ?? 0,
+        endLine: row.endLine ?? row[3] ?? 0,
+        embedding: row.embedding ?? row[4] ?? [],
+      }));
+      bestChunks = new Map(
+        rankExactEmbeddingRows(exactRows, queryVec, k, maxDistance).map((row) => [
+          row.nodeId,
+          {
+            distance: row.distance,
+            chunkIndex: row.chunkIndex,
+            startLine: row.startLine,
+            endLine: row.endLine,
+          },
+        ]),
+      );
+    }
+  }
+
+  if (bestChunks.size === 0) {
     return [];
   }
 
   // Group results by label for batched metadata queries
-  const byLabel = new Map<string, Array<{ nodeId: string; distance: number }>>();
-  for (const embRow of embResults) {
-    const nodeId = embRow.nodeId ?? embRow[0];
-    const distance = embRow.distance ?? embRow[1];
+  const byLabel = new Map<
+    string,
+    Array<{ nodeId: string; distance: number } & Record<string, any>>
+  >();
+  for (const [nodeId, chunk] of Array.from(bestChunks.entries()).slice(0, k)) {
     const labelEndIdx = nodeId.indexOf(':');
     const label = labelEndIdx > 0 ? nodeId.substring(0, labelEndIdx) : 'Unknown';
     if (!byLabel.has(label)) byLabel.set(label, []);
-    byLabel.get(label)!.push({ nodeId, distance });
+    byLabel.get(label)!.push({ nodeId, ...chunk });
   }
 
   // Batch-fetch metadata per label
   const results: SemanticSearchResult[] = [];
 
   for (const [label, items] of byLabel) {
-    const idList = items.map(i => `'${i.nodeId.replace(/'/g, "''")}'`).join(', ');
+    const idList = items.map((i) => `'${i.nodeId.replace(/'/g, "''")}'`).join(', ');
     try {
-      let nodeQuery: string;
-      if (label === 'File') {
-        nodeQuery = `
-          MATCH (n:File) WHERE n.id IN [${idList}]
-          RETURN n.id AS id, n.name AS name, n.filePath AS filePath
-        `;
-      } else {
-        nodeQuery = `
-          MATCH (n:${label}) WHERE n.id IN [${idList}]
-          RETURN n.id AS id, n.name AS name, n.filePath AS filePath,
-                 n.startLine AS startLine, n.endLine AS endLine
-        `;
-      }
+      const nodeQuery = `
+        MATCH (n:\`${label}\`) WHERE n.id IN [${idList}]
+        RETURN n.id AS id, n.name AS name, n.filePath AS filePath,
+               n.startLine AS startLine, n.endLine AS endLine
+      `;
       const nodeRows = await executeQuery(nodeQuery);
       const rowMap = new Map<string, any>();
       for (const row of nodeRows) {
@@ -385,8 +688,8 @@ export const semanticSearch = async (
             label,
             filePath: nodeRow.filePath ?? nodeRow[2] ?? '',
             distance: item.distance,
-            startLine: label !== 'File' ? (nodeRow.startLine ?? nodeRow[3]) : undefined,
-            endLine: label !== 'File' ? (nodeRow.endLine ?? nodeRow[4]) : undefined,
+            startLine: item.startLine,
+            endLine: item.endLine,
           });
         }
       }
@@ -395,7 +698,6 @@ export const semanticSearch = async (
     }
   }
 
-  // Re-sort by distance since batch queries may have mixed order
   results.sort((a, b) => a.distance - b.distance);
 
   return results;
@@ -403,28 +705,16 @@ export const semanticSearch = async (
 
 /**
  * Semantic search with graph expansion (flattened results)
- * 
- * Note: With multi-table schema, graph traversal is simplified.
- * Returns semantic matches with their metadata.
- * For full graph traversal, use execute_vector_cypher tool directly.
- * 
- * @param executeQuery - Function to execute Cypher queries
- * @param query - Search query text
- * @param k - Number of initial semantic matches (default: 5)
- * @param _hops - Unused (kept for API compatibility).
- * @returns Semantic matches with metadata
  */
 export const semanticSearchWithContext = async (
   executeQuery: (cypher: string) => Promise<any[]>,
   query: string,
   k: number = 5,
-  _hops: number = 1
+  _hops: number = 1,
 ): Promise<any[]> => {
-  // For multi-table schema, just return semantic search results
-  // Graph traversal is complex with separate tables - use execute_vector_cypher instead
   const results = await semanticSearch(executeQuery, query, k, 0.5);
-  
-  return results.map(r => ({
+
+  return results.map((r) => ({
     matchId: r.nodeId,
     matchName: r.name,
     matchLabel: r.label,
@@ -436,4 +726,3 @@ export const semanticSearchWithContext = async (
     relationType: null,
   }));
 };
-

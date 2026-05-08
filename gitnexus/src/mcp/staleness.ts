@@ -1,8 +1,5 @@
 /**
- * Staleness Check
- * 
- * Checks if the GitNexus index is behind the current git HEAD.
- * Returns a hint for the LLM to call analyze if stale.
+ * Staleness Check — re-export from core (see `core/git-staleness.ts`).
  */
 
 import { execFileSync } from 'child_process';

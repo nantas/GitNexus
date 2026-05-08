@@ -1,13 +1,55 @@
-import type { SyntaxNode } from '../utils.js';
-import type { LanguageTypeConfig, ParameterExtractor, TypeBindingExtractor, InitializerExtractor, ClassNameLookup, ConstructorBindingScanner, PendingAssignmentExtractor, ForLoopExtractor } from './types.js';
-import { extractSimpleTypeName, extractVarName, resolveIterableElementType, methodToTypeArgPosition, type TypeArgPosition } from './shared.js';
+import type { SyntaxNode } from '../utils/ast-helpers.js';
+import type {
+  LanguageTypeConfig,
+  ParameterExtractor,
+  TypeBindingExtractor,
+  InitializerExtractor,
+  ClassNameLookup,
+  ConstructorBindingScanner,
+  PendingAssignmentExtractor,
+  ForLoopExtractor,
+  LiteralTypeInferrer,
+  ConstructorTypeDetector,
+  DeclaredTypeUnwrapper,
+} from './types.js';
+import {
+  extractSimpleTypeName,
+  extractVarName,
+  resolveIterableElementType,
+  methodToTypeArgPosition,
+  type TypeArgPosition,
+} from './shared.js';
 
-const DECLARATION_NODE_TYPES: ReadonlySet<string> = new Set([
-  'declaration',
-]);
+const DECLARATION_NODE_TYPES: ReadonlySet<string> = new Set(['declaration']);
+
+/** Smart pointer factory function names that create a typed object. */
+const SMART_PTR_FACTORIES = new Set(['make_shared', 'make_unique', 'make_shared_for_overwrite']);
+
+/** Smart pointer wrapper type names. When the declared type is a smart pointer,
+ *  the inner template type is extracted for virtual dispatch comparison. */
+const SMART_PTR_WRAPPERS = new Set(['shared_ptr', 'unique_ptr', 'weak_ptr']);
+
+/** Extract the first type name from a template_argument_list child.
+ *  Unwraps type_descriptor wrappers common in tree-sitter-cpp ASTs.
+ *  Returns undefined if no template arguments or no type found. */
+export const extractFirstTemplateTypeArg = (parentNode: SyntaxNode): string | undefined => {
+  const templateArgs = parentNode.children.find(
+    (c: SyntaxNode) => c.type === 'template_argument_list',
+  );
+  if (!templateArgs?.firstNamedChild) return undefined;
+  let argNode: SyntaxNode | null = templateArgs.firstNamedChild;
+  if (argNode.type === 'type_descriptor') {
+    const inner = argNode.childForFieldName('type');
+    if (inner) argNode = inner;
+  }
+  return extractSimpleTypeName(argNode) ?? undefined;
+};
 
 /** C++: Type x = ...; Type* x; Type& x; */
-const extractDeclaration: TypeBindingExtractor = (node: SyntaxNode, env: Map<string, string>): void => {
+const extractDeclaration: TypeBindingExtractor = (
+  node: SyntaxNode,
+  env: Map<string, string>,
+): void => {
   const typeNode = node.childForFieldName('type');
   if (!typeNode) return;
   const typeName = extractSimpleTypeName(typeNode);
@@ -17,15 +59,15 @@ const extractDeclaration: TypeBindingExtractor = (node: SyntaxNode, env: Map<str
   if (!declarator) return;
 
   // init_declarator: Type x = value
-  const nameNode = declarator.type === 'init_declarator'
-    ? declarator.childForFieldName('declarator')
-    : declarator;
+  const nameNode =
+    declarator.type === 'init_declarator' ? declarator.childForFieldName('declarator') : declarator;
   if (!nameNode) return;
 
   // Handle pointer/reference declarators
-  const finalName = nameNode.type === 'pointer_declarator' || nameNode.type === 'reference_declarator'
-    ? nameNode.firstNamedChild
-    : nameNode;
+  const finalName =
+    nameNode.type === 'pointer_declarator' || nameNode.type === 'reference_declarator'
+      ? nameNode.firstNamedChild
+      : nameNode;
   if (!finalName) return;
 
   const varName = extractVarName(finalName);
@@ -33,7 +75,11 @@ const extractDeclaration: TypeBindingExtractor = (node: SyntaxNode, env: Map<str
 };
 
 /** C++: auto x = new User(); auto x = User(); */
-const extractInitializer: InitializerExtractor = (node: SyntaxNode, env: Map<string, string>, classNames: ClassNameLookup): void => {
+const extractInitializer: InitializerExtractor = (
+  node: SyntaxNode,
+  env: Map<string, string>,
+  classNames: ClassNameLookup,
+): void => {
   const typeNode = node.childForFieldName('type');
   if (!typeNode) return;
 
@@ -43,7 +89,8 @@ const extractInitializer: InitializerExtractor = (node: SyntaxNode, env: Map<str
     typeText !== 'auto' &&
     typeText !== 'decltype(auto)' &&
     typeNode.type !== 'placeholder_type_specifier'
-  ) return;
+  )
+    return;
 
   const declarator = node.childForFieldName('declarator');
   if (!declarator) return;
@@ -88,6 +135,29 @@ const extractInitializer: InitializerExtractor = (node: SyntaxNode, env: Map<str
     } else if (func.type === 'identifier') {
       const text = func.text;
       if (text && classNames.has(text)) env.set(varName, text);
+    } else {
+      // auto x = std::make_shared<Dog>() — smart pointer factory via template_function.
+      // AST: call_expression > function: qualified_identifier > template_function
+      //   or: call_expression > function: template_function (unqualified)
+      const templateFunc =
+        func.type === 'template_function'
+          ? func
+          : func.type === 'qualified_identifier' || func.type === 'scoped_identifier'
+            ? (func.namedChildren.find((c: SyntaxNode) => c.type === 'template_function') ?? null)
+            : null;
+      if (templateFunc) {
+        const nameNode = templateFunc.firstNamedChild;
+        if (nameNode) {
+          const funcName =
+            nameNode.type === 'qualified_identifier' || nameNode.type === 'scoped_identifier'
+              ? (nameNode.lastNamedChild?.text ?? '')
+              : nameNode.text;
+          if (SMART_PTR_FACTORIES.has(funcName)) {
+            const typeName = extractFirstTemplateTypeArg(templateFunc);
+            if (typeName) env.set(varName, typeName);
+          }
+        }
+      }
     }
     return;
   }
@@ -110,9 +180,10 @@ const extractParameter: ParameterExtractor = (node: SyntaxNode, env: Map<string,
     typeNode = node.childForFieldName('type');
     const declarator = node.childForFieldName('declarator');
     if (declarator) {
-      nameNode = declarator.type === 'pointer_declarator' || declarator.type === 'reference_declarator'
-        ? declarator.firstNamedChild
-        : declarator;
+      nameNode =
+        declarator.type === 'pointer_declarator' || declarator.type === 'reference_declarator'
+          ? declarator.firstNamedChild
+          : declarator;
     }
   } else {
     nameNode = node.childForFieldName('name') ?? node.childForFieldName('pattern');
@@ -131,7 +202,12 @@ const scanConstructorBinding: ConstructorBindingScanner = (node) => {
   const typeNode = node.childForFieldName('type');
   if (!typeNode) return undefined;
   const typeText = typeNode.text;
-  if (typeText !== 'auto' && typeText !== 'decltype(auto)' && typeNode.type !== 'placeholder_type_specifier') return undefined;
+  if (
+    typeText !== 'auto' &&
+    typeText !== 'decltype(auto)' &&
+    typeNode.type !== 'placeholder_type_specifier'
+  )
+    return undefined;
   const declarator = node.childForFieldName('declarator');
   if (!declarator || declarator.type !== 'init_declarator') return undefined;
   const value = declarator.childForFieldName('value');
@@ -143,16 +219,20 @@ const scanConstructorBinding: ConstructorBindingScanner = (node) => {
     if (!last) return undefined;
     const nameNode = declarator.childForFieldName('declarator');
     if (!nameNode) return undefined;
-    const finalName = nameNode.type === 'pointer_declarator' || nameNode.type === 'reference_declarator'
-      ? nameNode.firstNamedChild : nameNode;
+    const finalName =
+      nameNode.type === 'pointer_declarator' || nameNode.type === 'reference_declarator'
+        ? nameNode.firstNamedChild
+        : nameNode;
     if (!finalName) return undefined;
     return { varName: finalName.text, calleeName: last.text };
   }
   if (func.type !== 'identifier') return undefined;
   const nameNode = declarator.childForFieldName('declarator');
   if (!nameNode) return undefined;
-  const finalName = nameNode.type === 'pointer_declarator' || nameNode.type === 'reference_declarator'
-    ? nameNode.firstNamedChild : nameNode;
+  const finalName =
+    nameNode.type === 'pointer_declarator' || nameNode.type === 'reference_declarator'
+      ? nameNode.firstNamedChild
+      : nameNode;
   if (!finalName) return undefined;
   const varName = finalName.text;
   if (!varName) return undefined;
@@ -166,20 +246,50 @@ const extractPendingAssignment: PendingAssignmentExtractor = (node, scopeEnv) =>
   if (!typeNode) return undefined;
   // Only handle auto — typed declarations already resolved by extractDeclaration
   const typeText = typeNode.text;
-  if (typeText !== 'auto' && typeText !== 'decltype(auto)'
-    && typeNode.type !== 'placeholder_type_specifier') return undefined;
+  if (
+    typeText !== 'auto' &&
+    typeText !== 'decltype(auto)' &&
+    typeNode.type !== 'placeholder_type_specifier'
+  )
+    return undefined;
   const declarator = node.childForFieldName('declarator');
   if (!declarator || declarator.type !== 'init_declarator') return undefined;
   const value = declarator.childForFieldName('value');
-  if (!value || value.type !== 'identifier') return undefined;
+  if (!value) return undefined;
   const nameNode = declarator.childForFieldName('declarator');
   if (!nameNode) return undefined;
-  const finalName = nameNode.type === 'pointer_declarator' || nameNode.type === 'reference_declarator'
-    ? nameNode.firstNamedChild : nameNode;
+  const finalName =
+    nameNode.type === 'pointer_declarator' || nameNode.type === 'reference_declarator'
+      ? nameNode.firstNamedChild
+      : nameNode;
   if (!finalName) return undefined;
   const lhs = extractVarName(finalName);
   if (!lhs || scopeEnv.has(lhs)) return undefined;
-  return { kind: 'copy', lhs, rhs: value.text };
+  if (value.type === 'identifier') return { kind: 'copy', lhs, rhs: value.text };
+  // field_expression RHS → fieldAccess (a.field)
+  if (value.type === 'field_expression') {
+    const obj = value.firstNamedChild;
+    const field = value.lastNamedChild;
+    if (obj?.type === 'identifier' && field?.type === 'field_identifier') {
+      return { kind: 'fieldAccess', lhs, receiver: obj.text, field: field.text };
+    }
+  }
+  // call_expression RHS
+  if (value.type === 'call_expression') {
+    const funcNode = value.childForFieldName('function');
+    if (funcNode?.type === 'identifier') {
+      return { kind: 'callResult', lhs, callee: funcNode.text };
+    }
+    // method call with receiver: call_expression → function: field_expression
+    if (funcNode?.type === 'field_expression') {
+      const obj = funcNode.firstNamedChild;
+      const field = funcNode.lastNamedChild;
+      if (obj?.type === 'identifier' && field?.type === 'field_identifier') {
+        return { kind: 'methodCallResult', lhs, receiver: obj.text, method: field.text };
+      }
+    }
+  }
+  return undefined;
 };
 
 // --- For-loop Tier 1c ---
@@ -210,7 +320,11 @@ const extractCppTemplateTypeArgs = (templateTypeNode: SyntaxNode): string[] => {
 /** Extract element type from a C++ type annotation AST node.
  *  Handles: template_type (vector<User>, map<string, User>),
  *  pointer/reference types (User*, User&). */
-const extractCppElementTypeFromTypeNode = (typeNode: SyntaxNode, pos: TypeArgPosition = 'last', depth = 0): string | undefined => {
+const extractCppElementTypeFromTypeNode = (
+  typeNode: SyntaxNode,
+  pos: TypeArgPosition = 'last',
+  depth = 0,
+): string | undefined => {
   if (depth > 50) return undefined;
   // template_type: vector<User>, map<string, User> — extract type arg based on position
   if (typeNode.type === 'template_type') {
@@ -218,8 +332,11 @@ const extractCppElementTypeFromTypeNode = (typeNode: SyntaxNode, pos: TypeArgPos
     if (args.length >= 1) return pos === 'first' ? args[0] : args[args.length - 1];
   }
   // reference/pointer types: unwrap and recurse (vector<User>& → vector<User>)
-  if (typeNode.type === 'reference_type' || typeNode.type === 'pointer_type'
-    || typeNode.type === 'type_descriptor') {
+  if (
+    typeNode.type === 'reference_type' ||
+    typeNode.type === 'pointer_type' ||
+    typeNode.type === 'type_descriptor'
+  ) {
     const inner = typeNode.lastNamedChild;
     if (inner) return extractCppElementTypeFromTypeNode(inner, pos, depth + 1);
   }
@@ -233,7 +350,11 @@ const extractCppElementTypeFromTypeNode = (typeNode: SyntaxNode, pos: TypeArgPos
 
 /** Walk up from a for-range-loop to the enclosing function_definition and search parameters
  *  for one named `iterableName`. Returns the element type from its annotation. */
-const findCppParamElementType = (iterableName: string, startNode: SyntaxNode, pos: TypeArgPosition = 'last'): string | undefined => {
+const findCppParamElementType = (
+  iterableName: string,
+  startNode: SyntaxNode,
+  pos: TypeArgPosition = 'last',
+): string | undefined => {
   let current: SyntaxNode | null = startNode.parent;
   while (current) {
     if (current.type === 'function_definition') {
@@ -248,7 +369,10 @@ const findCppParamElementType = (iterableName: string, startNode: SyntaxNode, po
           if (!paramDeclarator) continue;
           // Unwrap reference/pointer declarators: vector<User>& users → &users
           let identNode = paramDeclarator;
-          if (identNode.type === 'reference_declarator' || identNode.type === 'pointer_declarator') {
+          if (
+            identNode.type === 'reference_declarator' ||
+            identNode.type === 'pointer_declarator'
+          ) {
             identNode = identNode.firstNamedChild ?? identNode;
           }
           if (identNode.text !== iterableName) continue;
@@ -266,7 +390,10 @@ const findCppParamElementType = (iterableName: string, startNode: SyntaxNode, po
 /** C++: for (auto& user : users) — extract loop variable binding.
  *  Handles explicit types (for (User& user : users)) and auto (for (auto& user : users)).
  *  For auto, resolves element type from the iterable's container type. */
-const extractForLoopBinding: ForLoopExtractor = (node, { scopeEnv, declarationTypeNodes, scope } ): void => {
+const extractForLoopBinding: ForLoopExtractor = (
+  node,
+  { scopeEnv, declarationTypeNodes, scope },
+): void => {
   if (node.type !== 'for_range_loop') return;
 
   const typeNode = node.childForFieldName('type');
@@ -299,10 +426,11 @@ const extractForLoopBinding: ForLoopExtractor = (node, { scopeEnv, declarationTy
   if (!varName) return;
 
   // Check if the type is auto/placeholder — if not, use the explicit type directly
-  const isAuto = typeNode.type === 'placeholder_type_specifier'
-    || typeNode.text === 'auto'
-    || typeNode.text === 'const auto'
-    || typeNode.text === 'decltype(auto)';
+  const isAuto =
+    typeNode.type === 'placeholder_type_specifier' ||
+    typeNode.text === 'auto' ||
+    typeNode.text === 'const auto' ||
+    typeNode.text === 'decltype(auto)';
 
   if (!isAuto) {
     // Explicit type: for (User& user : users) — extract directly
@@ -340,11 +468,82 @@ const extractForLoopBinding: ForLoopExtractor = (node, { scopeEnv, declarationTy
   const containerTypeName = scopeEnv.get(iterableName);
   const typeArgPos = methodToTypeArgPosition(methodName, containerTypeName);
   const elementType = resolveIterableElementType(
-    iterableName, node, scopeEnv, declarationTypeNodes, scope,
-    extractCppElementTypeFromTypeNode, findCppParamElementType,
+    iterableName,
+    node,
+    scopeEnv,
+    declarationTypeNodes,
+    scope,
+    extractCppElementTypeFromTypeNode,
+    findCppParamElementType,
     typeArgPos,
   );
   if (elementType) scopeEnv.set(varName, elementType);
+};
+
+/** Infer the type of a literal AST node for C++ overload disambiguation. */
+const inferLiteralType: LiteralTypeInferrer = (node) => {
+  switch (node.type) {
+    case 'number_literal': {
+      const t = node.text;
+      // Float suffixes
+      if (t.endsWith('f') || t.endsWith('F')) return 'float';
+      if (t.includes('.') || t.includes('e') || t.includes('E')) return 'double';
+      // Long suffix
+      if (t.endsWith('L') || t.endsWith('l') || t.endsWith('LL') || t.endsWith('ll')) return 'long';
+      return 'int';
+    }
+    case 'string_literal':
+    case 'raw_string_literal':
+    case 'concatenated_string':
+      return 'string';
+    case 'char_literal':
+      return 'char';
+    case 'true':
+    case 'false':
+      return 'bool';
+    case 'null':
+    case 'nullptr':
+      return 'null';
+    default:
+      return undefined;
+  }
+};
+
+/** C++: detect constructor type from smart pointer factory calls (make_shared<Dog>()).
+ *  Extracts the template type argument as the constructor type for virtual dispatch. */
+const detectCppConstructorType: ConstructorTypeDetector = (node, classNames) => {
+  // Navigate to the initializer value in the declaration
+  const declarator = node.childForFieldName('declarator');
+  const initDecl = declarator?.type === 'init_declarator' ? declarator : undefined;
+  if (!initDecl) return undefined;
+  const value = initDecl.childForFieldName('value');
+  if (!value || value.type !== 'call_expression') return undefined;
+
+  // Check for template_function pattern: make_shared<Dog>()
+  const func = value.childForFieldName('function');
+  if (!func || func.type !== 'template_function') return undefined;
+
+  // Extract function name (possibly qualified: std::make_shared)
+  const nameNode = func.firstNamedChild;
+  if (!nameNode) return undefined;
+  let funcName: string;
+  if (nameNode.type === 'qualified_identifier' || nameNode.type === 'scoped_identifier') {
+    funcName = nameNode.lastNamedChild?.text ?? '';
+  } else {
+    funcName = nameNode.text;
+  }
+  if (!SMART_PTR_FACTORIES.has(funcName)) return undefined;
+
+  // Extract template type argument
+  return extractFirstTemplateTypeArg(func);
+};
+
+/** Unwrap a C++ smart pointer declared type to its inner template type.
+ *  E.g., shared_ptr<Animal> → Animal. Returns the original name if not a smart pointer. */
+const unwrapCppDeclaredType: DeclaredTypeUnwrapper = (declaredType, typeNode) => {
+  if (!SMART_PTR_WRAPPERS.has(declaredType)) return declaredType;
+  if (typeNode.type !== 'template_type') return declaredType;
+  return extractFirstTemplateTypeArg(typeNode) ?? declaredType;
 };
 
 export const typeConfig: LanguageTypeConfig = {
@@ -356,4 +555,7 @@ export const typeConfig: LanguageTypeConfig = {
   scanConstructorBinding,
   extractForLoopBinding,
   extractPendingAssignment,
+  inferLiteralType,
+  detectConstructorType: detectCppConstructorType,
+  unwrapDeclaredType: unwrapCppDeclaredType,
 };

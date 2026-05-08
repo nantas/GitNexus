@@ -1,4 +1,4 @@
-import { GraphNode, GraphRelationship, KnowledgeGraph } from '../core/graph/types.js';
+import type { KnowledgeGraph } from '../core/graph/types.js';
 import { CommunityDetectionResult } from '../core/ingestion/community-processor.js';
 import { ProcessDetectionResult } from '../core/ingestion/process-processor.js';
 import type { UnityResourceProcessingResult } from '../core/ingestion/unity-resource-processor.js';

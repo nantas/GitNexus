@@ -26,7 +26,15 @@ import { runHook, parseHookOutput } from '../utils/hook-test-helpers.js';
 // ─── Paths to both hook variants ────────────────────────────────────
 
 const CJS_HOOK = path.resolve(__dirname, '..', '..', 'hooks', 'claude', 'gitnexus-hook.cjs');
-const PLUGIN_HOOK = path.resolve(__dirname, '..', '..', '..', 'gitnexus-claude-plugin', 'hooks', 'gitnexus-hook.js');
+const PLUGIN_HOOK = path.resolve(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  'gitnexus-claude-plugin',
+  'hooks',
+  'gitnexus-hook.js',
+);
 
 // ─── Test fixtures: temporary .gitnexus directory ───────────────────
 
@@ -39,12 +47,12 @@ beforeAll(() => {
   fs.mkdirSync(gitNexusDir, { recursive: true });
 
   // Initialize a bare git repo so git rev-parse HEAD works
-  spawnSync('git', ['init'], { cwd: tmpDir, stdio: 'pipe' });
-  spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmpDir, stdio: 'pipe' });
-  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tmpDir, stdio: 'pipe' });
+  runGit(tmpDir, ['init']);
+  runGit(tmpDir, ['config', 'user.email', 'test@test.com']);
+  runGit(tmpDir, ['config', 'user.name', 'Test']);
   fs.writeFileSync(path.join(tmpDir, 'dummy.txt'), 'hello');
-  spawnSync('git', ['add', '.'], { cwd: tmpDir, stdio: 'pipe' });
-  spawnSync('git', ['commit', '-m', 'init'], { cwd: tmpDir, stdio: 'pipe' });
+  runGit(tmpDir, ['add', '.']);
+  runGit(tmpDir, ['commit', '-m', 'init']);
 });
 
 afterAll(() => {
@@ -53,11 +61,42 @@ afterAll(() => {
 
 // ─── Helper to get HEAD commit hash ─────────────────────────────────
 
-function getHeadCommit(): string {
-  const result = spawnSync('git', ['rev-parse', 'HEAD'], {
-    cwd: tmpDir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+function runGit(dir: string, args: string[]) {
+  const result = spawnSync('git', args, {
+    cwd: dir,
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
+  if (result.status !== 0) {
+    const message = result.stderr || result.stdout || result.error?.message || 'unknown error';
+    throw new Error(`git ${args.join(' ')} failed in ${dir}: ${message}`);
+  }
+  return result;
+}
+
+function getHeadCommit(): string {
+  const result = runGit(tmpDir, ['rev-parse', 'HEAD']);
   return (result.stdout || '').trim();
+}
+
+function initGitRepo(dir: string) {
+  runGit(dir, ['init']);
+  runGit(dir, ['config', 'user.email', 'test@test.com']);
+  runGit(dir, ['config', 'user.name', 'Test']);
+  fs.writeFileSync(path.join(dir, 'file.txt'), 'hello');
+  runGit(dir, ['add', '.']);
+  runGit(dir, ['commit', '-m', 'init']);
+}
+
+function createGlobalRegistry(homeDir: string, marker: 'both' | 'registry' | 'repos' = 'both') {
+  const registryDir = path.join(homeDir, '.gitnexus');
+  fs.mkdirSync(registryDir, { recursive: true });
+  if (marker === 'both' || marker === 'repos') {
+    fs.mkdirSync(path.join(registryDir, 'repos'), { recursive: true });
+  }
+  if (marker === 'both' || marker === 'registry') {
+    fs.writeFileSync(path.join(registryDir, 'registry.json'), JSON.stringify({ repos: [] }));
+  }
 }
 
 // ─── Both hook files should exist ───────────────────────────────────
@@ -75,7 +114,10 @@ describe('Hook files exist', () => {
 // ─── Source code regression: no shell: true ──────────────────────────
 
 describe('Shell injection regression', () => {
-  for (const [label, hookPath] of [['CJS', CJS_HOOK], ['Plugin', PLUGIN_HOOK]] as const) {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
     it(`${label} hook has no shell: true in spawnSync calls`, () => {
       const source = fs.readFileSync(hookPath, 'utf-8');
       // Match spawnSync calls with shell option set to true or a variable
@@ -97,23 +139,29 @@ describe('Shell injection regression', () => {
 // ─── Source code regression: .cmd extensions for Windows ─────────────
 
 describe('Windows .cmd extension handling', () => {
-  for (const [label, hookPath] of [['CJS', CJS_HOOK], ['Plugin', PLUGIN_HOOK]] as const) {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
     it(`${label} hook uses .cmd extensions for Windows npx`, () => {
       const source = fs.readFileSync(hookPath, 'utf-8');
-      expect(source).toContain("npx.cmd");
+      expect(source).toContain('npx.cmd');
     });
   }
 
   it('Plugin hook uses .cmd extension for Windows gitnexus binary', () => {
     const source = fs.readFileSync(PLUGIN_HOOK, 'utf-8');
-    expect(source).toContain("gitnexus.cmd");
+    expect(source).toContain('gitnexus.cmd');
   });
 });
 
 // ─── Source code regression: cwd validation ─────────────────────────
 
 describe('cwd validation guards', () => {
-  for (const [label, hookPath] of [['CJS', CJS_HOOK], ['Plugin', PLUGIN_HOOK]] as const) {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
     it(`${label} hook validates cwd is absolute path`, () => {
       const source = fs.readFileSync(hookPath, 'utf-8');
       const cwdChecks = (source.match(/path\.isAbsolute\(cwd\)/g) || []).length;
@@ -126,7 +174,10 @@ describe('cwd validation guards', () => {
 // ─── Source code regression: sendHookResponse used consistently ──────
 
 describe('sendHookResponse consistency', () => {
-  for (const [label, hookPath] of [['CJS', CJS_HOOK], ['Plugin', PLUGIN_HOOK]] as const) {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
     it(`${label} hook uses sendHookResponse in both handlers`, () => {
       const source = fs.readFileSync(hookPath, 'utf-8');
       const calls = (source.match(/sendHookResponse\(/g) || []).length;
@@ -147,7 +198,10 @@ describe('sendHookResponse consistency', () => {
 // ─── Source code regression: dispatch map pattern ────────────────────
 
 describe('Dispatch map pattern', () => {
-  for (const [label, hookPath] of [['CJS', CJS_HOOK], ['Plugin', PLUGIN_HOOK]] as const) {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
     it(`${label} hook uses dispatch map instead of if/else`, () => {
       const source = fs.readFileSync(hookPath, 'utf-8');
       expect(source).toContain('const handlers = {');
@@ -162,7 +216,10 @@ describe('Dispatch map pattern', () => {
 // ─── Source code regression: debug error truncation ──────────────────
 
 describe('Debug error message truncation', () => {
-  for (const [label, hookPath] of [['CJS', CJS_HOOK], ['Plugin', PLUGIN_HOOK]] as const) {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
     it(`${label} hook truncates error messages to 200 chars`, () => {
       const source = fs.readFileSync(hookPath, 'utf-8');
       expect(source).toContain('.slice(0, 200)');
@@ -173,7 +230,10 @@ describe('Debug error message truncation', () => {
 // ─── extractPattern regression (via source analysis) ────────────────
 
 describe('extractPattern coverage', () => {
-  for (const [label, hookPath] of [['CJS', CJS_HOOK], ['Plugin', PLUGIN_HOOK]] as const) {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
     it(`${label} hook extracts pattern from Grep tool input`, () => {
       const source = fs.readFileSync(hookPath, 'utf-8');
       expect(source).toContain("toolName === 'Grep'");
@@ -202,7 +262,10 @@ describe('extractPattern coverage', () => {
 describe('Git mutation regex', () => {
   const GIT_REGEX = /\\bgit\\s\+\(commit\|merge\|rebase\|cherry-pick\|pull\)/;
 
-  for (const [label, hookPath] of [['CJS', CJS_HOOK], ['Plugin', PLUGIN_HOOK]] as const) {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
     it(`${label} hook detects git commit`, () => {
       const source = fs.readFileSync(hookPath, 'utf-8');
       expect(source).toContain('commit');
@@ -234,7 +297,10 @@ describe('Git mutation regex', () => {
 // ─── Integration: PostToolUse staleness detection ───────────────────
 
 describe('PostToolUse staleness detection (integration)', () => {
-  for (const [label, hookPath] of [['CJS', CJS_HOOK], ['Plugin', PLUGIN_HOOK]] as const) {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
     it(`${label}: emits stale notification when HEAD differs from meta`, () => {
       // Write meta.json with a different commit
       fs.writeFileSync(
@@ -405,7 +471,10 @@ describe('PostToolUse staleness detection (integration)', () => {
 // ─── Integration: cwd validation rejects relative paths ─────────────
 
 describe('cwd validation (integration)', () => {
-  for (const [label, hookPath] of [['CJS', CJS_HOOK], ['Plugin', PLUGIN_HOOK]] as const) {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
     it(`${label}: PostToolUse silent when cwd is relative`, () => {
       const result = runHook(hookPath, {
         hook_event_name: 'PostToolUse',
@@ -429,10 +498,193 @@ describe('cwd validation (integration)', () => {
   }
 });
 
+// ─── Integration: global registry lookup ────────────────────────────
+
+describe('Global registry lookup', () => {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
+    it(`${label}: PostToolUse stays silent for unindexed repo under global registry`, () => {
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitnexus-home-'));
+      const repoDir = path.join(homeDir, 'work', 'unindexed');
+      try {
+        createGlobalRegistry(homeDir);
+        fs.mkdirSync(repoDir, { recursive: true });
+        initGitRepo(repoDir);
+
+        const result = runHook(hookPath, {
+          hook_event_name: 'PostToolUse',
+          tool_name: 'Bash',
+          tool_input: { command: 'git commit -m "test"' },
+          tool_output: { exit_code: 0 },
+          cwd: repoDir,
+        });
+
+        expect(result.stdout.trim()).toBe('');
+      } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+      }
+    });
+
+    it(`${label}: PreToolUse stays silent for unindexed repo under global registry`, () => {
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitnexus-home-'));
+      const repoDir = path.join(homeDir, 'work', 'unindexed');
+      try {
+        createGlobalRegistry(homeDir);
+        fs.mkdirSync(repoDir, { recursive: true });
+        initGitRepo(repoDir);
+
+        const result = runHook(hookPath, {
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Grep',
+          tool_input: { pattern: 'validateUser' },
+          cwd: repoDir,
+        });
+
+        expect(result.stdout.trim()).toBe('');
+      } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+      }
+    });
+
+    it(`${label}: PostToolUse emits stale for indexed repo under parent global registry`, () => {
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitnexus-home-'));
+      const repoDir = path.join(homeDir, 'work', 'indexed-repo');
+      try {
+        createGlobalRegistry(homeDir);
+        fs.mkdirSync(path.join(repoDir, '.gitnexus'), { recursive: true });
+        initGitRepo(repoDir);
+        fs.writeFileSync(
+          path.join(repoDir, '.gitnexus', 'meta.json'),
+          JSON.stringify({ lastCommit: 'oldcommit', stats: {} }),
+        );
+
+        const result = runHook(hookPath, {
+          hook_event_name: 'PostToolUse',
+          tool_name: 'Bash',
+          tool_input: { command: 'git commit -m "test"' },
+          tool_output: { exit_code: 0 },
+          cwd: repoDir,
+        });
+
+        const output = parseHookOutput(result.stdout);
+        expect(output).not.toBeNull();
+        expect(output!.additionalContext).toContain('stale');
+      } finally {
+        fs.rmSync(homeDir, { recursive: true, force: true });
+      }
+    });
+
+    for (const marker of ['registry', 'repos'] as const) {
+      it(`${label}: PostToolUse skips global registry with only ${marker} marker`, () => {
+        const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitnexus-home-'));
+        const repoDir = path.join(homeDir, 'work', `unindexed-${marker}`);
+        try {
+          createGlobalRegistry(homeDir, marker);
+          fs.mkdirSync(repoDir, { recursive: true });
+          initGitRepo(repoDir);
+
+          const result = runHook(hookPath, {
+            hook_event_name: 'PostToolUse',
+            tool_name: 'Bash',
+            tool_input: { command: 'git commit -m "test"' },
+            tool_output: { exit_code: 0 },
+            cwd: repoDir,
+          });
+
+          expect(result.stdout.trim()).toBe('');
+        } finally {
+          fs.rmSync(homeDir, { recursive: true, force: true });
+        }
+      });
+    }
+  }
+});
+
+// ─── Integration: linked-worktree resolution (#1224) ───────────────
+
+describe('Linked git worktree resolution', () => {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
+    it(`${label}: PostToolUse emits stale from a linked worktree pointing at an indexed canonical repo`, () => {
+      // Layout mirrors `git worktree add ../<repo>-worktrees/feature-x`:
+      //   <root>/main-repo/.git              (canonical)
+      //   <root>/main-repo/.gitnexus/        (only here)
+      //   <root>/main-repo-worktrees/feat/   (linked worktree, no .gitnexus)
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gitnexus-worktree-'));
+      const mainRepo = path.join(root, 'main-repo');
+      const worktreePath = path.join(root, 'main-repo-worktrees', 'feat');
+      try {
+        fs.mkdirSync(mainRepo, { recursive: true });
+        initGitRepo(mainRepo);
+        fs.mkdirSync(path.join(mainRepo, '.gitnexus'), { recursive: true });
+        fs.writeFileSync(
+          path.join(mainRepo, '.gitnexus', 'meta.json'),
+          JSON.stringify({ lastCommit: 'oldcommit', stats: {} }),
+        );
+
+        // Create the linked worktree on a new branch.
+        fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+        runGit(mainRepo, ['worktree', 'add', '-b', 'feat', worktreePath]);
+
+        // Sanity: walking up from the worktree never reaches `.gitnexus`.
+        expect(fs.existsSync(path.join(worktreePath, '.gitnexus'))).toBe(false);
+        expect(fs.existsSync(path.join(path.dirname(worktreePath), '.gitnexus'))).toBe(false);
+
+        const result = runHook(hookPath, {
+          hook_event_name: 'PostToolUse',
+          tool_name: 'Bash',
+          tool_input: { command: 'git commit -m "test"' },
+          tool_output: { exit_code: 0 },
+          cwd: worktreePath,
+        });
+
+        const output = parseHookOutput(result.stdout);
+        expect(output).not.toBeNull();
+        expect(output!.additionalContext).toContain('stale');
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it(`${label}: PostToolUse silent from a linked worktree when canonical repo has no .gitnexus`, () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gitnexus-worktree-'));
+      const mainRepo = path.join(root, 'main-repo');
+      const worktreePath = path.join(root, 'main-repo-worktrees', 'feat');
+      try {
+        fs.mkdirSync(mainRepo, { recursive: true });
+        initGitRepo(mainRepo);
+        // Note: NO .gitnexus/ in the canonical repo.
+
+        fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+        runGit(mainRepo, ['worktree', 'add', '-b', 'feat', worktreePath]);
+
+        const result = runHook(hookPath, {
+          hook_event_name: 'PostToolUse',
+          tool_name: 'Bash',
+          tool_input: { command: 'git commit -m "test"' },
+          tool_output: { exit_code: 0 },
+          cwd: worktreePath,
+        });
+
+        expect(result.stdout.trim()).toBe('');
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 // ─── Integration: dispatch map routes correctly ─────────────────────
 
 describe('Dispatch map routing (integration)', () => {
-  for (const [label, hookPath] of [['CJS', CJS_HOOK], ['Plugin', PLUGIN_HOOK]] as const) {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
     it(`${label}: unknown hook_event_name produces no output`, () => {
       const result = runHook(hookPath, {
         hook_event_name: 'UnknownEvent',
@@ -489,7 +741,10 @@ describe('Dispatch map routing (integration)', () => {
 // ─── Integration: PostToolUse with missing meta.json ────────────────
 
 describe('PostToolUse with missing/corrupt meta.json', () => {
-  for (const [label, hookPath] of [['CJS', CJS_HOOK], ['Plugin', PLUGIN_HOOK]] as const) {
+  for (const [label, hookPath] of [
+    ['CJS', CJS_HOOK],
+    ['Plugin', PLUGIN_HOOK],
+  ] as const) {
     it(`${label}: emits stale when meta.json does not exist`, () => {
       const metaPath = path.join(gitNexusDir, 'meta.json');
       const hadMeta = fs.existsSync(metaPath);

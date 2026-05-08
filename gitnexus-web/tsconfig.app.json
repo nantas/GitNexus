@@ -16,9 +16,11 @@
     "skipLibCheck": true,
     "baseUrl": "./",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@shared/*": ["../shared/*"]
     },
     "types": ["vite/client"]
   },
-  "include": ["src"]
+  "include": ["src", "../shared"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }

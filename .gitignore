@@ -23,6 +23,7 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+docker/.env
 
 # Logs
 *.log
@@ -33,6 +34,8 @@ coverage/
 
 # Misc
 *.local
+HANDOFF.md
+HANDOFF*.md
 
 .vercel
 

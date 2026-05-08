@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Mock all the heavy imports before importing index
 vi.mock('../../src/cli/analyze.js', () => ({
@@ -24,7 +24,7 @@ describe('CLI commands', () => {
       const pkg = await import('../../package.json', { with: { type: 'json' } });
       expect(pkg.default.scripts.test).toBeDefined();
       expect(pkg.default.scripts['test:integration']).toBeDefined();
-      expect(pkg.default.scripts['test:all']).toBeDefined();
+      expect(pkg.default.scripts['test:unit']).toBeDefined();
     });
 
     it('has build script', async () => {
@@ -38,6 +38,29 @@ describe('CLI commands', () => {
       const pkg = await import('../../package.json', { with: { type: 'json' } });
       expect(pkg.default.bin).toBeDefined();
       expect(pkg.default.bin.gitnexus || pkg.default.bin).toBeDefined();
+    });
+  });
+
+  describe('optional parser dependencies', () => {
+    it('uses vendored source for tree-sitter-dart instead of a remote dependency', async () => {
+      const pkg = await import('../../package.json', { with: { type: 'json' } });
+      expect(pkg.default.optionalDependencies['tree-sitter-dart']).toBe(
+        'file:./vendor/tree-sitter-dart',
+      );
+    });
+
+    it('uses the vendored official Swift runtime package instead of source-building on install', async () => {
+      const pkg = await import('../../package.json', { with: { type: 'json' } });
+      const swiftPkg = await import('../../vendor/tree-sitter-swift/package.json', {
+        with: { type: 'json' },
+      });
+      expect(pkg.default.dependencies['tree-sitter']).toBe('^0.21.1');
+      expect(pkg.default.optionalDependencies['tree-sitter-swift']).toBe(
+        'file:./vendor/tree-sitter-swift',
+      );
+      expect(pkg.default.scripts.postinstall).not.toContain('tree-sitter-swift');
+      expect(swiftPkg.default.version).toBe('0.7.1');
+      expect(swiftPkg.default.peerDependencies['tree-sitter']).toContain('^0.21.1');
     });
   });
 

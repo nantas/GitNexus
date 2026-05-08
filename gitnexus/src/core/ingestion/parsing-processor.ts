@@ -1,26 +1,82 @@
-import { KnowledgeGraph, GraphNode, GraphRelationship } from '../graph/types.js';
+import type { GraphNode, GraphRelationship, NodeLabel } from 'gitnexus-shared';
+import { KnowledgeGraph } from '../graph/types.js';
 import Parser from 'tree-sitter';
 import { loadParser, loadLanguage, isLanguageAvailable, parseContent } from '../tree-sitter/parser-loader.js';
 import { LANGUAGE_QUERIES } from './tree-sitter-queries.js';
 import { generateId } from '../../lib/utils.js';
-import { SymbolTable } from './symbol-table.js';
+import type { SymbolTableReader, SymbolTableWriter, ExtractedHeritage } from './model/index.js';
+// SymbolTableReader is used for the FieldExtractorContext stub; the
+// parsing functions themselves need Writer because they call .add().
 import { ASTCache } from './ast-cache.js';
-import { getLanguageFromFilename, yieldToEventLoop, DEFINITION_CAPTURE_KEYS, getDefinitionNodeFromCaptures, findEnclosingClassId, extractMethodSignature } from './utils.js';
-import { isNodeExported } from './export-detection.js';
+import { getLanguageFromFilename, SupportedLanguages } from 'gitnexus-shared';
+import { extractVueScript, isVueSetupTopLevel } from './vue-sfc-extractor.js';
+import { yieldToEventLoop } from './utils/event-loop.js';
+import { isVerboseIngestionEnabled } from './utils/verbose.js';
+import {
+  getDefinitionNodeFromCaptures,
+  findEnclosingClassInfo,
+  getLabelFromCaptures,
+  CLASS_CONTAINER_TYPES,
+  type SyntaxNode,
+  type EnclosingClassInfo,
+} from './utils/ast-helpers.js';
 import { detectFrameworkFromAST } from './framework-detection.js';
-import { typeConfigs } from './type-extractors/index.js';
+import { buildTypeEnv } from './type-env.js';
+import type { FieldInfo, FieldExtractorContext } from './field-types.js';
+import type { MethodInfo } from './method-types.js';
+import {
+  buildMethodProps,
+  arityForIdFromInfo,
+  typeTagForId,
+  constTagForId,
+  buildCollisionGroups,
+} from './utils/method-props.js';
+import type { LanguageProvider } from './language-provider.js';
+import type { ParsedFile } from 'gitnexus-shared';
 import { WorkerPool } from './workers/worker-pool.js';
-import type { ParseWorkerResult, ParseWorkerInput, ExtractedImport, ExtractedCall, ExtractedHeritage, ExtractedRoute, FileConstructorBindings } from './workers/parse-worker.js';
-import { getTreeSitterBufferSize, TREE_SITTER_MAX_BUFFER } from './constants.js';
+import { logger } from '../logger.js';
+import type {
+  ParseWorkerResult,
+  ParseWorkerInput,
+  ExtractedImport,
+  ExtractedCall,
+  ExtractedAssignment,
+  ExtractedRoute,
+  ExtractedFetchCall,
+  ExtractedDecoratorRoute,
+  ExtractedToolDef,
+  FileConstructorBindings,
+  FileScopeBindings,
+  ExtractedORMQuery,
+} from './workers/parse-worker.js';
+import {
+  getTreeSitterBufferSize,
+  getTreeSitterContentByteLength,
+  TREE_SITTER_MAX_BUFFER,
+} from './constants.js';
 
 export type FileProgressCallback = (current: number, total: number, filePath: string) => void;
 
 export interface WorkerExtractedData {
   imports: ExtractedImport[];
   calls: ExtractedCall[];
+  assignments: ExtractedAssignment[];
   heritage: ExtractedHeritage[];
   routes: ExtractedRoute[];
+  fetchCalls: ExtractedFetchCall[];
+  decoratorRoutes: ExtractedDecoratorRoute[];
+  toolDefs: ExtractedToolDef[];
+  ormQueries: ExtractedORMQuery[];
   constructorBindings: FileConstructorBindings[];
+  fileScopeBindings: FileScopeBindings[];
+  /**
+   * Per-file `ParsedFile` artifacts from the new scope-based resolution
+   * pipeline (RFC #909 Ring 2). Empty until a provider implements
+   * `emitScopeCaptures` — additive to the legacy DAG path. Aggregated
+   * from every worker chunk; consumed downstream by #921's
+   * finalize-orchestrator.
+   */
+  parsedFiles: ParsedFile[];
 }
 
 export interface ParsingFileInput {
@@ -59,7 +115,21 @@ const processParsingWithWorkers = async (
     }
   }
 
-  if (parseableFiles.length === 0) return { imports: [], calls: [], heritage: [], routes: [], constructorBindings: [] };
+  if (parseableFiles.length === 0)
+    return {
+      imports: [],
+      calls: [],
+      assignments: [],
+      heritage: [],
+      routes: [],
+      fetchCalls: [],
+      decoratorRoutes: [],
+      toolDefs: [],
+      ormQueries: [],
+      constructorBindings: [],
+      fileScopeBindings: [],
+      parsedFiles: [],
+    };
 
   const total = files.length;
 
@@ -74,15 +144,20 @@ const processParsingWithWorkers = async (
   // Merge results from all workers into graph and symbol table
   const allImports: ExtractedImport[] = [];
   const allCalls: ExtractedCall[] = [];
+  const allAssignments: ExtractedAssignment[] = [];
   const allHeritage: ExtractedHeritage[] = [];
   const allRoutes: ExtractedRoute[] = [];
+  const allFetchCalls: ExtractedFetchCall[] = [];
+  const allDecoratorRoutes: ExtractedDecoratorRoute[] = [];
+  const allToolDefs: ExtractedToolDef[] = [];
+  const allORMQueries: ExtractedORMQuery[] = [];
   const allConstructorBindings: FileConstructorBindings[] = [];
   let rawFallbackCount = 0;
   for (const result of chunkResults) {
     for (const node of result.nodes) {
       graph.addNode({
         id: node.id,
-        label: node.label as any,
+        label: node.label as NodeLabel,
         properties: node.properties,
       });
     }
@@ -94,8 +169,12 @@ const processParsingWithWorkers = async (
     for (const sym of result.symbols) {
       symbolTable.add(sym.filePath, sym.name, sym.nodeId, sym.type, {
         parameterCount: sym.parameterCount,
+        requiredParameterCount: sym.requiredParameterCount,
+        parameterTypes: sym.parameterTypes,
         returnType: sym.returnType,
+        declaredType: sym.declaredType,
         ownerId: sym.ownerId,
+        qualifiedName: sym.qualifiedName,
       });
     }
 
@@ -120,17 +199,132 @@ const processParsingWithWorkers = async (
     const summary = Array.from(skippedLanguages.entries())
       .map(([lang, count]) => `${lang}: ${count}`)
       .join(', ');
-    console.warn(`  Skipped unsupported languages: ${summary}`);
+    logger.warn(`  Skipped unsupported languages: ${summary}`);
   }
 
   // Final progress
   onFileProgress?.(total, total, 'done');
-  return { imports: allImports, calls: allCalls, heritage: allHeritage, routes: allRoutes, constructorBindings: allConstructorBindings };
+  return {
+    imports: allImports,
+    calls: allCalls,
+    assignments: allAssignments,
+    heritage: allHeritage,
+    routes: allRoutes,
+    fetchCalls: allFetchCalls,
+    decoratorRoutes: allDecoratorRoutes,
+    toolDefs: allToolDefs,
+    ormQueries: allORMQueries,
+    constructorBindings: allConstructorBindings,
+    fileScopeBindings: fileScopeBindingsByFile,
+    parsedFiles: allParsedFiles,
+  };
 };
 
 // ============================================================================
 // Sequential fallback (original implementation)
 // ============================================================================
+
+// Inline caches to avoid repeated parent-walks per node (same pattern as parse-worker.ts).
+// Keyed by tree-sitter node reference — cleared at the start of each file.
+const classInfoCache = new Map<SyntaxNode, EnclosingClassInfo | null>();
+const exportCache = new Map<SyntaxNode, boolean>();
+
+const cachedFindEnclosingClassInfo = (
+  node: SyntaxNode,
+  filePath: string,
+  resolveEnclosingOwner?: (node: SyntaxNode) => SyntaxNode | null,
+): EnclosingClassInfo | null => {
+  const cached = classInfoCache.get(node);
+  if (cached !== undefined) return cached;
+  const result = findEnclosingClassInfo(node, filePath, resolveEnclosingOwner);
+  classInfoCache.set(node, result);
+  return result;
+};
+
+const cachedExportCheck = (
+  checker: (node: SyntaxNode, name: string) => boolean,
+  node: SyntaxNode,
+  name: string,
+): boolean => {
+  const cached = exportCache.get(node);
+  if (cached !== undefined) return cached;
+  const result = checker(node, name);
+  exportCache.set(node, result);
+  return result;
+};
+
+// FieldExtractor cache for sequential path — same pattern as parse-worker.ts
+const seqFieldInfoCache = new Map<number, Map<string, FieldInfo>>();
+
+// MethodExtractor cache for sequential path — avoids re-traversing the same class
+// body once per method. Keyed on classNode.id (tree-sitter node identity number).
+const seqMethodExtractCache = new Map<
+  number,
+  { ownerName: string | undefined; methods: MethodInfo[] } | null
+>();
+// Derived method map + collision groups cache — avoids rebuilding per method.
+const seqMethodMapCache = new Map<
+  number,
+  { map: Map<string, MethodInfo>; groups: Map<string, MethodInfo[]> }
+>();
+
+/** Provider-aware enclosing container lookup.
+ *  Walks up from `node` until a CLASS_CONTAINER_TYPES node is found.
+ *  When `resolveEnclosingOwner` is provided, delegates language-specific
+ *  container remapping (e.g., Ruby singleton_class → enclosing class).
+ *  Without the hook, returns the first matching container directly (raw lookup). */
+function seqFindEnclosingOwnerNode(
+  node: SyntaxNode,
+  resolveEnclosingOwner?: (node: SyntaxNode) => SyntaxNode | null,
+): SyntaxNode | null {
+  let current = node.parent;
+  while (current) {
+    if (CLASS_CONTAINER_TYPES.has(current.type)) {
+      if (resolveEnclosingOwner) {
+        const resolved = resolveEnclosingOwner(current);
+        if (resolved === null) {
+          // Provider says skip this container — keep walking up.
+          current = current.parent;
+          continue;
+        }
+        return resolved;
+      }
+      return current;
+    }
+    current = current.parent;
+  }
+  return null;
+}
+
+/** Minimal no-op SymbolTable stub for sequential extractor contexts. The real
+ *  SymbolTable is not fully populated yet at this stage, so use the stub for safety.
+ *  Implements the full {@link SymbolTableReader} surface so future extractor additions
+ *  don't silently fall off an `as unknown as` cast. */
+const NOOP_SYMBOL_TABLE_SEQ: SymbolTableReader = {
+  lookupExact: () => undefined,
+  lookupExactFull: () => undefined,
+  lookupExactAll: () => [],
+  lookupCallableByName: () => [],
+  getFiles: () => [][Symbol.iterator](),
+  getStats: () => ({ fileCount: 0 }),
+};
+
+function seqGetFieldInfo(
+  classNode: SyntaxNode,
+  provider: LanguageProvider,
+  context: FieldExtractorContext,
+): Map<string, FieldInfo> | undefined {
+  if (!provider.fieldExtractor) return undefined;
+  const cacheKey = classNode.startIndex;
+  let cached = seqFieldInfoCache.get(cacheKey);
+  if (cached) return cached;
+  const extracted = provider.fieldExtractor.extract(classNode, context);
+  if (!extracted?.fields?.length) return undefined;
+  cached = new Map<string, FieldInfo>();
+  for (const field of extracted.fields) cached.set(field.name, field);
+  seqFieldInfoCache.set(cacheKey, cached);
+  return cached;
+}
 
 const processParsingSequential = async (
   graph: KnowledgeGraph,
@@ -142,10 +336,18 @@ const processParsingSequential = async (
 ) => {
   const parser = await loadParser();
   const total = files.length;
-  const skippedLanguages = new Map<string, number>();
+  const logSkipped = isVerboseIngestionEnabled();
+  const skippedByLang = logSkipped ? new Map<string, number>() : null;
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
+
+    // Reset memoization before each new file (node refs are per-tree)
+    classInfoCache.clear();
+    exportCache.clear();
+    seqFieldInfoCache.clear();
+    seqMethodExtractCache.clear();
+    seqMethodMapCache.clear();
 
     onFileProgress?.(i + 1, total, file.path);
 
@@ -154,10 +356,10 @@ const processParsingSequential = async (
     const language = getLanguageFromFilename(file.path);
 
     if (!language) continue;
-
-    // Skip unsupported languages (e.g. Swift when tree-sitter-swift not installed)
     if (!isLanguageAvailable(language)) {
-      skippedLanguages.set(language, (skippedLanguages.get(language) || 0) + 1);
+      if (skippedByLang) {
+        skippedByLang.set(language, (skippedByLang.get(language) ?? 0) + 1);
+      }
       continue;
     }
 
@@ -169,10 +371,10 @@ const processParsingSequential = async (
     try {
       await loadLanguage(language, file.path);
     } catch {
-      continue;  // parser unavailable — safety net
+      continue; // parser unavailable — safety net
     }
 
-    let tree;
+    let tree: Parser.Tree;
     try {
       tree = parseContent(file.content);
     } catch {
@@ -204,123 +406,281 @@ const processParsingSequential = async (
 
     astCache.set(file.path, tree);
 
-    const queryString = LANGUAGE_QUERIES[language];
+    const provider = getProvider(language);
+    // Mirror into the cross-phase cache only when the language has a
+    // scope-resolution consumer — otherwise we retain Trees no one
+    // reads. parse-impl clears `astCache` between chunks;
+    // `scopeTreeCache` survives until scope-resolution disposes it.
+    if (provider.emitScopeCaptures !== undefined) {
+      scopeTreeCache?.set(file.path, tree);
+    }
+    const queryString = provider.treeSitterQueries;
     if (!queryString) {
       continue;
     }
 
-    let query;
-    let matches;
+    let query: Parser.Query;
+    let matches: Parser.QueryMatch[];
     try {
       const language = parser.getLanguage();
       query = new Parser.Query(language, queryString);
       matches = query.matches(tree.rootNode);
     } catch (queryError) {
-      console.warn(`Query error for ${file.path}:`, queryError);
+      logger.warn({ queryError }, `Query error for ${file.path}:`);
       continue;
     }
 
-    matches.forEach(match => {
-      const captureMap: Record<string, any> = {};
+    // Build per-file type environment for FieldExtractor context (lightweight — skipped if no fieldExtractor).
+    //
+    // Note: this TypeEnv is intentionally NOT flushed into the BindingAccumulator.
+    // The accumulator feed happens later in `call-processor.ts` via its own
+    // `typeEnv.flush(accumulator)` call. Flushing here would double-count
+    // file-scope bindings and break the single-use invariant of `flush()`.
+    // See the BindingAccumulator class JSDoc for the full accumulator
+    // lifecycle and flush-site ownership rules.
+    const typeEnv = provider.fieldExtractor
+      ? buildTypeEnv(tree, language, {
+          enclosingFunctionFinder: provider.enclosingFunctionFinder,
+          extractFunctionName: provider.methodExtractor?.extractFunctionName,
+        })
+      : null;
 
-      match.captures.forEach(c => {
+    matches.forEach((match) => {
+      const captureMap: Record<string, SyntaxNode> = {};
+
+      match.captures.forEach((c) => {
         captureMap[c.name] = c.node;
       });
 
-      if (captureMap['import']) {
-        return;
-      }
-
-      if (captureMap['call']) {
-        return;
-      }
+      const definitionNodeForRange = getDefinitionNodeFromCaptures(captureMap);
+      const definitionNode = getDefinitionNodeFromCaptures(captureMap);
+      const defaultNodeLabel = getLabelFromCaptures(captureMap, provider);
+      if (!defaultNodeLabel) return;
 
       const nameNode = captureMap['name'];
+      const extractedClassSymbol =
+        definitionNode && provider.classExtractor?.isTypeDeclaration(definitionNode)
+          ? provider.classExtractor.extract(definitionNode, {
+              name: nameNode?.text,
+              type: defaultNodeLabel,
+            })
+          : null;
+      const nodeLabel = extractedClassSymbol?.type ?? defaultNodeLabel;
       // Synthesize name for constructors without explicit @name capture (e.g. Swift init)
-      if (!nameNode && !captureMap['definition.constructor']) return;
-      const nodeName = nameNode ? nameNode.text : 'init';
+      if (!nameNode && nodeLabel !== 'Constructor' && !extractedClassSymbol) return;
+      const nodeName = extractedClassSymbol?.name ?? (nameNode ? nameNode.text : 'init');
 
-      let nodeLabel = 'CodeElement';
+      const startLine = definitionNodeForRange
+        ? definitionNodeForRange.startPosition.row + lineOffset
+        : nameNode
+          ? nameNode.startPosition.row + lineOffset
+          : lineOffset;
 
-      if (captureMap['definition.function']) nodeLabel = 'Function';
-      else if (captureMap['definition.class']) nodeLabel = 'Class';
-      else if (captureMap['definition.interface']) nodeLabel = 'Interface';
-      else if (captureMap['definition.method']) nodeLabel = 'Method';
-      else if (captureMap['definition.struct']) nodeLabel = 'Struct';
-      else if (captureMap['definition.enum']) nodeLabel = 'Enum';
-      else if (captureMap['definition.namespace']) nodeLabel = 'Namespace';
-      else if (captureMap['definition.module']) nodeLabel = 'Module';
-      else if (captureMap['definition.trait']) nodeLabel = 'Trait';
-      else if (captureMap['definition.impl']) nodeLabel = 'Impl';
-      else if (captureMap['definition.type']) nodeLabel = 'TypeAlias';
-      else if (captureMap['definition.const']) nodeLabel = 'Const';
-      else if (captureMap['definition.static']) nodeLabel = 'Static';
-      else if (captureMap['definition.typedef']) nodeLabel = 'Typedef';
-      else if (captureMap['definition.macro']) nodeLabel = 'Macro';
-      else if (captureMap['definition.union']) nodeLabel = 'Union';
-      else if (captureMap['definition.property']) nodeLabel = 'Property';
-      else if (captureMap['definition.record']) nodeLabel = 'Record';
-      else if (captureMap['definition.delegate']) nodeLabel = 'Delegate';
-      else if (captureMap['definition.annotation']) nodeLabel = 'Annotation';
-      else if (captureMap['definition.constructor']) nodeLabel = 'Constructor';
-      else if (captureMap['definition.template']) nodeLabel = 'Template';
+      // Compute enclosing class BEFORE node ID — needed to qualify method IDs
+      const needsOwner =
+        nodeLabel === 'Method' ||
+        nodeLabel === 'Constructor' ||
+        nodeLabel === 'Property' ||
+        nodeLabel === 'Function';
+      const enclosingClassInfo = needsOwner
+        ? cachedFindEnclosingClassInfo(
+            nameNode || definitionNodeForRange,
+            file.path,
+            provider.resolveEnclosingOwner,
+          )
+        : null;
+      const enclosingClassId = enclosingClassInfo?.classId ?? null;
 
-      const definitionNodeForRange = getDefinitionNodeFromCaptures(captureMap);
-      const startLine = definitionNodeForRange ? definitionNodeForRange.startPosition.row : (nameNode ? nameNode.startPosition.row : 0);
-      const nodeId = generateId(nodeLabel, `${file.path}:${nodeName}`);
+      // Qualify method/property IDs with enclosing class name to avoid collisions
+      // e.g. "Method:animal.dart:Animal.speak" vs "Method:animal.dart:Dog.speak"
+      const qualifiedName = enclosingClassInfo
+        ? `${enclosingClassInfo.className}.${nodeName}`
+        : nodeName;
 
-      const definitionNode = getDefinitionNodeFromCaptures(captureMap);
+      // Extract method metadata for Function/Method/Constructor nodes BEFORE generating
+      // the node ID — parameterCount is needed to disambiguate overloaded methods.
+      // Use the per-language MethodExtractor for method metadata (isAbstract, isStatic,
+      // visibility, annotations, parameterCount, parameterTypes, returnType, etc.).
+      const isMethodLike =
+        nodeLabel === 'Function' || nodeLabel === 'Method' || nodeLabel === 'Constructor';
+      let methodProps: Record<string, unknown> = {};
+      let arityForId: number | undefined; // raw param count for ID, even for variadic
+      let seqDefMethodInfo: MethodInfo | undefined;
+      let seqDefMethods: MethodInfo[] | undefined;
+      let seqClassNodeId: number | undefined;
+      if (isMethodLike && definitionNode) {
+        let enriched = false;
+
+        if (provider.methodExtractor) {
+          // Try class-based extraction (method inside a class/struct/trait body).
+          // Raw lookup (no resolveEnclosingOwner) so the method extractor sees
+          // the actual container node (e.g. singleton_class) for static detection.
+          const methodOwnerNode = seqFindEnclosingOwnerNode(definitionNode);
+          if (methodOwnerNode) {
+            // Cache extract() results per class node to avoid re-traversing the
+            // same class body for every method it contains (O(N) -> O(1) per hit).
+            let result:
+              | { ownerName: string | undefined; methods: MethodInfo[] }
+              | null
+              | undefined = seqMethodExtractCache.get(methodOwnerNode.id);
+            if (result === undefined) {
+              result =
+                provider.methodExtractor.extract(methodOwnerNode, {
+                  filePath: file.path,
+                  language,
+                }) ?? null;
+              seqMethodExtractCache.set(methodOwnerNode.id, result);
+            }
+            if (result?.methods?.length) {
+              const defLine = definitionNode.startPosition.row + 1;
+              const info = result.methods.find((m) => m.name === nodeName && m.line === defLine);
+              if (info) {
+                enriched = true;
+                arityForId = arityForIdFromInfo(info);
+                methodProps = buildMethodProps(info);
+                seqDefMethodInfo = info;
+                seqDefMethods = result.methods;
+                seqClassNodeId = methodOwnerNode.id;
+              }
+            }
+          }
+
+          // For top-level methods (e.g. Go method_declaration), try extractFromNode
+          if (!enriched && provider.methodExtractor.extractFromNode) {
+            const info = provider.methodExtractor.extractFromNode(definitionNode, {
+              filePath: file.path,
+              language,
+            });
+            if (info) {
+              enriched = true;
+              arityForId = arityForIdFromInfo(info);
+              methodProps = buildMethodProps(info);
+            }
+          }
+        }
+      }
+
+      // Append #<paramCount> to owned callable IDs to disambiguate overloads.
+      // Top-level Function IDs stay stable; functions inside an owner may overload.
+      // When same-arity collisions exist, append ~type1,type2 for further disambiguation.
+      const needsAritySuffix =
+        nodeLabel === 'Method' ||
+        nodeLabel === 'Constructor' ||
+        (nodeLabel === 'Function' && enclosingClassId !== null);
+      let arityTag = needsAritySuffix && arityForId !== undefined ? `#${arityForId}` : '';
+      if (arityTag && seqDefMethods && seqDefMethodInfo && seqClassNodeId !== undefined) {
+        // Use cached method map + collision groups (built once per class, not per method)
+        let cached = seqMethodMapCache.get(seqClassNodeId);
+        if (!cached) {
+          const tempMap = new Map<string, MethodInfo>();
+          for (const m of seqDefMethods) tempMap.set(`${m.name}:${m.line}`, m);
+          cached = { map: tempMap, groups: buildCollisionGroups(tempMap) };
+          seqMethodMapCache.set(seqClassNodeId, cached);
+        }
+        arityTag += typeTagForId(
+          cached.map,
+          nodeName,
+          arityForId,
+          seqDefMethodInfo,
+          language,
+          cached.groups,
+        );
+        arityTag += constTagForId(
+          cached.map,
+          nodeName,
+          arityForId,
+          seqDefMethodInfo,
+          cached.groups,
+        );
+      }
+      const nodeId = generateId(nodeLabel, `${file.path}:${qualifiedName}${arityTag}`);
+      const classNodeForSymbol = definitionNodeForRange || definitionNode || nameNode;
+      const qualifiedTypeName =
+        extractedClassSymbol?.qualifiedName ??
+        (classNodeForSymbol && provider.classExtractor?.isTypeDeclaration(classNodeForSymbol)
+          ? (provider.classExtractor.extractQualifiedName(classNodeForSymbol, nodeName) ?? nodeName)
+          : undefined);
       const frameworkHint = definitionNode
         ? detectFrameworkFromAST(language, (definitionNode.text || '').slice(0, 300))
         : null;
 
-      // Extract method signature for Method/Constructor nodes
-      const methodSig = (nodeLabel === 'Function' || nodeLabel === 'Method' || nodeLabel === 'Constructor')
-        ? extractMethodSignature(definitionNode)
-        : undefined;
-
-      // Language-specific return type fallback (e.g. Ruby YARD @return [Type])
-      // Also upgrades uninformative AST types like PHP `array` with PHPDoc `@return User[]`
-      if (methodSig && (!methodSig.returnType || methodSig.returnType === 'array' || methodSig.returnType === 'iterable') && definitionNode) {
-        const tc = typeConfigs[language as keyof typeof typeConfigs];
-        if (tc?.extractReturnType) {
-          const docReturn = tc.extractReturnType(definitionNode);
-          if (docReturn) methodSig.returnType = docReturn;
-        }
-      }
-
       const node: GraphNode = {
         id: nodeId,
-        label: nodeLabel as any,
+        label: nodeLabel as NodeLabel,
         properties: {
           name: nodeName,
           filePath: file.path,
           startLine: nameNode.startPosition.row + 1,
           endLine: nameNode.endPosition.row + 1,
           language: language,
-          isExported: isNodeExported(nameNode || definitionNodeForRange, nodeName, language),
-          ...(frameworkHint ? {
-            astFrameworkMultiplier: frameworkHint.entryPointMultiplier,
-            astFrameworkReason: frameworkHint.reason,
-          } : {}),
-          ...(methodSig ? {
-            parameterCount: methodSig.parameterCount,
-            returnType: methodSig.returnType,
-          } : {}),
+          isExported:
+            language === SupportedLanguages.Vue && isVueSetup
+              ? isVueSetupTopLevel(nameNode || definitionNodeForRange)
+              : cachedExportCheck(
+                  provider.exportChecker,
+                  nameNode || definitionNodeForRange,
+                  nodeName,
+                ),
+          ...(qualifiedTypeName !== undefined ? { qualifiedName: qualifiedTypeName } : {}),
+          ...(frameworkHint
+            ? {
+                astFrameworkMultiplier: frameworkHint.entryPointMultiplier,
+                astFrameworkReason: frameworkHint.reason,
+              }
+            : {}),
+          ...methodProps,
         },
       };
 
       graph.addNode(node);
 
-      // Compute enclosing class for Method/Constructor/Property/Function — used for both ownerId and HAS_METHOD
-      // Function is included because Kotlin/Rust/Python capture class methods as Function nodes
-      const needsOwner = nodeLabel === 'Method' || nodeLabel === 'Constructor' || nodeLabel === 'Property' || nodeLabel === 'Function';
-      const enclosingClassId = needsOwner ? findEnclosingClassId(nameNode || definitionNodeForRange, file.path) : null;
+      // enclosingClassId already computed above (before nodeId generation)
+
+      // Extract declared type and field metadata for Property nodes
+      let declaredType: string | undefined;
+      let seqVisibility: string | undefined;
+      let seqIsStatic: boolean | undefined;
+      let seqIsReadonly: boolean | undefined;
+      if (nodeLabel === 'Property' && definitionNode) {
+        // FieldExtractor is the single source of truth when available
+        if (provider.fieldExtractor && typeEnv) {
+          const classNode = seqFindEnclosingOwnerNode(
+            definitionNode,
+            provider.resolveEnclosingOwner,
+          );
+          if (classNode) {
+            const fieldMap = seqGetFieldInfo(classNode, provider, {
+              typeEnv,
+              symbolTable: NOOP_SYMBOL_TABLE_SEQ,
+              filePath: file.path,
+              language,
+            });
+            const info = fieldMap?.get(nodeName);
+            if (info) {
+              declaredType = info.type ?? undefined;
+              seqVisibility = info.visibility;
+              seqIsStatic = info.isStatic;
+              seqIsReadonly = info.isReadonly;
+            }
+          }
+        }
+        // All 15 tree-sitter languages register a FieldExtractor — no fallback needed.
+      }
+
+      // Apply field metadata to the graph node retroactively
+      if (seqVisibility !== undefined) node.properties.visibility = seqVisibility;
+      if (seqIsStatic !== undefined) node.properties.isStatic = seqIsStatic;
+      if (seqIsReadonly !== undefined) node.properties.isReadonly = seqIsReadonly;
+      if (declaredType !== undefined) node.properties.declaredType = declaredType;
 
       symbolTable.add(file.path, nodeName, nodeId, nodeLabel, {
-        parameterCount: methodSig?.parameterCount,
-        returnType: methodSig?.returnType,
+        parameterCount: methodProps.parameterCount as number | undefined,
+        requiredParameterCount: methodProps.requiredParameterCount as number | undefined,
+        parameterTypes: methodProps.parameterTypes as string[] | undefined,
+        returnType: methodProps.returnType as string | undefined,
+        declaredType,
         ownerId: enclosingClassId ?? undefined,
+        qualifiedName: qualifiedTypeName,
       });
 
       const fileId = generateId('File', file.path);
@@ -338,13 +698,14 @@ const processParsingSequential = async (
 
       graph.addRelationship(relationship);
 
-      // ── HAS_METHOD: link method/constructor/property to enclosing class ──
+      // ── HAS_METHOD / HAS_PROPERTY: link member to enclosing class ──
       if (enclosingClassId) {
+        const memberEdgeType = nodeLabel === 'Property' ? 'HAS_PROPERTY' : 'HAS_METHOD';
         graph.addRelationship({
-          id: generateId('HAS_METHOD', `${enclosingClassId}->${nodeId}`),
+          id: generateId(memberEdgeType, `${enclosingClassId}->${nodeId}`),
           sourceId: enclosingClassId,
           targetId: nodeId,
-          type: 'HAS_METHOD',
+          type: memberEdgeType,
           confidence: 1.0,
           reason: '',
         });
@@ -352,11 +713,12 @@ const processParsingSequential = async (
     });
   }
 
-  if (skippedLanguages.size > 0) {
-    const summary = Array.from(skippedLanguages.entries())
-      .map(([lang, count]) => `${lang}: ${count}`)
-      .join(', ');
-    console.warn(`  Skipped unsupported languages: ${summary}`);
+  if (skippedByLang && skippedByLang.size > 0) {
+    for (const [lang, count] of skippedByLang.entries()) {
+      logger.warn(
+        `[ingestion] Skipped ${count} ${lang} file(s) in parsing processing — ${lang} parser not available.`,
+      );
+    }
   }
 };
 
@@ -369,15 +731,46 @@ export const processParsing = async (
   files: ParsingFileInput[],
   symbolTable: SymbolTable,
   astCache: ASTCache,
+  /**
+   * Persistent tree cache (separate from `astCache`, which the caller
+   * clears between chunks). Sequential parses additionally write the
+   * Tree here so cross-phase consumers (scope-resolution) can read it.
+   * Worker-mode parses skip — Trees can't cross MessageChannels.
+   * Pass `undefined` if no consumer needs cross-phase access.
+   */
+  scopeTreeCache: ASTCache | undefined,
   onFileProgress?: FileProgressCallback,
   workerPool?: WorkerPool,
   onRawFallbackParse?: (count: number) => void,
 ): Promise<WorkerExtractedData | null> => {
+  let lastProgress = 0;
+  const reportProgress: FileProgressCallback | undefined = onFileProgress
+    ? (current, total, detail) => {
+        lastProgress = Math.max(lastProgress, current);
+        onFileProgress(lastProgress, total, detail);
+      }
+    : undefined;
+
   if (workerPool) {
+    if (scopeTreeCache !== undefined && process.env.PROF_SCOPE_RESOLUTION === '1') {
+      // Trees can't cross MessageChannels, so worker-parsed files land
+      // in scope-resolution with an empty cache and get re-parsed.
+      // Surfacing this in PROF mode prevents silent perf cliffs when
+      // a repo crosses the worker-pool threshold.
+      logger.warn(
+        `[scope-resolution prof] worker pool engaged for ${files.length} files — cross-phase tree cache will be empty; scope-resolution re-parses.`,
+      );
+    }
     try {
       return await processParsingWithWorkers(graph, files, symbolTable, astCache, workerPool, onFileProgress, onRawFallbackParse);
     } catch (err) {
-      console.warn('Worker pool parsing failed, falling back to sequential:', err instanceof Error ? err.message : err);
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn({ message }, 'Worker pool parsing stopped; continuing with sequential parser:');
+      reportProgress?.(
+        lastProgress,
+        files.length,
+        `Sequential fallback after worker issue: ${message}`,
+      );
     }
   }
 

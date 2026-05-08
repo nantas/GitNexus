@@ -1,6 +1,6 @@
 /**
  * AI Context Generator
- * 
+ *
  * Creates AGENTS.md and CLAUDE.md with full inline GitNexus context.
  * AGENTS.md is the standard read by Cursor, Windsurf, OpenCode, Codex, Cline, etc.
  * CLAUDE.md is for Claude Code which only reads that file.
@@ -10,6 +10,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { type GeneratedSkillInfo } from './skill-gen.js';
+import { logger } from '../core/logger.js';
 
 // ESM equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -21,12 +22,44 @@ interface RepoStats {
   nodes?: number;
   edges?: number;
   communities?: number;
-  clusters?: number;       // Aggregated cluster count (what tools show)
+  clusters?: number; // Aggregated cluster count (what tools show)
   processes?: number;
+}
+
+export interface AIContextOptions {
+  skipAgentsMd?: boolean;
+  noStats?: boolean;
 }
 
 const GITNEXUS_START_MARKER = '<!-- gitnexus:start -->';
 const GITNEXUS_END_MARKER = '<!-- gitnexus:end -->';
+
+/**
+ * Find the index of a section marker that occupies its own line.
+ * Unlike `indexOf`, this rejects inline prose references like
+ * `` See the `<!-- gitnexus:start -->` block `` that appear
+ * mid-sentence (#1041). A marker counts as section-position only when:
+ *   - preceded by newline or start-of-file, AND
+ *   - followed by newline, `\r` (CRLF files), or end-of-file.
+ * The generator always emits each marker alone on its line, so this
+ * matches every legitimate section and none of the inline mentions.
+ *
+ * `startFrom` lets the end-marker lookup start after the already-found
+ * start marker, avoiding a scan from 0 and guaranteeing we never pick
+ * up an end marker that appears earlier in the file than the start.
+ */
+function findSectionMarkerIndex(content: string, marker: string, startFrom = 0): number {
+  let idx = content.indexOf(marker, startFrom);
+  while (idx !== -1) {
+    const atLineStart = idx === 0 || content[idx - 1] === '\n';
+    const endPos = idx + marker.length;
+    const atLineEnd =
+      endPos === content.length || content[endPos] === '\n' || content[endPos] === '\r';
+    if (atLineStart && atLineEnd) return idx;
+    idx = content.indexOf(marker, idx + 1);
+  }
+  return -1;
+}
 
 /**
  * Generate the full GitNexus context content.
@@ -84,7 +117,6 @@ function generateGitNexusContent(
 ${GITNEXUS_END_MARKER}`;
 }
 
-
 /**
  * Check if a file exists
  */
@@ -105,7 +137,7 @@ async function fileExists(filePath: string): Promise<boolean> {
  */
 async function upsertGitNexusSection(
   filePath: string,
-  content: string
+  content: string,
 ): Promise<'created' | 'updated' | 'appended'> {
   const exists = await fileExists(filePath);
 
@@ -116,9 +148,18 @@ async function upsertGitNexusSection(
 
   const existingContent = await fs.readFile(filePath, 'utf-8');
 
-  // Check if GitNexus section already exists
-  const startIdx = existingContent.indexOf(GITNEXUS_START_MARKER);
-  const endIdx = existingContent.indexOf(GITNEXUS_END_MARKER);
+  // Check if GitNexus section already exists. Matching is restricted
+  // to markers that occupy their own line so that inline prose
+  // references (e.g. `` See the `<!-- gitnexus:start -->` block `` in
+  // the shipped CLAUDE.md) are NOT treated as section delimiters
+  // (#1041). The end-marker scan starts after the start-marker so it
+  // can never pick up an earlier end in the file.
+  const startIdx = findSectionMarkerIndex(existingContent, GITNEXUS_START_MARKER);
+  const endIdx = findSectionMarkerIndex(
+    existingContent,
+    GITNEXUS_END_MARKER,
+    startIdx === -1 ? 0 : startIdx,
+  );
 
   if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
     // Replace existing section
@@ -148,27 +189,33 @@ async function installSkills(repoPath: string): Promise<string[]> {
   const skills = [
     {
       name: 'gitnexus-exploring',
-      description: 'Use when the user asks how code works, wants to understand architecture, trace execution flows, or explore unfamiliar parts of the codebase. Examples: "How does X work?", "What calls this function?", "Show me the auth flow"',
+      description:
+        'Use when the user asks how code works, wants to understand architecture, trace execution flows, or explore unfamiliar parts of the codebase. Examples: "How does X work?", "What calls this function?", "Show me the auth flow"',
     },
     {
       name: 'gitnexus-debugging',
-      description: 'Use when the user is debugging a bug, tracing an error, or asking why something fails. Examples: "Why is X failing?", "Where does this error come from?", "Trace this bug"',
+      description:
+        'Use when the user is debugging a bug, tracing an error, or asking why something fails. Examples: "Why is X failing?", "Where does this error come from?", "Trace this bug"',
     },
     {
       name: 'gitnexus-impact-analysis',
-      description: 'Use when the user wants to know what will break if they change something, or needs safety analysis before editing code. Examples: "Is it safe to change X?", "What depends on this?", "What will break?"',
+      description:
+        'Use when the user wants to know what will break if they change something, or needs safety analysis before editing code. Examples: "Is it safe to change X?", "What depends on this?", "What will break?"',
     },
     {
       name: 'gitnexus-refactoring',
-      description: 'Use when the user wants to rename, extract, split, move, or restructure code safely. Examples: "Rename this function", "Extract this into a module", "Refactor this class", "Move this to a separate file"',
+      description:
+        'Use when the user wants to rename, extract, split, move, or restructure code safely. Examples: "Rename this function", "Extract this into a module", "Refactor this class", "Move this to a separate file"',
     },
     {
       name: 'gitnexus-guide',
-      description: 'Use when the user asks about GitNexus itself — available tools, how to query the knowledge graph, MCP resources, graph schema, or workflow reference. Examples: "What GitNexus tools are available?", "How do I use GitNexus?"',
+      description:
+        'Use when the user asks about GitNexus itself — available tools, how to query the knowledge graph, MCP resources, graph schema, or workflow reference. Examples: "What GitNexus tools are available?", "How do I use GitNexus?"',
     },
     {
       name: 'gitnexus-cli',
-      description: 'Use when the user needs to run GitNexus CLI commands like analyze/index a repo, check status, clean the index, generate a wiki, or list indexed repos. Examples: "Index this repo", "Reanalyze the codebase", "Generate a wiki"',
+      description:
+        'Use when the user needs to run GitNexus CLI commands like analyze/index a repo, check status, clean the index, generate a wiki, or list indexed repos. Examples: "Index this repo", "Reanalyze the codebase", "Generate a wiki"',
     },
     {
       name: 'gitnexus-unity-rule-gen',
@@ -209,7 +256,7 @@ Use GitNexus tools to accomplish this task.
       installedSkills.push(skill.name);
     } catch (err) {
       // Skip on error, don't fail the whole process
-      console.warn(`Warning: Could not install skill ${skill.name}:`, err);
+      logger.warn({ err }, `Warning: Could not install skill ${skill.name}:`);
     }
   }
 
@@ -266,10 +313,14 @@ export async function generateAIContextFiles(
   const agentsResult = await upsertGitNexusSection(agentsPath, content);
   createdFiles.push(`AGENTS.md (${agentsResult})`);
 
-  // Create CLAUDE.md (for Claude Code)
-  const claudePath = path.join(repoPath, 'CLAUDE.md');
-  const claudeResult = await upsertGitNexusSection(claudePath, content);
-  createdFiles.push(`CLAUDE.md (${claudeResult})`);
+    // Create CLAUDE.md (for Claude Code)
+    const claudePath = path.join(repoPath, 'CLAUDE.md');
+    const claudeResult = await upsertGitNexusSection(claudePath, content);
+    createdFiles.push(`CLAUDE.md (${claudeResult})`);
+  } else {
+    createdFiles.push('AGENTS.md (skipped via --skip-agents-md)');
+    createdFiles.push('CLAUDE.md (skipped via --skip-agents-md)');
+  }
 
   // Install repo-local skills only when project scope is selected.
   if (skillScope === 'project') {

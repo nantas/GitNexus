@@ -12,7 +12,7 @@ import path from 'path';
 import { PipelineResult } from '../types/pipeline.js';
 import { CommunityNode, CommunityMembership } from '../core/ingestion/community-processor.js';
 import { ProcessNode } from '../core/ingestion/process-processor.js';
-import { GraphNode, KnowledgeGraph } from '../core/graph/types.js';
+import { KnowledgeGraph } from '../core/graph/types.js';
 
 // ============================================================================
 // TYPES
@@ -65,7 +65,7 @@ interface CrossConnection {
 export const generateSkillFiles = async (
   repoPath: string,
   projectName: string,
-  pipelineResult: PipelineResult
+  pipelineResult: PipelineResult,
 ): Promise<{ skills: GeneratedSkillInfo[]; outputPath: string }> => {
   const { communityResult, processResult, graph } = pipelineResult;
   const outputDir = path.join(repoPath, '.claude', 'skills', 'generated');
@@ -81,16 +81,17 @@ export const generateSkillFiles = async (
   // The community processor skips singletons from its communities array but memberships
   // include ALL assignments. For repos with sparse CALLS edges, the communities array
   // can be empty while memberships still has useful groupings.
-  const communities = communityResult.communities.length > 0
-    ? communityResult.communities
-    : buildCommunitiesFromMemberships(communityResult.memberships, graph, repoPath);
+  const communities =
+    communityResult.communities.length > 0
+      ? communityResult.communities
+      : buildCommunitiesFromMemberships(communityResult.memberships, graph, repoPath);
 
   const aggregated = aggregateCommunities(communities);
 
   // Step 2: Filter to significant communities
   // Keep communities with >= 3 symbols after aggregation.
   const significant = aggregated
-    .filter(c => c.symbolCount >= 3)
+    .filter((c) => c.symbolCount >= 3)
     .sort((a, b) => b.symbolCount - a.symbolCount)
     .slice(0, 20);
 
@@ -103,13 +104,15 @@ export const generateSkillFiles = async (
   const membershipsByComm = buildMembershipMap(communityResult.memberships);
   const nodeIdToCommunityLabel = buildNodeCommunityLabelMap(
     communityResult.memberships,
-    communities
+    communities,
   );
 
   // Step 4: Clear and recreate output directory
   try {
     await fs.rm(outputDir, { recursive: true, force: true });
-  } catch { /* may not exist */ }
+  } catch {
+    /* may not exist */
+  }
   await fs.mkdir(outputDir, { recursive: true });
 
   // Step 5: Generate skill files
@@ -136,7 +139,7 @@ export const generateSkillFiles = async (
       community.label,
       membershipsByComm,
       nodeIdToCommunityLabel,
-      graph
+      graph,
     );
 
     // Generate kebab name
@@ -152,7 +155,7 @@ export const generateSkillFiles = async (
       entryPoints,
       flows,
       connections,
-      kebabName
+      kebabName,
     );
 
     // Write file
@@ -168,7 +171,9 @@ export const generateSkillFiles = async (
     };
     skills.push(info);
 
-    console.log(`    \u2713 ${community.label} (${community.symbolCount} symbols, ${files.length} files)`);
+    console.log(
+      `    \u2713 ${community.label} (${community.symbolCount} symbols, ${files.length} files)`,
+    );
   }
 
   console.log(`\n  ${skills.length} skills generated \u2192 .claude/skills/generated/`);
@@ -191,7 +196,7 @@ export const generateSkillFiles = async (
 const buildCommunitiesFromMemberships = (
   memberships: CommunityMembership[],
   graph: KnowledgeGraph,
-  repoPath: string
+  repoPath: string,
 ): CommunityNode[] => {
   // Group memberships by communityId
   const groups = new Map<string, string[]>();
@@ -216,7 +221,11 @@ const buildCommunitiesFromMemberships = (
       const parts = normalized.split('/').filter(Boolean);
       if (parts.length >= 2) {
         const folder = parts[parts.length - 2];
-        if (!['src', 'lib', 'core', 'utils', 'common', 'shared', 'helpers'].includes(folder.toLowerCase())) {
+        if (
+          !['src', 'lib', 'core', 'utils', 'common', 'shared', 'helpers'].includes(
+            folder.toLowerCase(),
+          )
+        ) {
           folderCounts.set(folder, (folderCounts.get(folder) || 0) + 1);
         }
       }
@@ -240,7 +249,7 @@ const buildCommunitiesFromMemberships = (
     const nodeSet = new Set(nodeIds);
     let internalEdges = 0;
     let totalEdges = 0;
-    graph.forEachRelationship(rel => {
+    graph.forEachRelationship((rel) => {
       if (nodeSet.has(rel.sourceId)) {
         totalEdges++;
         if (nodeSet.has(rel.targetId)) internalEdges++;
@@ -270,11 +279,14 @@ const buildCommunitiesFromMemberships = (
  * @returns {AggregatedCommunity[]} Aggregated communities grouped by label
  */
 const aggregateCommunities = (communities: CommunityNode[]): AggregatedCommunity[] => {
-  const groups = new Map<string, {
-    rawIds: string[];
-    totalSymbols: number;
-    weightedCohesion: number;
-  }>();
+  const groups = new Map<
+    string,
+    {
+      rawIds: string[];
+      totalSymbols: number;
+      weightedCohesion: number;
+    }
+  >();
 
   for (const c of communities) {
     const label = c.heuristicLabel || c.label || 'Unknown';
@@ -333,7 +345,7 @@ const buildMembershipMap = (memberships: CommunityMembership[]): Map<string, str
  */
 const buildNodeCommunityLabelMap = (
   memberships: CommunityMembership[],
-  communities: CommunityNode[]
+  communities: CommunityNode[],
 ): Map<string, string> => {
   const commIdToLabel = new Map<string, string>();
   for (const c of communities) {
@@ -364,7 +376,7 @@ const buildNodeCommunityLabelMap = (
 const gatherMembers = (
   rawIds: string[],
   membershipsByComm: Map<string, string[]>,
-  graph: KnowledgeGraph
+  graph: KnowledgeGraph,
 ): MemberSymbol[] => {
   const seen = new Set<string>();
   const members: MemberSymbol[] = [];
@@ -431,7 +443,7 @@ const gatherEntryPoints = (members: MemberSymbol[]): MemberSymbol[] => {
   };
 
   return members
-    .filter(m => m.isExported)
+    .filter((m) => m.isExported)
     .sort((a, b) => {
       const pa = typePriority[a.label] ?? 99;
       const pb = typePriority[b.label] ?? 99;
@@ -449,7 +461,7 @@ const gatherFlows = (rawIds: string[], processes: ProcessNode[]): ProcessNode[] 
   const rawIdSet = new Set(rawIds);
 
   return processes
-    .filter(proc => proc.communities.some(cid => rawIdSet.has(cid)))
+    .filter((proc) => proc.communities.some((cid) => rawIdSet.has(cid)))
     .sort((a, b) => b.stepCount - a.stepCount);
 };
 
@@ -467,7 +479,7 @@ const gatherCrossConnections = (
   ownLabel: string,
   membershipsByComm: Map<string, string[]>,
   nodeIdToCommunityLabel: Map<string, string>,
-  graph: KnowledgeGraph
+  graph: KnowledgeGraph,
 ): CrossConnection[] => {
   // Collect all node IDs in this aggregated community
   const ownNodeIds = new Set<string>();
@@ -481,7 +493,7 @@ const gatherCrossConnections = (
   // Count outgoing CALLS to nodes in different communities
   const targetCounts = new Map<string, number>();
 
-  graph.forEachRelationship(rel => {
+  graph.forEachRelationship((rel) => {
     if (rel.type !== 'CALLS') return;
     if (!ownNodeIds.has(rel.sourceId)) return;
     if (ownNodeIds.has(rel.targetId)) return; // same community
@@ -521,7 +533,7 @@ const renderSkillMarkdown = (
   entryPoints: MemberSymbol[],
   flows: ProcessNode[],
   connections: CrossConnection[],
-  kebabName: string
+  kebabName: string,
 ): string => {
   const cohesionPct = Math.round(community.cohesion * 100);
 
@@ -529,10 +541,10 @@ const renderSkillMarkdown = (
   const dominantDir = getDominantDirectory(files);
 
   // Top symbol names for "When to Use"
-  const topNames = entryPoints.slice(0, 3).map(e => e.name);
+  const topNames = entryPoints.slice(0, 3).map((e) => e.name);
   if (topNames.length === 0) {
     // Fallback to any members
-    topNames.push(...members.slice(0, 3).map(m => m.name));
+    topNames.push(...members.slice(0, 3).map((m) => m.name));
   }
 
   const lines: string[] = [];
@@ -540,14 +552,18 @@ const renderSkillMarkdown = (
   // Frontmatter
   lines.push('---');
   lines.push(`name: ${kebabName}`);
-  lines.push(`description: "Skill for the ${community.label} area of ${projectName}. ${community.symbolCount} symbols across ${files.length} files."`);
+  lines.push(
+    `description: "Skill for the ${community.label} area of ${projectName}. ${community.symbolCount} symbols across ${files.length} files."`,
+  );
   lines.push('---');
   lines.push('');
 
   // Title
   lines.push(`# ${community.label}`);
   lines.push('');
-  lines.push(`${community.symbolCount} symbols | ${files.length} files | Cohesion: ${cohesionPct}%`);
+  lines.push(
+    `${community.symbolCount} symbols | ${files.length} files | Cohesion: ${cohesionPct}%`,
+  );
   lines.push('');
 
   // When to Use
@@ -625,11 +641,18 @@ const renderSkillMarkdown = (
   }
 
   // How to Explore
-  const firstEntry = entryPoints.length > 0 ? entryPoints[0].name : (members.length > 0 ? members[0].name : community.label);
+  const firstEntry =
+    entryPoints.length > 0
+      ? entryPoints[0].name
+      : members.length > 0
+        ? members[0].name
+        : community.label;
   lines.push('## How to Explore');
   lines.push('');
   lines.push(`1. \`gitnexus_context({name: "${firstEntry}"})\` \u2014 see callers and callees`);
-  lines.push(`2. \`gitnexus_query({query: "${community.label.toLowerCase()}"})\` \u2014 find related execution flows`);
+  lines.push(
+    `2. \`gitnexus_query({query: "${community.label.toLowerCase()}"})\` \u2014 find related execution flows`,
+  );
   lines.push('3. Read key files listed above for implementation details');
   lines.push('');
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { buildImportResolutionContext, type ImportResolutionContext } from '../../src/core/ingestion/import-processor.js';
-import { createResolutionContext } from '../../src/core/ingestion/resolution-context.js';
+import { buildImportResolutionContext } from '../../src/core/ingestion/import-processor.js';
+import type { ImportResolutionContext } from '../../src/core/ingestion/import-resolvers/types.js';
+import { createResolutionContext } from '../../src/core/ingestion/model/resolution-context.js';
 
 describe('ResolutionContext.importMap', () => {
   it('creates an empty Map', () => {
@@ -48,8 +49,8 @@ describe('buildImportResolutionContext', () => {
   });
 
   it('creates a suffix index for O(1) lookups', () => {
-    expect(ctx.suffixIndex).toBeDefined();
-    expect(typeof ctx.suffixIndex.get).toBe('function');
+    expect(ctx.index).toBeDefined();
+    expect(typeof ctx.index.get).toBe('function');
   });
 
   it('initializes empty resolve cache', () => {
@@ -65,22 +66,22 @@ describe('buildImportResolutionContext', () => {
 
   describe('suffix index', () => {
     it('resolves file by suffix', () => {
-      const result = ctx.suffixIndex.get('utils.ts');
+      const result = ctx.index.get('utils.ts');
       expect(result).toBeDefined();
     });
 
     it('resolves file by full path', () => {
-      const result = ctx.suffixIndex.get('src/index.ts');
+      const result = ctx.index.get('src/index.ts');
       expect(result).toBeDefined();
     });
 
     it('resolves nested component path', () => {
-      const result = ctx.suffixIndex.get('components/Button.tsx');
+      const result = ctx.index.get('components/Button.tsx');
       expect(result).toBeDefined();
     });
 
     it('returns undefined for non-existent suffix', () => {
-      const result = ctx.suffixIndex.get('nonexistent.ts');
+      const result = ctx.index.get('nonexistent.ts');
       expect(result).toBeUndefined();
     });
   });

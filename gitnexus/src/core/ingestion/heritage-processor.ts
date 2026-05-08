@@ -20,68 +20,167 @@ import Parser from 'tree-sitter';
 import { isLanguageAvailable, loadParser, loadLanguage, parseContent } from '../tree-sitter/parser-loader.js';
 import { LANGUAGE_QUERIES } from './tree-sitter-queries.js';
 import { generateId } from '../../lib/utils.js';
-import { getLanguageFromFilename, isVerboseIngestionEnabled, yieldToEventLoop } from './utils.js';
-import { SupportedLanguages } from '../../config/supported-languages.js';
+import { getLanguageFromFilename, type NodeLabel, type SupportedLanguages } from 'gitnexus-shared';
+import { isVerboseIngestionEnabled } from './utils/verbose.js';
+import { yieldToEventLoop } from './utils/event-loop.js';
+import { getProvider } from './languages/index.js';
 import { getTreeSitterBufferSize } from './constants.js';
-import type { ExtractedHeritage } from './workers/parse-worker.js';
-import type { ResolutionContext } from './resolution-context.js';
+import type {
+  ExtractedHeritage,
+  HeritageResolutionStrategy,
+  HeritageStrategyLookup,
+} from './model/heritage-map.js';
+import { resolveExtendsType } from './model/heritage-map.js';
+import type { ResolutionContext } from './model/resolution-context.js';
+import { TIER_CONFIDENCE } from './model/resolution-context.js';
+import type { HeritageInfo } from './heritage-types.js';
 
-/** C#/Java convention: interfaces start with I followed by an uppercase letter */
-const INTERFACE_NAME_RE = /^I[A-Z]/;
-
+import { logger } from '../logger.js';
 /**
- * Determine whether a heritage.extends capture is actually an IMPLEMENTS relationship.
- * Uses the symbol table first (authoritative — Tier 1); falls back to a language-gated
- * heuristic for external symbols not present in the graph:
- *   - C# / Java: `I[A-Z]` naming convention
- *   - Swift: default IMPLEMENTS (protocol conformance is the norm)
- *   - All others: default EXTENDS
+ * Derive the heritage-resolution strategy for a language from its
+ * `LanguageProvider`. This is the production wiring that `buildHeritageMap`
+ * and the standalone `resolveExtendsType` call site use — the model layer
+ * itself stays unaware of the provider registry.
  */
-const resolveExtendsType = (
-  parentName: string,
-  currentFilePath: string,
-  ctx: ResolutionContext,
-  language: SupportedLanguages,
-): { type: 'EXTENDS' | 'IMPLEMENTS'; idPrefix: string } => {
-  const resolved = ctx.resolve(parentName, currentFilePath);
-  if (resolved && resolved.candidates.length > 0) {
-    const isInterface = resolved.candidates[0].type === 'Interface';
-    return isInterface
-      ? { type: 'IMPLEMENTS', idPrefix: 'Interface' }
-      : { type: 'EXTENDS', idPrefix: 'Class' };
-  }
-  // Unresolved symbol — fall back to language-specific heuristic
-  if (language === SupportedLanguages.CSharp || language === SupportedLanguages.Java) {
-    if (INTERFACE_NAME_RE.test(parentName)) {
-      return { type: 'IMPLEMENTS', idPrefix: 'Interface' };
-    }
-  } else if (language === SupportedLanguages.Swift) {
-    // Protocol conformance is far more common than class inheritance in Swift
-    return { type: 'IMPLEMENTS', idPrefix: 'Interface' };
-  }
-  return { type: 'EXTENDS', idPrefix: 'Class' };
+export const getHeritageStrategyForLanguage: HeritageStrategyLookup = (
+  lang: SupportedLanguages,
+): HeritageResolutionStrategy => {
+  const provider = getProvider(lang);
+  return {
+    interfaceNamePattern: provider.interfaceNamePattern,
+    defaultEdge: provider.heritageDefaultEdge ?? 'EXTENDS',
+  };
 };
 
 /**
  * Resolve a symbol ID for heritage, with fallback to generated ID.
  * Uses ctx.resolve() → pick first candidate's nodeId → generate synthetic ID.
  */
+interface ResolvedHeritage {
+  readonly id: string;
+  readonly confidence: number;
+}
+
 const resolveHeritageId = (
   name: string,
   filePath: string,
   ctx: ResolutionContext,
   fallbackLabel: string,
   fallbackKey?: string,
-): string => {
+): ResolvedHeritage => {
   const resolved = ctx.resolve(name, filePath);
   if (resolved && resolved.candidates.length > 0) {
     // For global with multiple candidates, refuse (a wrong edge is worse than no edge)
     if (resolved.tier === 'global' && resolved.candidates.length > 1) {
-      return generateId(fallbackLabel, fallbackKey ?? name);
+      return {
+        id: generateId(fallbackLabel, fallbackKey ?? name),
+        confidence: TIER_CONFIDENCE['global'],
+      };
     }
-    return resolved.candidates[0].nodeId;
+    return { id: resolved.candidates[0].nodeId, confidence: TIER_CONFIDENCE[resolved.tier] };
   }
-  return generateId(fallbackLabel, fallbackKey ?? name);
+  // Unresolved: use global-tier confidence as fallback
+  return {
+    id: generateId(fallbackLabel, fallbackKey ?? name),
+    confidence: TIER_CONFIDENCE['global'],
+  };
+};
+
+/**
+ * Resolve a single HeritageInfo to a graph edge, using the same resolution
+ * logic as processHeritageFromExtracted.  This bridges the heritage extractor
+ * output format to the graph-resolution side.
+ */
+const resolveAndAddHeritageEdge = (
+  graph: KnowledgeGraph,
+  item: HeritageInfo,
+  filePath: string,
+  language: SupportedLanguages,
+  ctx: ResolutionContext,
+): void => {
+  if (item.kind === 'extends') {
+    const { type: relType, idPrefix } = resolveExtendsType(
+      item.parentName,
+      filePath,
+      ctx,
+      getHeritageStrategyForLanguage(language),
+    );
+
+    const child = resolveHeritageId(
+      item.className,
+      filePath,
+      ctx,
+      'Class',
+      `${filePath}:${item.className}`,
+    );
+    const parent = resolveHeritageId(item.parentName, filePath, ctx, idPrefix);
+
+    if (child.id && parent.id && child.id !== parent.id) {
+      graph.addRelationship({
+        id: generateId(relType, `${child.id}->${parent.id}`),
+        sourceId: child.id,
+        targetId: parent.id,
+        type: relType,
+        confidence: Math.sqrt(child.confidence * parent.confidence),
+        reason: '',
+      });
+    }
+  } else if (item.kind === 'implements') {
+    const cls = resolveHeritageId(
+      item.className,
+      filePath,
+      ctx,
+      'Class',
+      `${filePath}:${item.className}`,
+    );
+    const iface = resolveHeritageId(item.parentName, filePath, ctx, 'Interface');
+
+    if (cls.id && iface.id) {
+      graph.addRelationship({
+        id: generateId('IMPLEMENTS', `${cls.id}->${iface.id}`),
+        sourceId: cls.id,
+        targetId: iface.id,
+        type: 'IMPLEMENTS',
+        confidence: Math.sqrt(cls.confidence * iface.confidence),
+        reason: '',
+      });
+    }
+  } else if (
+    item.kind === 'trait-impl' ||
+    item.kind === 'include' ||
+    item.kind === 'extend' ||
+    item.kind === 'prepend'
+  ) {
+    // Fallback label for an unresolved child name. Rust `trait-impl` children
+    // are structs; Ruby mixin children are classes or modules (Trait). For
+    // Ruby mixin kinds the common case resolves through the type registry
+    // post-plan-001, so the fallback only fires for true-unresolved references
+    // (e.g. mixin inside a singleton_class). `Class` is strictly better than
+    // `Struct` there because it matches the label the structure phase would
+    // emit for a Ruby `class` — the dominant shape. Ruby modules that fail
+    // to resolve still lose their `Trait` label in the synthesized id, but
+    // they fail to resolve rarely and the tradeoff is documented.
+    const childFallbackLabel: NodeLabel = item.kind === 'trait-impl' ? 'Struct' : 'Class';
+    const strct = resolveHeritageId(
+      item.className,
+      filePath,
+      ctx,
+      childFallbackLabel,
+      `${filePath}:${item.className}`,
+    );
+    const trait = resolveHeritageId(item.parentName, filePath, ctx, 'Trait');
+
+    if (strct.id && trait.id) {
+      graph.addRelationship({
+        id: generateId('IMPLEMENTS', `${strct.id}->${trait.id}:${item.kind}`),
+        sourceId: strct.id,
+        targetId: trait.id,
+        type: 'IMPLEMENTS',
+        confidence: Math.sqrt(strct.confidence * trait.confidence),
+        reason: item.kind,
+      });
+    }
+  }
 };
 
 export const processHeritage = async (
@@ -111,7 +210,8 @@ export const processHeritage = async (
       continue;
     }
 
-    const queryStr = LANGUAGE_QUERIES[language];
+    const provider = getProvider(language);
+    const queryStr = provider.treeSitterQueries;
     if (!queryStr) continue;
 
     // 2. Load the language
@@ -155,89 +255,32 @@ export const processHeritage = async (
     let query;
     let matches;
     try {
-      const language = parser.getLanguage();
-      query = new Parser.Query(language, queryStr);
+      const treeSitterLang = parser.getLanguage();
+      query = new Parser.Query(treeSitterLang, queryStr);
       matches = query.matches(tree.rootNode);
     } catch (queryError) {
-      console.warn(`Heritage query error for ${file.path}:`, queryError);
+      logger.warn({ queryError }, `Heritage query error for ${file.path}:`);
       continue;
     }
 
-    // 4. Process heritage matches
-    matches.forEach(match => {
+    // 4. Process heritage matches via provider heritage extractor
+    const heritageExtractor = provider.heritageExtractor;
+    matches.forEach((match) => {
       const captureMap: Record<string, any> = {};
-      match.captures.forEach(c => {
+      match.captures.forEach((c) => {
         captureMap[c.name] = c.node;
       });
 
-      // EXTENDS or IMPLEMENTS: resolve via symbol table for languages where
-      // the tree-sitter query can't distinguish classes from interfaces (C#, Java)
-      if (captureMap['heritage.class'] && captureMap['heritage.extends']) {
-        // Go struct embedding: skip named fields (only anonymous fields are embedded)
-        const extendsNode = captureMap['heritage.extends'];
-        const fieldDecl = extendsNode.parent;
-        if (fieldDecl?.type === 'field_declaration' && fieldDecl.childForFieldName('name')) {
-          return; // Named field, not struct embedding
-        }
+      if (!captureMap['heritage.class']) return;
+      if (!heritageExtractor) return;
 
-        const className = captureMap['heritage.class'].text;
-        const parentClassName = captureMap['heritage.extends'].text;
+      const heritageItems = heritageExtractor.extract(captureMap, {
+        filePath: file.path,
+        language,
+      });
 
-        const { type: relType, idPrefix } = resolveExtendsType(parentClassName, file.path, ctx, language);
-
-        const childId = resolveHeritageId(className, file.path, ctx, 'Class', `${file.path}:${className}`);
-        const parentId = resolveHeritageId(parentClassName, file.path, ctx, idPrefix);
-
-        if (childId && parentId && childId !== parentId) {
-          graph.addRelationship({
-            id: generateId(relType, `${childId}->${parentId}`),
-            sourceId: childId,
-            targetId: parentId,
-            type: relType,
-            confidence: 1.0,
-            reason: '',
-          });
-        }
-      }
-
-      // IMPLEMENTS: Class implements Interface (TypeScript only)
-      if (captureMap['heritage.class'] && captureMap['heritage.implements']) {
-        const className = captureMap['heritage.class'].text;
-        const interfaceName = captureMap['heritage.implements'].text;
-
-        const classId = resolveHeritageId(className, file.path, ctx, 'Class', `${file.path}:${className}`);
-        const interfaceId = resolveHeritageId(interfaceName, file.path, ctx, 'Interface');
-
-        if (classId && interfaceId) {
-          graph.addRelationship({
-            id: generateId('IMPLEMENTS', `${classId}->${interfaceId}`),
-            sourceId: classId,
-            targetId: interfaceId,
-            type: 'IMPLEMENTS',
-            confidence: 1.0,
-            reason: '',
-          });
-        }
-      }
-
-      // IMPLEMENTS (Rust): impl Trait for Struct
-      if (captureMap['heritage.trait'] && captureMap['heritage.class']) {
-        const structName = captureMap['heritage.class'].text;
-        const traitName = captureMap['heritage.trait'].text;
-
-        const structId = resolveHeritageId(structName, file.path, ctx, 'Struct', `${file.path}:${structName}`);
-        const traitId = resolveHeritageId(traitName, file.path, ctx, 'Trait');
-
-        if (structId && traitId) {
-          graph.addRelationship({
-            id: generateId('IMPLEMENTS', `${structId}->${traitId}`),
-            sourceId: structId,
-            targetId: traitId,
-            type: 'IMPLEMENTS',
-            confidence: 1.0,
-            reason: 'trait-impl',
-          });
-        }
+      for (const item of heritageItems) {
+        resolveAndAddHeritageEdge(graph, item, file.path, language, ctx);
       }
     });
 
@@ -246,8 +289,8 @@ export const processHeritage = async (
 
   if (skippedByLang && skippedByLang.size > 0) {
     for (const [lang, count] of skippedByLang.entries()) {
-      console.warn(
-        `[ingestion] Skipped ${count} ${lang} file(s) in heritage processing — ${lang} parser not available.`
+      logger.warn(
+        `[ingestion] Skipped ${count} ${lang} file(s) in heritage processing — ${lang} parser not available.`,
       );
     }
   }
@@ -276,46 +319,78 @@ export const processHeritageFromExtracted = async (
     if (h.kind === 'extends') {
       const fileLanguage = getLanguageFromFilename(h.filePath);
       if (!fileLanguage) continue;
-      const { type: relType, idPrefix } = resolveExtendsType(h.parentName, h.filePath, ctx, fileLanguage);
+      const { type: relType, idPrefix } = resolveExtendsType(
+        h.parentName,
+        h.filePath,
+        ctx,
+        getHeritageStrategyForLanguage(fileLanguage),
+      );
 
-      const childId = resolveHeritageId(h.className, h.filePath, ctx, 'Class', `${h.filePath}:${h.className}`);
-      const parentId = resolveHeritageId(h.parentName, h.filePath, ctx, idPrefix);
+      const child = resolveHeritageId(
+        h.className,
+        h.filePath,
+        ctx,
+        'Class',
+        `${h.filePath}:${h.className}`,
+      );
+      const parent = resolveHeritageId(h.parentName, h.filePath, ctx, idPrefix);
 
-      if (childId && parentId && childId !== parentId) {
+      if (child.id && parent.id && child.id !== parent.id) {
         graph.addRelationship({
-          id: generateId(relType, `${childId}->${parentId}`),
-          sourceId: childId,
-          targetId: parentId,
+          id: generateId(relType, `${child.id}->${parent.id}`),
+          sourceId: child.id,
+          targetId: parent.id,
           type: relType,
-          confidence: 1.0,
+          confidence: Math.sqrt(child.confidence * parent.confidence),
           reason: '',
         });
       }
     } else if (h.kind === 'implements') {
-      const classId = resolveHeritageId(h.className, h.filePath, ctx, 'Class', `${h.filePath}:${h.className}`);
-      const interfaceId = resolveHeritageId(h.parentName, h.filePath, ctx, 'Interface');
+      const cls = resolveHeritageId(
+        h.className,
+        h.filePath,
+        ctx,
+        'Class',
+        `${h.filePath}:${h.className}`,
+      );
+      const iface = resolveHeritageId(h.parentName, h.filePath, ctx, 'Interface');
 
-      if (classId && interfaceId) {
+      if (cls.id && iface.id) {
         graph.addRelationship({
-          id: generateId('IMPLEMENTS', `${classId}->${interfaceId}`),
-          sourceId: classId,
-          targetId: interfaceId,
+          id: generateId('IMPLEMENTS', `${cls.id}->${iface.id}`),
+          sourceId: cls.id,
+          targetId: iface.id,
           type: 'IMPLEMENTS',
-          confidence: 1.0,
+          confidence: Math.sqrt(cls.confidence * iface.confidence),
           reason: '',
         });
       }
-    } else if (h.kind === 'trait-impl' || h.kind === 'include' || h.kind === 'extend' || h.kind === 'prepend') {
-      const structId = resolveHeritageId(h.className, h.filePath, ctx, 'Struct', `${h.filePath}:${h.className}`);
-      const traitId = resolveHeritageId(h.parentName, h.filePath, ctx, 'Trait');
+    } else if (
+      h.kind === 'trait-impl' ||
+      h.kind === 'include' ||
+      h.kind === 'extend' ||
+      h.kind === 'prepend'
+    ) {
+      // See the per-item call above (processHeritageFromExtractedItem) for
+      // rationale: `Class` is the correct fallback for Ruby mixin kinds,
+      // `Struct` stays the Rust `trait-impl` default.
+      const childFallbackLabel: NodeLabel = h.kind === 'trait-impl' ? 'Struct' : 'Class';
+      const strct = resolveHeritageId(
+        h.className,
+        h.filePath,
+        ctx,
+        childFallbackLabel,
+        `${h.filePath}:${h.className}`,
+      );
+      const trait = resolveHeritageId(h.parentName, h.filePath, ctx, 'Trait');
 
-      if (structId && traitId) {
+      if (strct.id && trait.id) {
         graph.addRelationship({
-          id: generateId('IMPLEMENTS', `${structId}->${traitId}:${h.kind}`),
-          sourceId: structId,
-          targetId: traitId,
+          id: generateId('IMPLEMENTS', `${strct.id}->${trait.id}:${h.kind}`),
+          sourceId: strct.id,
+          targetId: trait.id,
           type: 'IMPLEMENTS',
-          confidence: 1.0,
+          confidence: Math.sqrt(strct.confidence * trait.confidence),
           reason: h.kind,
         });
       }
@@ -324,3 +399,111 @@ export const processHeritageFromExtracted = async (
 
   onProgress?.(total, total);
 };
+
+/**
+ * Walk source files with the same heritage captures as parse-worker, producing
+ * {@link ExtractedHeritage} rows without mutating the graph. Used on the
+ * sequential pipeline path so `buildHeritageMap(..., ctx)` can run before
+ * `processCalls` (worker path defers calls until heritage from all chunks exists).
+ *
+ * This prepass extracts BOTH capture-based heritage (`@heritage.*` — extends /
+ * implements / trait-impl) AND call-based heritage (`@call.name` routed through
+ * `heritageExtractor.extractFromCall` — Ruby `include` / `extend` / `prepend`).
+ * Without the second pass, sequential-mode `sequentialHeritageMap` would not
+ * know about Ruby mixin ancestry before `processCalls` resolves calls against
+ * it, silently dropping mixed-in methods from the graph. This function stays
+ * read-only — `processCalls` still owns emission of heritage graph edges via
+ * its `rubyHeritage` return path.
+ */
+export async function extractExtractedHeritageFromFiles(
+  files: { path: string; content: string }[],
+  astCache: ASTCache,
+): Promise<ExtractedHeritage[]> {
+  const parser = await loadParser();
+  const out: ExtractedHeritage[] = [];
+
+  for (const file of files) {
+    const language = getLanguageFromFilename(file.path);
+    if (!language || !isLanguageAvailable(language)) continue;
+
+    const provider = getProvider(language);
+    const queryStr = provider.treeSitterQueries;
+    if (!queryStr) continue;
+
+    await loadLanguage(language, file.path);
+
+    let tree = astCache.get(file.path);
+    if (!tree) {
+      try {
+        tree = parser.parse(file.content, undefined, {
+          bufferSize: getTreeSitterBufferSize(file.content),
+        });
+      } catch {
+        continue;
+      }
+      astCache.set(file.path, tree);
+    }
+
+    let matches;
+    try {
+      const lang = parser.getLanguage();
+      const query = new Parser.Query(lang, queryStr);
+      matches = query.matches(tree.rootNode);
+    } catch {
+      continue;
+    }
+
+    const callBasedEnabled = !!provider.heritageExtractor?.extractFromCall;
+
+    for (const match of matches) {
+      const captureMap: Record<string, any> = {};
+      match.captures.forEach((c) => {
+        captureMap[c.name] = c.node;
+      });
+
+      if (captureMap['heritage.class']) {
+        if (provider.heritageExtractor) {
+          const heritageItems = provider.heritageExtractor.extract(captureMap, {
+            filePath: file.path,
+            language,
+          });
+          for (const item of heritageItems) {
+            out.push({
+              filePath: file.path,
+              className: item.className,
+              parentName: item.parentName,
+              kind: item.kind,
+            });
+          }
+        }
+        continue;
+      }
+
+      // Call-based heritage (e.g. Ruby include/extend/prepend). Matches the
+      // routing the worker path performs inline in parse-worker.ts — see the
+      // `provider.heritageExtractor?.extractFromCall` branch there. We only
+      // need call-based records here; other @call captures are consumed by
+      // processCalls later in the sequential loop.
+      if (callBasedEnabled && captureMap['call'] && captureMap['call.name']) {
+        const calledName: string = captureMap['call.name'].text;
+        const heritageItems = provider.heritageExtractor!.extractFromCall!(
+          calledName,
+          captureMap['call'],
+          { filePath: file.path, language },
+        );
+        if (heritageItems) {
+          for (const item of heritageItems) {
+            out.push({
+              filePath: file.path,
+              className: item.className,
+              parentName: item.parentName,
+              kind: item.kind,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return out;
+}

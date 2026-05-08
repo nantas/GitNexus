@@ -8,6 +8,8 @@ import { setupCommand } from '../../src/cli/setup.js';
 describe('setupCommand skills integration', () => {
   let tempHome: string;
   const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
+  const originalPath = process.env.PATH;
   const testId = `${Date.now()}-${process.pid}`;
   const flatSkillName = `test-flat-skill-${testId}`;
   const dirSkillName = `test-dir-skill-${testId}`;
@@ -17,6 +19,7 @@ describe('setupCommand skills integration', () => {
   beforeAll(async () => {
     tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'gn-setup-home-'));
     process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome; // os.homedir() checks USERPROFILE on Windows
     await fs.mkdir(path.join(tempHome, '.cursor'), { recursive: true });
 
     // Create temporary source skills to verify both supported source layouts:
@@ -44,7 +47,24 @@ describe('setupCommand skills integration', () => {
     await fs.rm(path.join(packageSkillsRoot, `${flatSkillName}.md`), { force: true });
     await fs.rm(path.join(packageSkillsRoot, dirSkillName), { recursive: true, force: true });
     process.env.HOME = originalHome;
+    process.env.USERPROFILE = originalUserProfile;
+    process.env.PATH = originalPath;
     await fs.rm(tempHome, { recursive: true, force: true });
+  });
+
+  it('reports the OpenCode skills install path with the plural skills directory', async () => {
+    await fs.mkdir(path.join(tempHome, '.config', 'opencode'), { recursive: true });
+    await setupCommand();
+
+    const installedSkill = await fs.readFile(
+      path.join(tempHome, '.config', 'opencode', 'skills', 'gitnexus-cli', 'SKILL.md'),
+      'utf-8',
+    );
+
+    expect(installedSkill).toContain('GitNexus CLI Commands');
+    await expect(
+      fs.access(path.join(tempHome, '.config', 'opencode', 'skill', 'gitnexus-cli', 'SKILL.md')),
+    ).rejects.toThrow();
   });
 
   it('installs packaged, flat-file, and directory skills into cursor skills directory', async () => {
@@ -52,7 +72,7 @@ describe('setupCommand skills integration', () => {
 
     const cursorSkillsRoot = path.join(tempHome, '.cursor', 'skills');
     const entries = await fs.readdir(cursorSkillsRoot, { withFileTypes: true });
-    const skillDirs = entries.filter(e => e.isDirectory()).map(e => e.name);
+    const skillDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
 
     expect(skillDirs.length).toBeGreaterThan(0);
     expect(skillDirs).toContain('gitnexus-cli');
@@ -97,5 +117,35 @@ describe('setupCommand skills integration', () => {
     expect(debuggingSkill).toMatch(/graph-only/i);
     expect(exploringSkill).toMatch(/graph-only/i);
     expect(guideSkill).toMatch(/graph-only/i);
+  });
+
+  it('falls back to Codex config.toml and installs skills into ~/.agents/skills when codex CLI is unavailable', async () => {
+    await fs.mkdir(path.join(tempHome, '.codex'), { recursive: true });
+    process.env.PATH = '';
+
+    await setupCommand();
+
+    const codexConfig = await fs.readFile(path.join(tempHome, '.codex', 'config.toml'), 'utf-8');
+    expect(codexConfig).toContain('[mcp_servers.gitnexus]');
+    expect(codexConfig).toMatch(/gitnexus@\d+\.\d+\.\d+/);
+
+    const codexSkill = await fs.readFile(
+      path.join(tempHome, '.agents', 'skills', 'gitnexus-cli', 'SKILL.md'),
+      'utf-8',
+    );
+    expect(codexSkill).toContain('GitNexus CLI Commands');
+  });
+
+  it('does not duplicate the Codex MCP section on repeated fallback setup runs', async () => {
+    await fs.mkdir(path.join(tempHome, '.codex'), { recursive: true });
+    process.env.PATH = '';
+
+    await setupCommand();
+    await setupCommand();
+
+    const codexConfig = await fs.readFile(path.join(tempHome, '.codex', 'config.toml'), 'utf-8');
+    const sectionMatches = codexConfig.match(/\[mcp_servers\.gitnexus\]/g) ?? [];
+
+    expect(sectionMatches).toHaveLength(1);
   });
 });

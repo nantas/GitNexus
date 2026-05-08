@@ -26,7 +26,14 @@ import shutil
 import time
 from pathlib import Path
 
+from constants import (
+    EVAL_SERVER_HEALTH_INTERVAL_SECONDS,
+    EVAL_SERVER_HEALTH_RETRIES,
+    EVAL_SERVER_HEALTH_TIMEOUT_SECONDS,
+)
 from minisweagent.environments.docker import DockerEnvironment
+from tool_registry import TOOL_SPECS, ToolScriptSpec
+from utils.errors import is_debug_enabled, log_safe_exception
 
 logger = logging.getLogger("gitnexus_docker")
 
@@ -133,7 +140,13 @@ class GitNexusDockerEnvironment(DockerEnvironment):
             try:
                 self._setup_gitnexus()
             except Exception as e:
-                logger.warning(f"GitNexus setup failed, continuing without it: {e}")
+                log_safe_exception(
+                    logger,
+                    "GitNexus setup failed, continuing without it",
+                    e,
+                    include_debug=is_debug_enabled(),
+                    level="warning",
+                )
                 self._gitnexus_ready = False
 
         return result
@@ -222,26 +235,58 @@ class GitNexusDockerEnvironment(DockerEnvironment):
             "timeout": 5,
         })
 
-        # Wait for the server to be ready (up to 15s for KuzuDB init)
-        for i in range(30):
-            time.sleep(0.5)
+        # Wait for the server to be ready (up to ~15s for KuzuDB init)
+        for i in range(EVAL_SERVER_HEALTH_RETRIES):
+            time.sleep(EVAL_SERVER_HEALTH_INTERVAL_SECONDS)
             health = self.execute({
                 "command": f"curl -sf http://127.0.0.1:{self.eval_server_port}/health 2>/dev/null || echo 'NOT_READY'",
-                "timeout": 3,
+                "timeout": EVAL_SERVER_HEALTH_TIMEOUT_SECONDS,
             })
             output = health.get("output", "").strip()
             if "NOT_READY" not in output and "ok" in output:
-                logger.info(f"Eval-server ready after {(i + 1) * 0.5:.1f}s")
+                logger.info(
+                    f"Eval-server ready after {(i + 1) * EVAL_SERVER_HEALTH_INTERVAL_SECONDS:.1f}s"
+                )
                 return
 
         log_output = self.execute({
             "command": "cat /tmp/gitnexus-eval-server.log 2>/dev/null | tail -20",
         })
         logger.warning(
-            f"Eval-server didn't become ready in 15s. "
+            f"Eval-server didn't become ready in "
+            f"{EVAL_SERVER_HEALTH_RETRIES * EVAL_SERVER_HEALTH_INTERVAL_SECONDS:.1f}s. "
             f"Tools will fall back to direct CLI.\n"
             f"Server log: {log_output.get('output', 'N/A')}"
         )
+
+    @staticmethod
+    def _render_tool_script(spec: ToolScriptSpec, port: str) -> str:
+        """
+        Render a standalone bash script for a GitNexus tool.
+
+        Scripts call the eval-server fast path when an endpoint is present,
+        and fall back to the CLI otherwise.
+        """
+        lines = ["#!/bin/bash"]
+
+        if spec.endpoint:
+            lines.append(f'PORT="${{GITNEXUS_EVAL_PORT:-{port}}}"')
+
+        if spec.header:
+            lines.append(spec.header.strip())
+
+        if spec.payload_builder:
+            lines.append(spec.payload_builder.strip())
+
+        if spec.endpoint:
+            lines.append(
+                f'result=$(curl -sf -X POST "http://127.0.0.1:${{PORT}}{spec.endpoint}" '
+                '-H "Content-Type: application/json" -d "$payload" 2>/dev/null)'
+            )
+            lines.append('if [ $? -eq 0 ] && [ -n "$result" ]; then echo "$result"; exit 0; fi')
+
+        lines.append(spec.fallback.strip())
+        return "\n".join(lines)
 
     def _install_tools(self):
         """
@@ -259,24 +304,20 @@ class GitNexusDockerEnvironment(DockerEnvironment):
         """
         port = str(self.eval_server_port)
 
-        tools = {
-            "gitnexus-query": TOOL_SCRIPT_QUERY,
-            "gitnexus-context": TOOL_SCRIPT_CONTEXT,
-            "gitnexus-impact": TOOL_SCRIPT_IMPACT,
-            "gitnexus-cypher": TOOL_SCRIPT_CYPHER,
-            "gitnexus-augment": TOOL_SCRIPT_AUGMENT,
-            "gitnexus-overview": TOOL_SCRIPT_OVERVIEW,
-        }
-
-        for name, script in tools.items():
-            script_content = script.replace("__PORT__", port).strip()
+        for spec in TOOL_SPECS.values():
+            script_content = self._render_tool_script(spec, port).strip()
             # Use heredoc with quoted delimiter — prevents all variable expansion and quoting issues
             self.execute({
-                "command": f"cat << 'GITNEXUS_SCRIPT_EOF' > /usr/local/bin/{name}\n{script_content}\nGITNEXUS_SCRIPT_EOF\nchmod +x /usr/local/bin/{name}",
+                "command": (
+                    f"cat << 'GITNEXUS_SCRIPT_EOF' > /usr/local/bin/{spec.bin_name}\n"
+                    f"{script_content}\n"
+                    "GITNEXUS_SCRIPT_EOF\n"
+                    f"chmod +x /usr/local/bin/{spec.bin_name}"
+                ),
                 "timeout": 5,
             })
 
-        logger.info(f"Installed {len(tools)} GitNexus tool scripts in /usr/local/bin/")
+        logger.info(f"Installed {len(TOOL_SPECS)} GitNexus tool scripts in /usr/local/bin/")
 
     def _get_repo_info(self) -> dict:
         """Get repository identity info from the container."""
@@ -325,7 +366,13 @@ class GitNexusDockerEnvironment(DockerEnvironment):
                     logger.info(f"Cached GitNexus index: {cache_path}")
 
         except Exception as e:
-            logger.warning(f"Failed to cache GitNexus index: {e}")
+            log_safe_exception(
+                logger,
+                "Failed to cache GitNexus index",
+                e,
+                include_debug=is_debug_enabled(),
+                level="warning",
+            )
             if cache_path.exists():
                 shutil.rmtree(cache_path, ignore_errors=True)
 
@@ -361,7 +408,13 @@ class GitNexusDockerEnvironment(DockerEnvironment):
                 logger.info("GitNexus index restored from cache")
 
         except Exception as e:
-            logger.warning(f"Failed to restore cache, re-indexing: {e}")
+            log_safe_exception(
+                logger,
+                "Failed to restore cache, re-indexing",
+                e,
+                include_debug=is_debug_enabled(),
+                level="warning",
+            )
             self._index_repository()
 
     def stop(self) -> dict:

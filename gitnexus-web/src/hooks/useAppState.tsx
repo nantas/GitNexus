@@ -1,18 +1,43 @@
-import { createContext, useContext, useState, useCallback, useRef, useEffect, ReactNode } from 'react';
-import * as Comlink from 'comlink';
-import { KnowledgeGraph, GraphNode, NodeLabel } from '../core/graph/types';
-import { PipelineProgress, PipelineResult, deserializePipelineResult } from '../types/pipeline';
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useMemo,
+  ReactNode,
+} from 'react';
+import type { GraphNode, NodeLabel, PipelineProgress } from 'gitnexus-shared';
+import type { KnowledgeGraph } from '../core/graph/types';
 import { createKnowledgeGraph } from '../core/graph/graph';
-import { DEFAULT_VISIBLE_LABELS } from '../lib/constants';
-import type { IngestionWorkerApi } from '../workers/ingestion.worker';
-import type { FileEntry } from '../services/zip';
-import type { EmbeddingProgress, SemanticSearchResult } from '../core/embeddings/types';
-import type { LLMSettings, ProviderConfig, AgentStreamChunk, ChatMessage, ToolCallInfo, MessageStep } from '../core/llm/types';
+import type {
+  LLMSettings,
+  AgentStreamChunk,
+  ChatMessage,
+  ToolCallInfo,
+  MessageStep,
+} from '../core/llm/types';
 import { loadSettings, getActiveProviderConfig, saveSettings } from '../core/llm/settings-service';
 import type { AgentMessage } from '../core/llm/agent';
-import { DEFAULT_VISIBLE_EDGES, type EdgeType } from '../lib/constants';
-import type { RepoSummary, ConnectToServerResult } from '../services/server-connection';
-import { fetchRepos, connectToServer } from '../services/server-connection';
+import { type EdgeType } from '../lib/constants';
+import {
+  connectToServer,
+  runQuery as backendRunQuery,
+  search as backendSearch,
+  grep as backendGrep,
+  readFile as backendReadFile,
+  startEmbeddings as backendStartEmbeddings,
+  streamEmbeddingProgress,
+  probeBackend,
+  type BackendRepo,
+  type ConnectResult,
+  type JobProgress,
+} from '../services/backend-client';
+import { ERROR_RESET_DELAY_MS } from '../config/ui-constants';
+import { normalizePath } from '../lib/path-resolution';
+import { FILE_REF_REGEX, NODE_REF_REGEX } from '../lib/grounding-patterns';
+import { GraphStateProvider, useGraphState } from './app-state/graph';
 
 export type ViewMode = 'onboarding' | 'loading' | 'exploring';
 export type RightPanelTab = 'code' | 'chat';
@@ -39,10 +64,10 @@ export interface CodeReference {
   filePath: string;
   startLine?: number;
   endLine?: number;
-  nodeId?: string;  // Associated graph node ID
-  label?: string;   // File, Function, Class, etc.
-  name?: string;    // Display name
-  source: 'ai' | 'user';  // How it was added
+  nodeId?: string; // Associated graph node ID
+  label?: string; // File, Function, Class, etc.
+  name?: string; // Display name
+  source: 'ai' | 'user'; // How it was added
 }
 
 export interface CodeReferenceFocus {
@@ -60,8 +85,6 @@ interface AppState {
   // Graph data
   graph: KnowledgeGraph | null;
   setGraph: (graph: KnowledgeGraph | null) => void;
-  fileContents: Map<string, string>;
-  setFileContents: (contents: Map<string, string>) => void;
 
   // Selection
   selectedNode: GraphNode | null;
@@ -74,6 +97,8 @@ interface AppState {
   setRightPanelTab: (tab: RightPanelTab) => void;
   openCodePanel: () => void;
   openChatPanel: () => void;
+  helpDialogBoxOpen: boolean;
+  setHelpDialogBoxOpen: (open: boolean) => void;
 
   // Filters
   visibleLabels: NodeLabel[];
@@ -95,6 +120,7 @@ interface AppState {
   isAIHighlightsEnabled: boolean;
   toggleAIHighlights: () => void;
   clearAIToolHighlights: () => void;
+  clearAICitationHighlights: () => void;
   clearBlastRadius: () => void;
   queryResult: QueryResult | null;
   setQueryResult: (result: QueryResult | null) => void;
@@ -116,28 +142,25 @@ interface AppState {
   // Multi-repo switching
   serverBaseUrl: string | null;
   setServerBaseUrl: (url: string | null) => void;
-  availableRepos: RepoSummary[];
-  setAvailableRepos: (repos: RepoSummary[]) => void;
+  availableRepos: BackendRepo[];
+  setAvailableRepos: (repos: BackendRepo[]) => void;
   switchRepo: (repoName: string) => Promise<void>;
+  setCurrentRepo: (repoName: string) => void;
 
   // Worker API (shared across app)
-  runPipeline: (file: File, onProgress: (p: PipelineProgress) => void, clusteringConfig?: ProviderConfig) => Promise<PipelineResult>;
-  runPipelineFromFiles: (files: FileEntry[], onProgress: (p: PipelineProgress) => void, clusteringConfig?: ProviderConfig) => Promise<PipelineResult>;
   runQuery: (cypher: string) => Promise<any[]>;
   isDatabaseReady: () => Promise<boolean>;
 
   // Embedding state
   embeddingStatus: EmbeddingStatus;
-  embeddingProgress: EmbeddingProgress | null;
+  embeddingProgress: { phase: string; percent: number } | null;
 
   // Embedding methods
-  startEmbeddings: (forceDevice?: 'webgpu' | 'wasm') => Promise<void>;
-  semanticSearch: (query: string, k?: number) => Promise<SemanticSearchResult[]>;
+  startEmbeddings: () => Promise<void>;
+  startEmbeddingsWithFallback: () => void;
+  semanticSearch: (query: string, k?: number) => Promise<any[]>;
   semanticSearchWithContext: (query: string, k?: number, hops?: number) => Promise<any[]>;
   isEmbeddingReady: boolean;
-
-  // Debug/test methods
-  testArrayParams: () => Promise<{ success: boolean; error?: string }>;
 
   // LLM/Agent state
   llmSettings: LLMSettings;
@@ -173,20 +196,35 @@ interface AppState {
 
 const AppStateContext = createContext<AppState | null>(null);
 
-export const AppStateProvider = ({ children }: { children: ReactNode }) => {
+export const AppStateProvider = ({ children }: { children: ReactNode }) => (
+  <GraphStateProvider>
+    <AppStateProviderInner>{children}</AppStateProviderInner>
+  </GraphStateProvider>
+);
+
+const AppStateProviderInner = ({ children }: { children: ReactNode }) => {
   // View state
   const [viewMode, setViewMode] = useState<ViewMode>('onboarding');
 
-  // Graph data
-  const [graph, setGraph] = useState<KnowledgeGraph | null>(null);
-  const [fileContents, setFileContents] = useState<Map<string, string>>(new Map());
-
-  // Selection
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const {
+    graph,
+    setGraph,
+    selectedNode,
+    setSelectedNode,
+    visibleLabels,
+    toggleLabelVisibility,
+    visibleEdgeTypes,
+    toggleEdgeVisibility,
+    depthFilter,
+    setDepthFilter,
+    highlightedNodeIds,
+    setHighlightedNodeIds,
+  } = useGraphState();
 
   // Right Panel
   const [isRightPanelOpen, setRightPanelOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('code');
+  const [helpDialogBoxOpen, setHelpDialogBoxOpen] = useState(false);
 
   const openCodePanel = useCallback(() => {
     // Legacy API: used by graph/tree selection.
@@ -200,29 +238,27 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     setRightPanelTab('chat');
   }, []);
 
-  // Filters
-  const [visibleLabels, setVisibleLabels] = useState<NodeLabel[]>(DEFAULT_VISIBLE_LABELS);
-  const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<EdgeType[]>(DEFAULT_VISIBLE_EDGES);
-
-  // Depth filter
-  const [depthFilter, setDepthFilter] = useState<number | null>(null);
-
   // Query state
-  const [highlightedNodeIds, setHighlightedNodeIds] = useState<Set<string>>(new Set());
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
 
   // AI highlights (separate from user/query highlights)
-  const [aiCitationHighlightedNodeIds, setAICitationHighlightedNodeIds] = useState<Set<string>>(new Set());
+  const [aiCitationHighlightedNodeIds, setAICitationHighlightedNodeIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [aiToolHighlightedNodeIds, setAIToolHighlightedNodeIds] = useState<Set<string>>(new Set());
   const [blastRadiusNodeIds, setBlastRadiusNodeIds] = useState<Set<string>>(new Set());
   const [isAIHighlightsEnabled, setAIHighlightsEnabled] = useState(true);
 
   const toggleAIHighlights = useCallback(() => {
-    setAIHighlightsEnabled(prev => !prev);
+    setAIHighlightsEnabled((prev) => !prev);
   }, []);
 
   const clearAIToolHighlights = useCallback(() => {
     setAIToolHighlightedNodeIds(new Set());
+  }, []);
+
+  const clearAICitationHighlights = useCallback(() => {
+    setAICitationHighlightedNodeIds(new Set());
   }, []);
 
   const clearBlastRadius = useCallback(() => {
@@ -242,7 +278,7 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     const now = Date.now();
     const duration = type === 'pulse' ? 2000 : type === 'ripple' ? 3000 : 4000;
 
-    setAnimatedNodes(prev => {
+    setAnimatedNodes((prev) => {
       const next = new Map(prev);
       for (const id of nodeIds) {
         next.set(id, { type, startTime: now, duration });
@@ -252,7 +288,7 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
 
     // Auto-cleanup after duration
     setTimeout(() => {
-      setAnimatedNodes(prev => {
+      setAnimatedNodes((prev) => {
         const next = new Map(prev);
         for (const id of nodeIds) {
           const anim = next.get(id);
@@ -281,11 +317,14 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
 
   // Multi-repo switching
   const [serverBaseUrl, setServerBaseUrl] = useState<string | null>(null);
-  const [availableRepos, setAvailableRepos] = useState<RepoSummary[]>([]);
+  const [availableRepos, setAvailableRepos] = useState<BackendRepo[]>([]);
 
   // Embedding state
   const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus>('idle');
-  const [embeddingProgress, setEmbeddingProgress] = useState<EmbeddingProgress | null>(null);
+  const [embeddingProgress, setEmbeddingProgress] = useState<{
+    phase: string;
+    percent: number;
+  } | null>(null);
 
   // LLM/Agent state
   const [llmSettings, setLLMSettings] = useState<LLMSettings>(loadSettings);
@@ -304,66 +343,61 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
   const [isCodePanelOpen, setCodePanelOpen] = useState(false);
   const [codeReferenceFocus, setCodeReferenceFocus] = useState<CodeReferenceFocus | null>(null);
 
-    const normalizePath = useCallback((p: string) => {
-    return p.replace(/\\/g, '/').replace(/^\.?\//, '');
-  }, []);
-
-  const resolveFilePath = useCallback((requestedPath: string): string | null => {
-    const req = normalizePath(requestedPath).toLowerCase();
-    if (!req) return null;
-
-    // Exact match first
-    for (const key of fileContents.keys()) {
-      if (normalizePath(key).toLowerCase() === req) return key;
-    }
-
-    // Ends-with match (best for partial paths like "src/foo.ts")
-    let best: { path: string; score: number } | null = null;
-    for (const key of fileContents.keys()) {
-      const norm = normalizePath(key).toLowerCase();
-      if (norm.endsWith(req)) {
-        const score = 1000 - norm.length; // shorter is better
-        if (!best || score > best.score) best = { path: key, score };
+  // Map of normalized file path → node ID for graph-based lookups
+  const fileNodeByPath = useMemo(() => {
+    if (!graph) return new Map<string, string>();
+    const map = new Map<string, string>();
+    for (const n of graph.nodes) {
+      if (n.label === 'File') {
+        map.set(normalizePath(n.properties.filePath), n.id);
       }
     }
-    if (best) return best.path;
+    return map;
+  }, [graph]);
 
-    // Segment match fallback
-    const segs = req.split('/').filter(Boolean);
-    for (const key of fileContents.keys()) {
-      const normSegs = normalizePath(key).toLowerCase().split('/').filter(Boolean);
-      let idx = 0;
-      for (const s of segs) {
-        const found = normSegs.findIndex((x, i) => i >= idx && x.includes(s));
-        if (found === -1) { idx = -1; break; }
-        idx = found + 1;
+  // Map of normalized path → original path for resolving partial paths
+  const filePathIndex = useMemo(() => {
+    if (!graph) return new Map<string, string>();
+    const map = new Map<string, string>();
+    for (const n of graph.nodes) {
+      if (n.label === 'File' && n.properties.filePath) {
+        map.set(normalizePath(n.properties.filePath), n.properties.filePath);
       }
-      if (idx !== -1) return key;
     }
+    return map;
+  }, [graph]);
 
-    return null;
-  }, [fileContents, normalizePath]);
+  const resolveFilePath = useCallback(
+    (requestedPath: string): string | null => {
+      const normalized = normalizePath(requestedPath);
+      // Exact match
+      if (filePathIndex.has(normalized)) return filePathIndex.get(normalized)!;
+      // Suffix match (partial paths like "src/utils.ts")
+      for (const [key, value] of filePathIndex) {
+        if (key.endsWith(normalized)) return value;
+      }
+      return null;
+    },
+    [filePathIndex],
+  );
 
-  const findFileNodeId = useCallback((filePath: string): string | undefined => {
-    if (!graph) return undefined;
-    const target = normalizePath(filePath);
-    const fileNode = graph.nodes.find(
-      (n) => n.label === 'File' && normalizePath(n.properties.filePath) === target
-    );
-    return fileNode?.id;
-  }, [graph, normalizePath]);
+  const findFileNodeId = useCallback(
+    (filePath: string): string | undefined => {
+      return fileNodeByPath.get(normalizePath(filePath));
+    },
+    [fileNodeByPath],
+  );
 
   // Code References methods
   const addCodeReference = useCallback((ref: Omit<CodeReference, 'id'>) => {
     const id = `ref-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const newRef: CodeReference = { ...ref, id };
 
-    setCodeReferences(prev => {
+    setCodeReferences((prev) => {
       // Don't add duplicates (same file + line range)
-      const isDuplicate = prev.some(r =>
-        r.filePath === ref.filePath &&
-        r.startLine === ref.startLine &&
-        r.endLine === ref.endLine
+      const isDuplicate = prev.some(
+        (r) =>
+          r.filePath === ref.filePath && r.startLine === ref.startLine && r.endLine === ref.endLine,
       );
       if (isDuplicate) return prev;
       return [...prev, newRef];
@@ -384,20 +418,20 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
 
     // Track AI highlights separately so they can be toggled off in the UI
     if (ref.nodeId && ref.source === 'ai') {
-      setAICitationHighlightedNodeIds(prev => new Set([...prev, ref.nodeId!]));
+      setAICitationHighlightedNodeIds((prev) => new Set([...prev, ref.nodeId!]));
     }
   }, []);
 
   // Remove ONLY AI-provided refs so each new chat response refreshes the Code panel
   const clearAICodeReferences = useCallback(() => {
-    setCodeReferences(prev => {
-      const removed = prev.filter(r => r.source === 'ai');
-      const kept = prev.filter(r => r.source !== 'ai');
+    setCodeReferences((prev) => {
+      const removed = prev.filter((r) => r.source === 'ai');
+      const kept = prev.filter((r) => r.source !== 'ai');
 
       // Remove citation-based AI highlights for removed refs
-      const removedNodeIds = new Set(removed.map(r => r.nodeId).filter(Boolean) as string[]);
+      const removedNodeIds = new Set(removed.map((r) => r.nodeId).filter(Boolean) as string[]);
       if (removedNodeIds.size > 0) {
-        setAICitationHighlightedNodeIds(prevIds => {
+        setAICitationHighlightedNodeIds((prevIds) => {
           const next = new Set(prevIds);
           for (const id of removedNodeIds) next.delete(id);
           return next;
@@ -410,7 +444,7 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
       }
       return kept;
     });
-  }, [queryResult, selectedNode]);
+  }, [selectedNode]);
 
   // Auto-add a code reference when the user selects a node in the graph/tree
   useEffect(() => {
@@ -420,141 +454,105 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     setCodePanelOpen(true);
   }, [selectedNode]);
 
-  // Worker (single instance shared across app)
-  const workerRef = useRef<Worker | null>(null);
-  const apiRef = useRef<Comlink.Remote<IngestionWorkerApi> | null>(null);
+  // Backend client — direct HTTP calls (no Worker/Comlink)
+  const repoRef = useRef<string | undefined>(undefined);
 
-  useEffect(() => {
-    const worker = new Worker(
-      new URL('../workers/ingestion.worker.ts', import.meta.url),
-      { type: 'module' }
-    );
-    const api = Comlink.wrap<IngestionWorkerApi>(worker);
-    workerRef.current = worker;
-    apiRef.current = api;
-
-    return () => {
-      worker.terminate();
-      workerRef.current = null;
-      apiRef.current = null;
-    };
-  }, []);
-
-  const runPipeline = useCallback(async (
-    file: File,
-    onProgress: (progress: PipelineProgress) => void,
-    clusteringConfig?: ProviderConfig
-  ): Promise<PipelineResult> => {
-    const api = apiRef.current;
-    if (!api) throw new Error('Worker not initialized');
-
-    const proxiedOnProgress = Comlink.proxy(onProgress);
-    const serializedResult = await api.runPipeline(file, proxiedOnProgress, clusteringConfig);
-    return deserializePipelineResult(serializedResult, createKnowledgeGraph);
-  }, []);
-
-  const runPipelineFromFiles = useCallback(async (
-    files: FileEntry[],
-    onProgress: (progress: PipelineProgress) => void,
-    clusteringConfig?: ProviderConfig
-  ): Promise<PipelineResult> => {
-    const api = apiRef.current;
-    if (!api) throw new Error('Worker not initialized');
-
-    const proxiedOnProgress = Comlink.proxy(onProgress);
-    const serializedResult = await api.runPipelineFromFiles(files, proxiedOnProgress, clusteringConfig);
-    return deserializePipelineResult(serializedResult, createKnowledgeGraph);
+  const setCurrentRepo = useCallback((repoName: string) => {
+    repoRef.current = repoName;
   }, []);
 
   const runQuery = useCallback(async (cypher: string): Promise<any[]> => {
-    const api = apiRef.current;
-    if (!api) throw new Error('Worker not initialized');
-    return api.runQuery(cypher);
+    return backendRunQuery(cypher, repoRef.current);
   }, []);
 
   const isDatabaseReady = useCallback(async (): Promise<boolean> => {
-    const api = apiRef.current;
-    if (!api) return false;
-    try {
-      return await api.isReady();
-    } catch {
-      return false;
-    }
+    return probeBackend();
   }, []);
 
-  // Embedding methods
-  const startEmbeddings = useCallback(async (forceDevice?: 'webgpu' | 'wasm'): Promise<void> => {
-    const api = apiRef.current;
-    if (!api) throw new Error('Worker not initialized');
+  // Embedding methods — now trigger server-side via /api/embed
+  const embedAbortRef = useRef<AbortController | null>(null);
+
+  const startEmbeddings = useCallback(async (): Promise<void> => {
+    const repo = repoRef.current;
+    if (!repo) throw new Error('No repository loaded');
 
     setEmbeddingStatus('loading');
     setEmbeddingProgress(null);
 
     try {
-      const proxiedOnProgress = Comlink.proxy((progress: EmbeddingProgress) => {
-        setEmbeddingProgress(progress);
+      const { jobId } = await backendStartEmbeddings(repo);
 
-        // Update status based on phase
-        switch (progress.phase) {
-          case 'loading-model':
-            setEmbeddingStatus('loading');
-            break;
-          case 'embedding':
-            setEmbeddingStatus('embedding');
-            break;
-          case 'indexing':
-            setEmbeddingStatus('indexing');
-            break;
-          case 'ready':
+      // Stream progress via SSE
+      await new Promise<void>((resolve, reject) => {
+        embedAbortRef.current = streamEmbeddingProgress(
+          jobId,
+          (progress: JobProgress) => {
+            setEmbeddingProgress({ phase: progress.phase as any, percent: progress.percent });
+            if (progress.phase === 'loading-model' || progress.phase === 'loading') {
+              setEmbeddingStatus('loading');
+            } else if (progress.phase === 'embedding') {
+              setEmbeddingStatus('embedding');
+            } else if (progress.phase === 'indexing') {
+              setEmbeddingStatus('indexing');
+            }
+          },
+          () => {
             setEmbeddingStatus('ready');
-            break;
-          case 'error':
+            setEmbeddingProgress({ phase: 'ready' as any, percent: 100 });
+            resolve();
+          },
+          (error: string) => {
             setEmbeddingStatus('error');
-            break;
-        }
+            reject(new Error(error));
+          },
+        );
       });
-
-      await api.startEmbeddingPipeline(proxiedOnProgress, forceDevice);
     } catch (error: any) {
-      // Check if it's WebGPU not available - let caller handle the dialog
-      if (error?.name === 'WebGPUNotAvailableError' ||
-        error?.message?.includes('WebGPU not available')) {
-        setEmbeddingStatus('idle'); // Reset to idle so user can try again
-      } else {
-        setEmbeddingStatus('error');
+      if (error?.message?.includes('already in progress')) {
+        // Dedup — embeddings already running, just wait
+        setEmbeddingStatus('embedding');
+        return;
       }
+      setEmbeddingStatus('error');
       throw error;
     }
   }, []);
 
-  const semanticSearch = useCallback(async (
-    query: string,
-    k: number = 10
-  ): Promise<SemanticSearchResult[]> => {
-    const api = apiRef.current;
-    if (!api) throw new Error('Worker not initialized');
-    return api.semanticSearch(query, k);
+  const startEmbeddingsWithFallback = useCallback(() => {
+    const isPlaywright =
+      (typeof navigator !== 'undefined' && navigator.webdriver) ||
+      (typeof import.meta !== 'undefined' &&
+        typeof import.meta.env !== 'undefined' &&
+        import.meta.env.VITE_PLAYWRIGHT_TEST) ||
+      (typeof process !== 'undefined' && process.env.PLAYWRIGHT_TEST);
+    if (isPlaywright) {
+      setEmbeddingStatus('idle');
+      return;
+    }
+    startEmbeddings().catch((err) => {
+      console.warn('Embeddings auto-start failed:', err);
+    });
+  }, [startEmbeddings]);
+
+  const semanticSearch = useCallback(async (query: string, k: number = 10): Promise<any[]> => {
+    return backendSearch(query, { limit: k, mode: 'semantic', repo: repoRef.current });
   }, []);
 
-  const semanticSearchWithContext = useCallback(async (
-    query: string,
-    k: number = 5,
-    hops: number = 2
-  ): Promise<any[]> => {
-    const api = apiRef.current;
-    if (!api) throw new Error('Worker not initialized');
-    return api.semanticSearchWithContext(query, k, hops);
-  }, []);
-
-  const testArrayParams = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
-    const api = apiRef.current;
-    if (!api) return { success: false, error: 'Worker not initialized' };
-    return api.testArrayParams();
-  }, []);
+  const semanticSearchWithContext = useCallback(
+    async (query: string, k: number = 5, _hops: number = 2): Promise<any[]> => {
+      return backendSearch(query, {
+        limit: k,
+        mode: 'semantic',
+        enrich: true,
+        repo: repoRef.current,
+      });
+    },
+    [],
+  );
 
   // LLM methods
   const updateLLMSettings = useCallback((updates: Partial<LLMSettings>) => {
-    setLLMSettings(prev => {
+    setLLMSettings((prev) => {
       const next = { ...prev, ...updates };
       saveSettings(next);
       return next;
@@ -565,402 +563,456 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     setLLMSettings(loadSettings());
   }, []);
 
-  const initializeAgent = useCallback(async (overrideProjectName?: string): Promise<void> => {
-    const api = apiRef.current;
-    if (!api) {
-      setAgentError('Worker not initialized');
-      return;
-    }
+  // Agent state — agent runs on main thread now (I/O-bound, not CPU-bound)
+  const agentRef = useRef<any>(null);
 
-    const config = getActiveProviderConfig();
-    if (!config) {
-      setAgentError('Please configure an LLM provider in settings');
-      return;
-    }
+  const initializeAgent = useCallback(
+    async (overrideProjectName?: string): Promise<void> => {
+      const config = getActiveProviderConfig();
+      if (!config) {
+        setAgentError('Please configure an LLM provider in settings');
+        return;
+      }
 
-    setIsAgentInitializing(true);
-    setAgentError(null);
+      setIsAgentInitializing(true);
+      setAgentError(null);
 
-    try {
-      // Use override if provided (for fresh loads), fallback to state (for re-init)
-      const effectiveProjectName = overrideProjectName || projectName || 'project';
-      const result = await api.initializeAgent(config, effectiveProjectName);
-      if (result.success) {
+      try {
+        const effectiveProjectName = overrideProjectName || projectName || 'project';
+
+        // Sync repoRef so all agent backend calls target the correct repo.
+        // initializeAgent can be called from App.tsx (handleServerConnect) which
+        // never sets repoRef.current directly — without this, queries default to repo[0].
+        if (overrideProjectName) {
+          repoRef.current = overrideProjectName;
+        }
+        const repo = repoRef.current;
+
+        // Build backend interface for Graph RAG tools
+        const { createGraphRAGAgent } = await import('../core/llm/agent');
+        const { buildCodebaseContext } = await import('../core/llm/context-builder');
+
+        const executeQuery = (cypher: string) => backendRunQuery(cypher, repo);
+        const codebaseContext = await buildCodebaseContext(executeQuery, effectiveProjectName);
+
+        const backend = {
+          executeQuery,
+          search: (query: string, opts?: any) => backendSearch(query, { ...opts, repo }),
+          grep: (pattern: string, limit?: number) => backendGrep(pattern, repo, limit),
+          readFile: (filePath: string) =>
+            backendReadFile(filePath, { repo }).then((r) => r.content),
+        };
+
+        agentRef.current = createGraphRAGAgent(config, backend, codebaseContext);
         setIsAgentReady(true);
         setAgentError(null);
         if (import.meta.env.DEV) {
           console.log('✅ Agent initialized successfully');
         }
-      } else {
-        setAgentError(result.error ?? 'Failed to initialize agent');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setAgentError(message);
         setIsAgentReady(false);
+      } finally {
+        setIsAgentInitializing(false);
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setAgentError(message);
-      setIsAgentReady(false);
-    } finally {
-      setIsAgentInitializing(false);
-    }
-  }, [projectName]);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [], // repoRef is a stable ref — we sync it explicitly on entry; no state deps needed
+  );
 
-  const sendChatMessage = useCallback(async (message: string): Promise<void> => {
-    const api = apiRef.current;
-    if (!api) {
-      setAgentError('Worker not initialized');
-      return;
-    }
+  const sendChatMessage = useCallback(
+    async (message: string): Promise<void> => {
+      // Refresh Code panel for the new question: keep user-pinned refs, clear old AI citations
+      clearAICodeReferences();
+      // Also clear previous tool-driven AI highlights (highlight_in_graph)
+      clearAIToolHighlights();
 
-    // Refresh Code panel for the new question: keep user-pinned refs, clear old AI citations
-    clearAICodeReferences();
-    // Also clear previous tool-driven AI highlights (highlight_in_graph)
-    clearAIToolHighlights();
+      if (!isAgentReady) {
+        // Try to initialize first
+        await initializeAgent();
+        if (!agentRef.current) return;
+      }
 
-    if (!isAgentReady) {
-      // Try to initialize first
-      await initializeAgent();
-      if (!apiRef.current) return;
-    }
-
-    // Add user message
-    const userMessage: ChatMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: message,
-      timestamp: Date.now(),
-    };
-    setChatMessages(prev => [...prev, userMessage]);
-
-    // If embeddings are running and we're currently creating the vector index,
-    // avoid a confusing "Embeddings not ready" error and give a clear wait message.
-    if (embeddingStatus === 'indexing') {
-      const assistantMessage: ChatMessage = {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        content: 'Wait a moment, vector index is being created.',
+      // Add user message
+      const userMessage: ChatMessage = {
+        id: `user-${Date.now()}`,
+        role: 'user',
+        content: message,
         timestamp: Date.now(),
       };
-      setChatMessages(prev => [...prev, assistantMessage]);
-      setAgentError(null);
-      setIsChatLoading(false);
-      setCurrentToolCalls([]);
-      return;
-    }
+      setChatMessages((prev) => [...prev, userMessage]);
 
-    setIsChatLoading(true);
-    setCurrentToolCalls([]);
-
-    // Prepare message history for agent (convert our format to AgentMessage format)
-    const history: AgentMessage[] = [...chatMessages, userMessage].map(m => ({
-      role: m.role === 'tool' ? 'assistant' : m.role,
-      content: m.content,
-    }));
-
-    // Create placeholder for assistant response
-    const assistantMessageId = `assistant-${Date.now()}`;
-    // Use an ordered steps array to preserve execution order (reasoning → tool → reasoning → tool → answer)
-    const stepsForMessage: MessageStep[] = [];
-    // Keep toolCalls for backwards compat and currentToolCalls state
-    const toolCallsForMessage: ToolCallInfo[] = [];
-    let stepCounter = 0;
-
-    // Helper to update the message with current steps
-    const updateMessage = () => {
-      // Build content from steps for backwards compatibility
-      const contentParts = stepsForMessage
-        .filter(s => s.type === 'reasoning' || s.type === 'content')
-        .map(s => s.content)
-        .filter(Boolean);
-      const content = contentParts.join('\n\n');
-
-      setChatMessages(prev => {
-        const existing = prev.find(m => m.id === assistantMessageId);
-        const newMessage: ChatMessage = {
-          id: assistantMessageId,
-          role: 'assistant' as const,
-          content,
-          steps: [...stepsForMessage],
-          toolCalls: [...toolCallsForMessage],
-          timestamp: existing?.timestamp ?? Date.now(),
+      // If embeddings are running and we're currently creating the vector index,
+      // avoid a confusing "Embeddings not ready" error and give a clear wait message.
+      if (embeddingStatus === 'indexing') {
+        const assistantMessage: ChatMessage = {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          content: 'Wait a moment, vector index is being created.',
+          timestamp: Date.now(),
         };
-        if (existing) {
-          return prev.map(m => m.id === assistantMessageId ? newMessage : m);
-        } else {
-          return [...prev, newMessage];
-        }
-      });
-    };
+        setChatMessages((prev) => [...prev, assistantMessage]);
+        setAgentError(null);
+        setIsChatLoading(false);
+        setCurrentToolCalls([]);
+        return;
+      }
 
-    try {
-      const onChunk = Comlink.proxy((chunk: AgentStreamChunk) => {
-        switch (chunk.type) {
-          case 'reasoning':
-            // LLM's thinking/reasoning - accumulate contiguous reasoning
-            if (chunk.reasoning) {
-              const lastStep = stepsForMessage[stepsForMessage.length - 1];
-              if (lastStep && lastStep.type === 'reasoning') {
-                // Append to existing reasoning step
-                stepsForMessage[stepsForMessage.length - 1] = {
-                  ...lastStep,
-                  content: (lastStep.content || '') + chunk.reasoning,
-                };
-              } else {
-                // Create new reasoning step (after tool calls or at start)
+      setIsChatLoading(true);
+      setCurrentToolCalls([]);
+
+      // Prepare message history for agent (convert our format to AgentMessage format)
+      const history: AgentMessage[] = [...chatMessages, userMessage].map((m) => ({
+        role: m.role === 'tool' ? 'assistant' : m.role,
+        content: m.content,
+      }));
+
+      // Create placeholder for assistant response
+      const assistantMessageId = `assistant-${Date.now()}`;
+      // Use an ordered steps array to preserve execution order (reasoning → tool → reasoning → tool → answer)
+      const stepsForMessage: MessageStep[] = [];
+      // Keep toolCalls for backwards compat and currentToolCalls state
+      const toolCallsForMessage: ToolCallInfo[] = [];
+      let stepCounter = 0;
+
+      // Helper to update the message with current steps
+      const updateMessage = () => {
+        // Build content from steps for backwards compatibility
+        const contentParts = stepsForMessage
+          .filter((s) => s.type === 'reasoning' || s.type === 'content')
+          .map((s) => s.content)
+          .filter(Boolean);
+        const content = contentParts.join('\n\n');
+
+        setChatMessages((prev) => {
+          const existing = prev.find((m) => m.id === assistantMessageId);
+          const newMessage: ChatMessage = {
+            id: assistantMessageId,
+            role: 'assistant' as const,
+            content,
+            steps: [...stepsForMessage],
+            toolCalls: [...toolCallsForMessage],
+            timestamp: existing?.timestamp ?? Date.now(),
+          };
+          if (existing) {
+            return prev.map((m) => (m.id === assistantMessageId ? newMessage : m));
+          } else {
+            return [...prev, newMessage];
+          }
+        });
+      };
+      let pendingUpdate = false;
+      const scheduleMessageUpdate = () => {
+        if (pendingUpdate) return;
+        pendingUpdate = true;
+        requestAnimationFrame(() => {
+          pendingUpdate = false;
+          updateMessage();
+        });
+      };
+
+      try {
+        const onChunk = (chunk: AgentStreamChunk) => {
+          switch (chunk.type) {
+            case 'reasoning':
+              // LLM's thinking/reasoning - accumulate contiguous reasoning
+              if (chunk.reasoning) {
+                const lastStep = stepsForMessage[stepsForMessage.length - 1];
+                if (lastStep && lastStep.type === 'reasoning') {
+                  // Append to existing reasoning step
+                  stepsForMessage[stepsForMessage.length - 1] = {
+                    ...lastStep,
+                    content: (lastStep.content || '') + chunk.reasoning,
+                  };
+                } else {
+                  // Create new reasoning step (after tool calls or at start)
+                  stepsForMessage.push({
+                    id: `step-${stepCounter++}`,
+                    type: 'reasoning',
+                    content: chunk.reasoning,
+                  });
+                }
+                scheduleMessageUpdate();
+              }
+              break;
+
+            case 'content':
+              // Final answer content - accumulate into contiguous content step
+              if (chunk.content) {
+                // Only append if the LAST step is a content step (contiguous streaming)
+                const lastStep = stepsForMessage[stepsForMessage.length - 1];
+                if (lastStep && lastStep.type === 'content') {
+                  // Append to existing content step
+                  stepsForMessage[stepsForMessage.length - 1] = {
+                    ...lastStep,
+                    content: (lastStep.content || '') + chunk.content,
+                  };
+                } else {
+                  // Create new content step (after tool calls or at start)
+                  stepsForMessage.push({
+                    id: `step-${stepCounter++}`,
+                    type: 'content',
+                    content: chunk.content,
+                  });
+                }
+                scheduleMessageUpdate();
+
+                // Parse inline grounding references and add them to the Code References panel.
+                // Supports: [[file.ts:10-25]] (file refs) and [[Class:View]] (node refs)
+                const currentContentStep = stepsForMessage[stepsForMessage.length - 1];
+                const fullText =
+                  currentContentStep && currentContentStep.type === 'content'
+                    ? currentContentStep.content || ''
+                    : '';
+
+                // Pattern 1: File refs - [[path/file.ext]] or [[path/file.ext:line]] or [[path/file.ext:line-line]]
+                // Line numbers are optional
+                const fileRefRegex = new RegExp(FILE_REF_REGEX.source, FILE_REF_REGEX.flags);
+                let fileMatch: RegExpExecArray | null;
+                while ((fileMatch = fileRefRegex.exec(fullText)) !== null) {
+                  const rawPath = fileMatch[1].trim();
+                  const startLine1 = fileMatch[2] ? parseInt(fileMatch[2], 10) : undefined;
+                  const endLine1 = fileMatch[3] ? parseInt(fileMatch[3], 10) : startLine1;
+
+                  const resolvedPath = resolveFilePath(rawPath);
+                  if (!resolvedPath) continue;
+
+                  const startLine0 =
+                    startLine1 !== undefined ? Math.max(0, startLine1 - 1) : undefined;
+                  const endLine0 = endLine1 !== undefined ? Math.max(0, endLine1 - 1) : startLine0;
+                  const nodeId = findFileNodeId(resolvedPath);
+
+                  addCodeReference({
+                    filePath: resolvedPath,
+                    startLine: startLine0,
+                    endLine: endLine0,
+                    nodeId,
+                    label: 'File',
+                    name: resolvedPath.split('/').pop() ?? resolvedPath,
+                    source: 'ai',
+                  });
+                }
+
+                // Pattern 2: Node refs - [[Type:Name]] or [[graph:Type:Name]]
+                const nodeRefRegex = new RegExp(NODE_REF_REGEX.source, NODE_REF_REGEX.flags);
+                let nodeMatch: RegExpExecArray | null;
+                while ((nodeMatch = nodeRefRegex.exec(fullText)) !== null) {
+                  const nodeType = nodeMatch[1];
+                  const nodeName = nodeMatch[2].trim();
+
+                  // Find node in graph
+                  if (!graph) continue;
+                  const node = graph.nodes.find(
+                    (n) => n.label === nodeType && n.properties.name === nodeName,
+                  );
+                  if (!node || !node.properties.filePath) continue;
+
+                  const resolvedPath = resolveFilePath(node.properties.filePath);
+                  if (!resolvedPath) continue;
+
+                  addCodeReference({
+                    filePath: resolvedPath,
+                    startLine: node.properties.startLine
+                      ? node.properties.startLine - 1
+                      : undefined,
+                    endLine: node.properties.endLine ? node.properties.endLine - 1 : undefined,
+                    nodeId: node.id,
+                    label: node.label,
+                    name: node.properties.name,
+                    source: 'ai',
+                  });
+                }
+              }
+              break;
+
+            case 'tool_call':
+              if (chunk.toolCall) {
+                const tc = chunk.toolCall;
+                toolCallsForMessage.push(tc);
+                // Add tool call as a step (in order with reasoning)
                 stepsForMessage.push({
                   id: `step-${stepCounter++}`,
-                  type: 'reasoning',
-                  content: chunk.reasoning,
+                  type: 'tool_call',
+                  toolCall: tc,
                 });
+                setCurrentToolCalls((prev) => [...prev, tc]);
+                scheduleMessageUpdate();
               }
-              updateMessage();
-            }
-            break;
+              break;
 
-          case 'content':
-            // Final answer content - accumulate into contiguous content step
-            if (chunk.content) {
-              // Only append if the LAST step is a content step (contiguous streaming)
-              const lastStep = stepsForMessage[stepsForMessage.length - 1];
-              if (lastStep && lastStep.type === 'content') {
-                // Append to existing content step
-                stepsForMessage[stepsForMessage.length - 1] = {
-                  ...lastStep,
-                  content: (lastStep.content || '') + chunk.content,
-                };
-              } else {
-                // Create new content step (after tool calls or at start)
-                stepsForMessage.push({
-                  id: `step-${stepCounter++}`,
-                  type: 'content',
-                  content: chunk.content,
-                });
-              }
-              updateMessage();
-
-              // Parse inline grounding references and add them to the Code References panel.
-              // Supports: [[file.ts:10-25]] (file refs) and [[Class:View]] (node refs)
-              const currentContentStep = stepsForMessage[stepsForMessage.length - 1];
-              const fullText = (currentContentStep && currentContentStep.type === 'content')
-                ? (currentContentStep.content || '')
-                : '';
-
-              // Pattern 1: File refs - [[path/file.ext]] or [[path/file.ext:line]] or [[path/file.ext:line-line]]
-              // Line numbers are optional
-              const fileRefRegex = /\[\[([a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9]+)(?::(\d+)(?:[-–](\d+))?)?\]\]/g;
-              let fileMatch: RegExpExecArray | null;
-              while ((fileMatch = fileRefRegex.exec(fullText)) !== null) {
-                const rawPath = fileMatch[1].trim();
-                const startLine1 = fileMatch[2] ? parseInt(fileMatch[2], 10) : undefined;
-                const endLine1 = fileMatch[3] ? parseInt(fileMatch[3], 10) : startLine1;
-
-                const resolvedPath = resolveFilePath(rawPath);
-                if (!resolvedPath) continue;
-
-                const startLine0 = startLine1 !== undefined ? Math.max(0, startLine1 - 1) : undefined;
-                const endLine0 = endLine1 !== undefined ? Math.max(0, endLine1 - 1) : startLine0;
-                const nodeId = findFileNodeId(resolvedPath);
-
-                addCodeReference({
-                  filePath: resolvedPath,
-                  startLine: startLine0,
-                  endLine: endLine0,
-                  nodeId,
-                  label: 'File',
-                  name: resolvedPath.split('/').pop() ?? resolvedPath,
-                  source: 'ai',
-                });
-              }
-
-              // Pattern 2: Node refs - [[Type:Name]] or [[graph:Type:Name]]
-              const nodeRefRegex = /\[\[(?:graph:)?(Class|Function|Method|Interface|File|Folder|Variable|Enum|Type|CodeElement):([^\]]+)\]\]/g;
-              let nodeMatch: RegExpExecArray | null;
-              while ((nodeMatch = nodeRefRegex.exec(fullText)) !== null) {
-                const nodeType = nodeMatch[1];
-                const nodeName = nodeMatch[2].trim();
-
-                // Find node in graph
-                if (!graph) continue;
-                const node = graph.nodes.find(n =>
-                  n.label === nodeType &&
-                  n.properties.name === nodeName
-                );
-                if (!node || !node.properties.filePath) continue;
-
-                const resolvedPath = resolveFilePath(node.properties.filePath);
-                if (!resolvedPath) continue;
-
-                addCodeReference({
-                  filePath: resolvedPath,
-                  startLine: node.properties.startLine ? node.properties.startLine - 1 : undefined,
-                  endLine: node.properties.endLine ? node.properties.endLine - 1 : undefined,
-                  nodeId: node.id,
-                  label: node.label,
-                  name: node.properties.name,
-                  source: 'ai',
-                });
-              }
-            }
-            break;
-
-          case 'tool_call':
-            if (chunk.toolCall) {
-              const tc = chunk.toolCall;
-              toolCallsForMessage.push(tc);
-              // Add tool call as a step (in order with reasoning)
-              stepsForMessage.push({
-                id: `step-${stepCounter++}`,
-                type: 'tool_call',
-                toolCall: tc,
-              });
-              setCurrentToolCalls(prev => [...prev, tc]);
-              updateMessage();
-            }
-            break;
-
-          case 'tool_result':
-            if (chunk.toolCall) {
-              const tc = chunk.toolCall;
-              // Update the tool call status in toolCallsForMessage
-              let idx = toolCallsForMessage.findIndex(t => t.id === tc.id);
-              if (idx < 0) {
-                idx = toolCallsForMessage.findIndex(t => t.name === tc.name && t.status === 'running');
-              }
-              if (idx < 0) {
-                idx = toolCallsForMessage.findIndex(t => t.name === tc.name && !t.result);
-              }
-              if (idx >= 0) {
-                toolCallsForMessage[idx] = {
-                  ...toolCallsForMessage[idx],
-                  result: tc.result,
-                  status: 'completed'
-                };
-              }
-
-              // Also update the tool call in steps
-              const stepIdx = stepsForMessage.findIndex(s =>
-                s.type === 'tool_call' && s.toolCall && (
-                  s.toolCall.id === tc.id ||
-                  (s.toolCall.name === tc.name && s.toolCall.status === 'running')
-                )
-              );
-              if (stepIdx >= 0 && stepsForMessage[stepIdx].toolCall) {
-                stepsForMessage[stepIdx] = {
-                  ...stepsForMessage[stepIdx],
-                  toolCall: {
-                    ...stepsForMessage[stepIdx].toolCall!,
-                    result: tc.result,
-                    status: 'completed',
-                  },
-                };
-              }
-
-              // Update currentToolCalls
-              setCurrentToolCalls(prev => {
-                let targetIdx = prev.findIndex(t => t.id === tc.id);
-                if (targetIdx < 0) {
-                  targetIdx = prev.findIndex(t => t.name === tc.name && t.status === 'running');
-                }
-                if (targetIdx < 0) {
-                  targetIdx = prev.findIndex(t => t.name === tc.name && !t.result);
-                }
-                if (targetIdx >= 0) {
-                  return prev.map((t, i) => i === targetIdx
-                    ? { ...t, result: tc.result, status: 'completed' }
-                    : t
+            case 'tool_result':
+              if (chunk.toolCall) {
+                const tc = chunk.toolCall;
+                // Update the tool call status in toolCallsForMessage
+                let idx = toolCallsForMessage.findIndex((t) => t.id === tc.id);
+                if (idx < 0) {
+                  idx = toolCallsForMessage.findIndex(
+                    (t) => t.name === tc.name && t.status === 'running',
                   );
                 }
-                return prev;
-              });
-
-              updateMessage();
-
-              // Parse highlight marker from tool results
-              if (tc.result) {
-                const highlightMatch = tc.result.match(/\[HIGHLIGHT_NODES:([^\]]+)\]/);
-                if (highlightMatch) {
-                  const rawIds = highlightMatch[1].split(',').map((id: string) => id.trim()).filter(Boolean);
-                  if (rawIds.length > 0 && graph) {
-                    const matchedIds = new Set<string>();
-                    const graphNodeIds = graph.nodes.map(n => n.id);
-
-                    for (const rawId of rawIds) {
-                      if (graphNodeIds.includes(rawId)) {
-                        matchedIds.add(rawId);
-                      } else {
-                        const found = graphNodeIds.find(gid =>
-                          gid.endsWith(rawId) || gid.endsWith(':' + rawId)
-                        );
-                        if (found) {
-                          matchedIds.add(found);
-                        }
-                      }
-                    }
-
-                    if (matchedIds.size > 0) {
-                      setAIToolHighlightedNodeIds(matchedIds);
-                    }
-                  } else if (rawIds.length > 0) {
-                    setAIToolHighlightedNodeIds(new Set(rawIds));
-                  }
+                if (idx < 0) {
+                  idx = toolCallsForMessage.findIndex((t) => t.name === tc.name && !t.result);
+                }
+                if (idx >= 0) {
+                  toolCallsForMessage[idx] = {
+                    ...toolCallsForMessage[idx],
+                    result: tc.result,
+                    status: 'completed',
+                  };
                 }
 
-                // Parse impact marker from tool results
-                const impactMatch = tc.result.match(/\[IMPACT:([^\]]+)\]/);
-                if (impactMatch) {
-                  const rawIds = impactMatch[1].split(',').map((id: string) => id.trim()).filter(Boolean);
-                  if (rawIds.length > 0 && graph) {
-                    const matchedIds = new Set<string>();
-                    const graphNodeIds = graph.nodes.map(n => n.id);
+                // Also update the tool call in steps
+                const stepIdx = stepsForMessage.findIndex(
+                  (s) =>
+                    s.type === 'tool_call' &&
+                    s.toolCall &&
+                    (s.toolCall.id === tc.id ||
+                      (s.toolCall.name === tc.name && s.toolCall.status === 'running')),
+                );
+                if (stepIdx >= 0 && stepsForMessage[stepIdx].toolCall) {
+                  stepsForMessage[stepIdx] = {
+                    ...stepsForMessage[stepIdx],
+                    toolCall: {
+                      ...stepsForMessage[stepIdx].toolCall!,
+                      result: tc.result,
+                      status: 'completed',
+                    },
+                  };
+                }
 
-                    for (const rawId of rawIds) {
-                      if (graphNodeIds.includes(rawId)) {
-                        matchedIds.add(rawId);
-                      } else {
-                        const found = graphNodeIds.find(gid =>
-                          gid.endsWith(rawId) || gid.endsWith(':' + rawId)
-                        );
-                        if (found) {
-                          matchedIds.add(found);
+                // Update currentToolCalls
+                setCurrentToolCalls((prev) => {
+                  let targetIdx = prev.findIndex((t) => t.id === tc.id);
+                  if (targetIdx < 0) {
+                    targetIdx = prev.findIndex((t) => t.name === tc.name && t.status === 'running');
+                  }
+                  if (targetIdx < 0) {
+                    targetIdx = prev.findIndex((t) => t.name === tc.name && !t.result);
+                  }
+                  if (targetIdx >= 0) {
+                    return prev.map((t, i) =>
+                      i === targetIdx ? { ...t, result: tc.result, status: 'completed' } : t,
+                    );
+                  }
+                  return prev;
+                });
+
+                scheduleMessageUpdate();
+
+                // Parse highlight marker from tool results
+                if (tc.result) {
+                  const highlightMatch = tc.result.match(/\[HIGHLIGHT_NODES:([^\]]+)\]/);
+                  if (highlightMatch) {
+                    const rawIds = highlightMatch[1]
+                      .split(',')
+                      .map((id: string) => id.trim())
+                      .filter(Boolean);
+                    if (rawIds.length > 0 && graph) {
+                      const matchedIds = new Set<string>();
+                      const graphNodeIdSet = new Set(graph.nodes.map((n) => n.id));
+
+                      for (const rawId of rawIds) {
+                        if (graphNodeIdSet.has(rawId)) {
+                          matchedIds.add(rawId);
+                        } else {
+                          const found = graph.nodes.find(
+                            (n) => n.id.endsWith(rawId) || n.id.endsWith(':' + rawId),
+                          )?.id;
+                          if (found) {
+                            matchedIds.add(found);
+                          }
                         }
                       }
-                    }
 
-                    if (matchedIds.size > 0) {
-                      setBlastRadiusNodeIds(matchedIds);
+                      if (matchedIds.size > 0) {
+                        setAIToolHighlightedNodeIds(matchedIds);
+                      }
+                    } else if (rawIds.length > 0) {
+                      setAIToolHighlightedNodeIds(new Set(rawIds));
                     }
-                  } else if (rawIds.length > 0) {
-                    setBlastRadiusNodeIds(new Set(rawIds));
+                  }
+
+                  // Parse impact marker from tool results
+                  const impactMatch = tc.result.match(/\[IMPACT:([^\]]+)\]/);
+                  if (impactMatch) {
+                    const rawIds = impactMatch[1]
+                      .split(',')
+                      .map((id: string) => id.trim())
+                      .filter(Boolean);
+                    if (rawIds.length > 0 && graph) {
+                      const matchedIds = new Set<string>();
+                      const graphNodeIdSet = new Set(graph.nodes.map((n) => n.id));
+
+                      for (const rawId of rawIds) {
+                        if (graphNodeIdSet.has(rawId)) {
+                          matchedIds.add(rawId);
+                        } else {
+                          const found = graph.nodes.find(
+                            (n) => n.id.endsWith(rawId) || n.id.endsWith(':' + rawId),
+                          )?.id;
+                          if (found) {
+                            matchedIds.add(found);
+                          }
+                        }
+                      }
+
+                      if (matchedIds.size > 0) {
+                        setBlastRadiusNodeIds(matchedIds);
+                      }
+                    } else if (rawIds.length > 0) {
+                      setBlastRadiusNodeIds(new Set(rawIds));
+                    }
                   }
                 }
               }
-            }
-            break;
+              break;
 
-          case 'error':
-            setAgentError(chunk.error ?? 'Unknown error');
-            break;
+            case 'error':
+              setAgentError(chunk.error ?? 'Unknown error');
+              break;
 
-          case 'done':
-            // Finalize the assistant message - just call updateMessage one more time
-            updateMessage();
-            break;
+            case 'done':
+              // Finalize the assistant message - just call updateMessage one more time
+              scheduleMessageUpdate();
+              break;
+          }
+        };
+
+        // Stream agent response using the full streaming generator
+        // (handles reasoning, tool_call, tool_result, content, and done events)
+        const agent = agentRef.current;
+        if (!agent) throw new Error('Agent not initialized');
+        const { streamAgentResponse } = await import('../core/llm/agent');
+        for await (const chunk of streamAgentResponse(agent, history)) {
+          onChunk(chunk);
         }
-      });
-
-      await api.chatStream(history, onChunk);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setAgentError(message);
-    } finally {
-      setIsChatLoading(false);
-      setCurrentToolCalls([]);
-    }
-  }, [chatMessages, isAgentReady, initializeAgent, resolveFilePath, findFileNodeId, addCodeReference, clearAICodeReferences, clearAIToolHighlights, graph, embeddingStatus]);
+        onChunk({ type: 'done' });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setAgentError(message);
+      } finally {
+        setIsChatLoading(false);
+        setCurrentToolCalls([]);
+      }
+    },
+    [
+      chatMessages,
+      isAgentReady,
+      initializeAgent,
+      resolveFilePath,
+      findFileNodeId,
+      addCodeReference,
+      clearAICodeReferences,
+      clearAIToolHighlights,
+      graph,
+      embeddingStatus,
+    ],
+  );
 
   const stopChatResponse = useCallback(() => {
-    const api = apiRef.current;
-    if (api && isChatLoading) {
-      api.stopChat();
+    if (isChatLoading) {
+      // Agent streaming will be interrupted by the AbortController in sendChatMessage
       setIsChatLoading(false);
       setCurrentToolCalls([]);
     }
@@ -973,97 +1025,181 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // Switch to a different repo on the connected server
-  const switchRepo = useCallback(async (repoName: string) => {
-    if (!serverBaseUrl) return;
+  const switchRepo = useCallback(
+    async (repoName: string) => {
+      if (!serverBaseUrl) return;
 
-    setProgress({ phase: 'extracting', percent: 0, message: 'Switching repository...', detail: `Loading ${repoName}` });
-    setViewMode('loading');
-
-    // Clear stale graph state from previous repo (highlights, selections, blast radius)
-    // Without this, sigma reducers dim ALL nodes/edges because old node IDs don't match
-    setHighlightedNodeIds(new Set());
-    clearAIToolHighlights();
-    clearBlastRadius();
-    setSelectedNode(null);
-    setQueryResult(null);
-    setCodeReferences([]);
-    setCodePanelOpen(false);
-    setCodeReferenceFocus(null);
-
-    try {
-      const result: ConnectToServerResult = await connectToServer(serverBaseUrl, (phase, downloaded, total) => {
-        if (phase === 'validating') {
-          setProgress({ phase: 'extracting', percent: 5, message: 'Switching repository...', detail: 'Validating' });
-        } else if (phase === 'downloading') {
-          const pct = total ? Math.round((downloaded / total) * 90) + 5 : 50;
-          const mb = (downloaded / (1024 * 1024)).toFixed(1);
-          setProgress({ phase: 'extracting', percent: pct, message: 'Downloading graph...', detail: `${mb} MB downloaded` });
-        } else if (phase === 'extracting') {
-          setProgress({ phase: 'extracting', percent: 97, message: 'Processing...', detail: 'Extracting file contents' });
-        }
-      }, undefined, repoName);
-
-      // Reuse the same handleServerConnect logic inline
-      const repoPath = result.repoInfo.repoPath;
-      const pName = result.repoInfo.name || repoPath.split('/').pop() || 'server-project';
-      setProjectName(pName);
-
-      const graph = createKnowledgeGraph();
-      for (const node of result.nodes) graph.addNode(node);
-      for (const rel of result.relationships) graph.addRelationship(rel);
-      setGraph(graph);
-
-      const fileMap = new Map<string, string>();
-      for (const [p, c] of Object.entries(result.fileContents)) fileMap.set(p, c);
-      setFileContents(fileMap);
-
-      setViewMode('exploring');
-
-      if (getActiveProviderConfig()) initializeAgent(pName);
-
-      startEmbeddings().catch((err) => {
-        if (err?.name === 'WebGPUNotAvailableError' || err?.message?.includes('WebGPU')) {
-          startEmbeddings('wasm').catch(console.warn);
-        } else {
-          console.warn('Embeddings auto-start failed:', err);
-        }
-      });
-    } catch (err) {
-      console.error('Repo switch failed:', err);
       setProgress({
-        phase: 'error', percent: 0,
-        message: 'Failed to switch repository',
-        detail: err instanceof Error ? err.message : 'Unknown error',
+        phase: 'extracting',
+        percent: 0,
+        message: 'Switching repository...',
+        detail: `Loading ${repoName}`,
       });
-      setTimeout(() => { setViewMode('exploring'); setProgress(null); }, 3000);
-    }
-  }, [serverBaseUrl, setProgress, setViewMode, setProjectName, setGraph, setFileContents, initializeAgent, startEmbeddings, setHighlightedNodeIds, clearAIToolHighlights, clearBlastRadius, setSelectedNode, setQueryResult, setCodeReferences, setCodePanelOpen, setCodeReferenceFocus]);
+      setViewMode('loading');
+      setIsAgentReady(false);
 
-  const removeCodeReference = useCallback((id: string) => {
-    setCodeReferences(prev => {
-      const ref = prev.find(r => r.id === id);
-      const newRefs = prev.filter(r => r.id !== id);
+      // Clear stale graph state from previous repo (highlights, selections, blast radius)
+      // Without this, sigma reducers dim ALL nodes/edges because old node IDs don't match
+      setHighlightedNodeIds(new Set());
+      clearAIToolHighlights();
+      clearAICitationHighlights();
+      clearBlastRadius();
+      setSelectedNode(null);
+      setQueryResult(null);
+      setCodeReferences([]);
+      setCodePanelOpen(false);
+      setCodeReferenceFocus(null);
 
-      // Remove AI citation highlight if this was the only AI reference to that node
-      if (ref?.nodeId && ref.source === 'ai') {
-        const stillReferenced = newRefs.some(r => r.nodeId === ref.nodeId && r.source === 'ai');
-        if (!stillReferenced) {
-          setAICitationHighlightedNodeIds(prev => {
-            const next = new Set(prev);
-            next.delete(ref.nodeId!);
-            return next;
-          });
+      let connectedRepo: BackendRepo | undefined;
+      let pNameStr = repoName || 'server-project';
+
+      try {
+        const result: ConnectResult = await connectToServer(
+          serverBaseUrl,
+          (phase, downloaded, total) => {
+            if (phase === 'validating') {
+              setProgress({
+                phase: 'extracting',
+                percent: 5,
+                message: 'Switching repository...',
+                detail: 'Validating',
+              });
+            } else if (phase === 'downloading') {
+              const pct = total ? Math.round((downloaded / total) * 90) + 5 : 50;
+              const mb = (downloaded / (1024 * 1024)).toFixed(1);
+              setProgress({
+                phase: 'extracting',
+                percent: pct,
+                message: 'Downloading graph...',
+                detail: `${mb} MB downloaded`,
+              });
+            } else if (phase === 'extracting') {
+              setProgress({
+                phase: 'extracting',
+                percent: 97,
+                message: 'Processing...',
+                detail: 'Extracting file contents',
+              });
+            }
+          },
+          undefined,
+          repoName,
+          { awaitAnalysis: true }, // enable backend hold-queue for repos still being analyzed
+        );
+
+        // Build graph for visualization
+        const repoPath = result.repoInfo.repoPath ?? result.repoInfo.path;
+        // Prefer the registry name, then normalize Windows \ and Unix / paths
+        const pName =
+          repoName ||
+          result.repoInfo.name ||
+          (repoPath || '').replace(/\\/g, '/').split('/').filter(Boolean).pop() ||
+          'server-project';
+        setProjectName(pName);
+        repoRef.current = pName;
+
+        connectedRepo = result.repoInfo;
+        pNameStr = pName;
+
+        const newGraph = createKnowledgeGraph();
+        for (const node of result.nodes) newGraph.addNode(node);
+        for (const rel of result.relationships) newGraph.addRelationship(rel);
+        setGraph(newGraph);
+      } catch (err: unknown) {
+        console.error('Repo switch failed:', err);
+        setProgress({
+          phase: 'error',
+          percent: 0,
+          message: 'Failed to switch repository',
+          detail: err instanceof Error ? err.message : 'Unknown error',
+        });
+        setIsAgentReady(false);
+        agentRef.current = null;
+        setTimeout(() => {
+          setViewMode('exploring');
+          setProgress(null);
+        }, ERROR_RESET_DELAY_MS);
+        return; // Abort the whole switchRepo process
+      }
+
+      if (pNameStr) {
+        // Persist the selected project in the URL so a refresh re-opens it
+        const urlObj = new URL(window.location.href);
+        urlObj.searchParams.set('project', pNameStr);
+        window.history.replaceState(null, '', urlObj.toString());
+      }
+
+      // Reset the agent and clear chat history so the AI starts fresh for the new repo
+      agentRef.current = null;
+      setIsAgentReady(false);
+      setChatMessages([]);
+
+      // Re-initialize agent with the new repo's graph context
+      try {
+        if (getActiveProviderConfig()) {
+          await initializeAgent(pNameStr);
         }
+        setViewMode('exploring');
+        startEmbeddingsWithFallback();
+        setProgress(null);
+      } catch (err) {
+        console.warn('Failed to initialize agent:', err);
+        setIsAgentReady(false);
+        agentRef.current = null;
+        setAgentError('Failed to initialize agent');
+        setViewMode('exploring');
+        setProgress(null);
       }
+    },
+    [
+      serverBaseUrl,
+      setProgress,
+      setViewMode,
+      setProjectName,
+      setGraph,
+      initializeAgent,
+      startEmbeddingsWithFallback,
+      setHighlightedNodeIds,
+      clearAIToolHighlights,
+      clearAICitationHighlights,
+      clearBlastRadius,
+      setSelectedNode,
+      setQueryResult,
+      setCodeReferences,
+      setCodePanelOpen,
+      setCodeReferenceFocus,
+      setChatMessages,
+    ],
+  );
 
-      // Auto-close panel if no references left AND no selection in top viewer
-      if (newRefs.length === 0 && !selectedNode) {
-        setCodePanelOpen(false);
-      }
+  const removeCodeReference = useCallback(
+    (id: string) => {
+      setCodeReferences((prev) => {
+        const ref = prev.find((r) => r.id === id);
+        const newRefs = prev.filter((r) => r.id !== id);
 
-      return newRefs;
-    });
-  }, [selectedNode]);
+        // Remove AI citation highlight if this was the only AI reference to that node
+        if (ref?.nodeId && ref.source === 'ai') {
+          const stillReferenced = newRefs.some((r) => r.nodeId === ref.nodeId && r.source === 'ai');
+          if (!stillReferenced) {
+            setAICitationHighlightedNodeIds((prev) => {
+              const next = new Set(prev);
+              next.delete(ref.nodeId!);
+              return next;
+            });
+          }
+        }
+
+        // Auto-close panel if no references left AND no selection in top viewer
+        if (newRefs.length === 0 && !selectedNode) {
+          setCodePanelOpen(false);
+        }
+
+        return newRefs;
+      });
+    },
+    [selectedNode],
+  );
 
   const clearCodeReferences = useCallback(() => {
     setCodeReferences([]);
@@ -1071,33 +1207,11 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     setCodeReferenceFocus(null);
   }, []);
 
-  const toggleLabelVisibility = useCallback((label: NodeLabel) => {
-    setVisibleLabels(prev => {
-      if (prev.includes(label)) {
-        return prev.filter(l => l !== label);
-      } else {
-        return [...prev, label];
-      }
-    });
-  }, []);
-
-  const toggleEdgeVisibility = useCallback((edgeType: EdgeType) => {
-    setVisibleEdgeTypes(prev => {
-      if (prev.includes(edgeType)) {
-        return prev.filter(t => t !== edgeType);
-      } else {
-        return [...prev, edgeType];
-      }
-    });
-  }, []);
-
   const value: AppState = {
     viewMode,
     setViewMode,
     graph,
     setGraph,
-    fileContents,
-    setFileContents,
     selectedNode,
     setSelectedNode,
     isRightPanelOpen,
@@ -1106,6 +1220,8 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     setRightPanelTab,
     openCodePanel,
     openChatPanel,
+    helpDialogBoxOpen,
+    setHelpDialogBoxOpen,
     visibleLabels,
     toggleLabelVisibility,
     visibleEdgeTypes,
@@ -1120,6 +1236,7 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     isAIHighlightsEnabled,
     toggleAIHighlights,
     clearAIToolHighlights,
+    clearAICitationHighlights,
     clearBlastRadius,
     queryResult,
     setQueryResult,
@@ -1138,19 +1255,17 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     availableRepos,
     setAvailableRepos,
     switchRepo,
-    runPipeline,
-    runPipelineFromFiles,
+    setCurrentRepo,
     runQuery,
     isDatabaseReady,
     // Embedding state and methods
     embeddingStatus,
     embeddingProgress,
     startEmbeddings,
+    startEmbeddingsWithFallback,
     semanticSearch,
     semanticSearchWithContext,
     isEmbeddingReady: embeddingStatus === 'ready',
-    // Debug
-    testArrayParams,
     // LLM/Agent state
     llmSettings,
     updateLLMSettings,
@@ -1180,11 +1295,7 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     codeReferenceFocus,
   };
 
-  return (
-    <AppStateContext.Provider value={value}>
-      {children}
-    </AppStateContext.Provider>
-  );
+  return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
 };
 
 export const useAppState = (): AppState => {
@@ -1194,4 +1305,3 @@ export const useAppState = (): AppState => {
   }
   return context;
 };
-

@@ -15,7 +15,8 @@
 import fs from 'fs/promises';
 import { createWriteStream, WriteStream } from 'fs';
 import path from 'path';
-import { KnowledgeGraph, GraphNode, NodeLabel } from '../graph/types.js';
+import type { GraphNode } from 'gitnexus-shared';
+import { KnowledgeGraph } from '../graph/types.js';
 import { NodeTableName } from './schema.js';
 
 /** Flush buffered rows to disk every N rows */
@@ -41,7 +42,10 @@ export const escapeCSVField = (value: string | number | undefined | null): strin
   return `"${str.replace(/"/g, '""')}"`;
 };
 
-export const escapeCSVNumber = (value: number | undefined | null, defaultValue: number = -1): string => {
+export const escapeCSVNumber = (
+  value: number | undefined | null,
+  defaultValue: number = -1,
+): string => {
   if (value === undefined || value === null) return String(defaultValue);
   return String(value);
 };
@@ -56,9 +60,9 @@ export const isBinaryContent = (content: string): boolean => {
   let nonPrintable = 0;
   for (let i = 0; i < sample.length; i++) {
     const code = sample.charCodeAt(i);
-    if ((code < 9) || (code > 13 && code < 32) || code === 127) nonPrintable++;
+    if (code < 9 || (code > 13 && code < 32) || code === 127) nonPrintable++;
   }
-  return (nonPrintable / sample.length) > 0.1;
+  return nonPrintable / sample.length > 0.1;
 };
 
 /**
@@ -236,7 +240,9 @@ export const streamAllCSVsToDisk = async (
   csvDir: string,
 ): Promise<StreamedCSVResult> => {
   // Remove stale CSVs from previous crashed runs, then recreate
-  try { await fs.rm(csvDir, { recursive: true, force: true }); } catch {}
+  try {
+    await fs.rm(csvDir, { recursive: true, force: true });
+  } catch {}
   await fs.mkdir(csvDir, { recursive: true });
 
   // We open ~30 concurrent write-streams; raise process limit to suppress
@@ -247,13 +253,23 @@ export const streamAllCSVsToDisk = async (
   const contentCache = new FileContentCache(repoPath);
 
   // Create writers for every node type up-front
-  const fileWriter = new BufferedCSVWriter(path.join(csvDir, 'file.csv'), 'id,name,filePath,content');
+  const fileWriter = new BufferedCSVWriter(
+    path.join(csvDir, 'file.csv'),
+    'id,name,filePath,content',
+  );
   const folderWriter = new BufferedCSVWriter(path.join(csvDir, 'folder.csv'), 'id,name,filePath');
   const codeElementHeader = 'id,name,filePath,startLine,endLine,isExported,content,description';
-  const functionWriter = new BufferedCSVWriter(path.join(csvDir, 'function.csv'), codeElementHeader);
+  const functionWriter = new BufferedCSVWriter(
+    path.join(csvDir, 'function.csv'),
+    codeElementHeader,
+  );
   const classWriter = new BufferedCSVWriter(path.join(csvDir, 'class.csv'), codeElementHeader);
-  const interfaceWriter = new BufferedCSVWriter(path.join(csvDir, 'interface.csv'), codeElementHeader);
-  const methodHeader = 'id,name,filePath,startLine,endLine,isExported,content,description,parameterCount,returnType';
+  const interfaceWriter = new BufferedCSVWriter(
+    path.join(csvDir, 'interface.csv'),
+    codeElementHeader,
+  );
+  const methodHeader =
+    'id,name,filePath,startLine,endLine,isExported,content,description,parameterCount,returnType';
   const methodWriter = new BufferedCSVWriter(path.join(csvDir, 'method.csv'), methodHeader);
   const codeElemWriter = new BufferedCSVWriter(path.join(csvDir, 'codeelement.csv'), codeElementHeader);
   const communityWriter = new BufferedCSVWriter(path.join(csvDir, 'community.csv'), 'id,label,heuristicLabel,keywords,description,enrichedBy,cohesion,symbolCount');
@@ -264,61 +280,93 @@ export const streamAllCSVsToDisk = async (
 
   // Multi-language node types share the same CSV shape (no isExported column)
   const multiLangHeader = 'id,name,filePath,startLine,endLine,content,description';
-  const MULTI_LANG_TYPES = ['Struct', 'Enum', 'Macro', 'Typedef', 'Union', 'Namespace', 'Trait', 'Impl',
-    'TypeAlias', 'Const', 'Static', 'Property', 'Record', 'Delegate', 'Annotation', 'Constructor', 'Template', 'Module'] as const;
+  const MULTI_LANG_TYPES = [
+    'Struct',
+    'Enum',
+    'Macro',
+    'Typedef',
+    'Union',
+    'Namespace',
+    'Trait',
+    'Impl',
+    'TypeAlias',
+    'Const',
+    'Static',
+    'Variable',
+    'Property',
+    'Record',
+    'Delegate',
+    'Annotation',
+    'Constructor',
+    'Template',
+    'Module',
+  ] as const;
   const multiLangWriters = new Map<string, BufferedCSVWriter>();
   for (const t of MULTI_LANG_TYPES) {
-    multiLangWriters.set(t, new BufferedCSVWriter(path.join(csvDir, `${t.toLowerCase()}.csv`), multiLangHeader));
+    multiLangWriters.set(
+      t,
+      new BufferedCSVWriter(path.join(csvDir, `${t.toLowerCase()}.csv`), multiLangHeader),
+    );
   }
 
   const codeWriterMap: Record<string, BufferedCSVWriter> = {
-    'Function': functionWriter,
-    'Class': classWriter,
-    'Interface': interfaceWriter,
-    'CodeElement': codeElemWriter,
+    Function: functionWriter,
+    Class: classWriter,
+    Interface: interfaceWriter,
+    CodeElement: codeElemWriter,
   };
 
-  const seenFileIds = new Set<string>();
+  // Deduplicate all node types — the pipeline can produce duplicate IDs across
+  // all symbol types (Class, Method, Function, etc.), not just File nodes.
+  // A single Set covering every label prevents PK violations on COPY.
+  const seenNodeIds = new Set<string>();
 
   // --- SINGLE PASS over all nodes ---
   for (const node of graph.iterNodes()) {
+    if (seenNodeIds.has(node.id)) continue;
+    seenNodeIds.add(node.id);
+
     switch (node.label) {
       case 'File': {
-        if (seenFileIds.has(node.id)) break;
-        seenFileIds.add(node.id);
         const content = await extractContent(node, contentCache);
-        await fileWriter.addRow([
-          escapeCSVField(node.id),
-          escapeCSVField(node.properties.name || ''),
-          escapeCSVField(node.properties.filePath || ''),
-          escapeCSVField(content),
-        ].join(','));
+        await fileWriter.addRow(
+          [
+            escapeCSVField(node.id),
+            escapeCSVField(node.properties.name || ''),
+            escapeCSVField(node.properties.filePath || ''),
+            escapeCSVField(content),
+          ].join(','),
+        );
         break;
       }
       case 'Folder':
-        await folderWriter.addRow([
-          escapeCSVField(node.id),
-          escapeCSVField(node.properties.name || ''),
-          escapeCSVField(node.properties.filePath || ''),
-        ].join(','));
+        await folderWriter.addRow(
+          [
+            escapeCSVField(node.id),
+            escapeCSVField(node.properties.name || ''),
+            escapeCSVField(node.properties.filePath || ''),
+          ].join(','),
+        );
         break;
       case 'Community': {
-        const keywords = (node.properties as any).keywords || [];
+        const keywords = node.properties.keywords || [];
         const keywordsStr = `[${keywords.map((k: string) => `'${k.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/,/g, '\\,')}'`).join(',')}]`;
-        await communityWriter.addRow([
-          escapeCSVField(node.id),
-          escapeCSVField(node.properties.name || ''),
-          escapeCSVField(node.properties.heuristicLabel || ''),
-          keywordsStr,
-          escapeCSVField((node.properties as any).description || ''),
-          escapeCSVField((node.properties as any).enrichedBy || 'heuristic'),
-          escapeCSVNumber(node.properties.cohesion, 0),
-          escapeCSVNumber(node.properties.symbolCount, 0),
-        ].join(','));
+        await communityWriter.addRow(
+          [
+            escapeCSVField(node.id),
+            escapeCSVField(node.properties.name || ''),
+            escapeCSVField(node.properties.heuristicLabel || ''),
+            keywordsStr,
+            escapeCSVField(node.properties.description || ''),
+            escapeCSVField(node.properties.enrichedBy || 'heuristic'),
+            escapeCSVNumber(node.properties.cohesion, 0),
+            escapeCSVNumber(node.properties.symbolCount, 0),
+          ].join(','),
+        );
         break;
       }
       case 'Process': {
-        const communities = (node.properties as any).communities || [];
+        const communities = node.properties.communities || [];
         const communitiesStr = `[${communities.map((c: string) => `'${c.replace(/'/g, "''")}'`).join(',')}]`;
         const sourceReasons = (node.properties as any).sourceReasons || [];
         const sourceReasonsStr = `[${sourceReasons.map((reason: string) => `'${String(reason).replace(/'/g, "''")}'`).join(',')}]`;
@@ -344,26 +392,8 @@ export const streamAllCSVsToDisk = async (
       }
       case 'Method': {
         const content = await extractContent(node, contentCache);
-        await methodWriter.addRow([
-          escapeCSVField(node.id),
-          escapeCSVField(node.properties.name || ''),
-          escapeCSVField(node.properties.filePath || ''),
-          escapeCSVNumber(node.properties.startLine, -1),
-          escapeCSVNumber(node.properties.endLine, -1),
-          node.properties.isExported ? 'true' : 'false',
-          escapeCSVField(content),
-          escapeCSVField((node.properties as any).description || ''),
-          escapeCSVNumber(node.properties.parameterCount, 0),
-          escapeCSVField(node.properties.returnType || ''),
-        ].join(','));
-        break;
-      }
-      default: {
-        // Code element nodes (Function, Class, Interface, CodeElement)
-        const writer = codeWriterMap[node.label];
-        if (writer) {
-          const content = await extractContent(node, contentCache);
-          await writer.addRow([
+        await methodWriter.addRow(
+          [
             escapeCSVField(node.id),
             escapeCSVField(node.properties.name || ''),
             escapeCSVField(node.properties.filePath || ''),
@@ -371,22 +401,93 @@ export const streamAllCSVsToDisk = async (
             escapeCSVNumber(node.properties.endLine, -1),
             node.properties.isExported ? 'true' : 'false',
             escapeCSVField(content),
-            escapeCSVField((node.properties as any).description || ''),
-          ].join(','));
-        } else {
-          // Multi-language node types (Struct, Impl, Trait, Macro, etc.)
-          const mlWriter = multiLangWriters.get(node.label);
-          if (mlWriter) {
-            const content = await extractContent(node, contentCache);
-            await mlWriter.addRow([
+            escapeCSVField(node.properties.description || ''),
+            escapeCSVNumber(node.properties.parameterCount, 0),
+            escapeCSVField(node.properties.returnType || ''),
+          ].join(','),
+        );
+        break;
+      }
+      case 'Section': {
+        const content = await extractContent(node, contentCache);
+        await sectionWriter.addRow(
+          [
+            escapeCSVField(node.id),
+            escapeCSVField(node.properties.name || ''),
+            escapeCSVField(node.properties.filePath || ''),
+            escapeCSVNumber(node.properties.startLine, -1),
+            escapeCSVNumber(node.properties.endLine, -1),
+            escapeCSVNumber(node.properties.level, 1),
+            escapeCSVField(content),
+            escapeCSVField(node.properties.description || ''),
+          ].join(','),
+        );
+        break;
+      }
+      case 'Route': {
+        const responseKeys = node.properties.responseKeys || [];
+        // LadybugDB array literal inside a quoted CSV field: escapeCSVField wraps in "..."
+        // and the array uses single-quoted elements
+        const keysStr = `[${responseKeys.map((k: string) => `'${k.replace(/'/g, "''")}'`).join(',')}]`;
+        const errorKeys = node.properties.errorKeys || [];
+        const errorKeysStr = `[${errorKeys.map((k: string) => `'${k.replace(/'/g, "''")}'`).join(',')}]`;
+        const middleware = node.properties.middleware || [];
+        const middlewareStr = `[${middleware.map((m: string) => `'${m.replace(/'/g, "''")}'`).join(',')}]`;
+        await routeWriter.addRow(
+          [
+            escapeCSVField(node.id),
+            escapeCSVField(node.properties.name || ''),
+            escapeCSVField(node.properties.filePath || ''),
+            escapeCSVField(keysStr),
+            escapeCSVField(errorKeysStr),
+            escapeCSVField(middlewareStr),
+          ].join(','),
+        );
+        break;
+      }
+      case 'Tool':
+        await toolWriter.addRow(
+          [
+            escapeCSVField(node.id),
+            escapeCSVField(node.properties.name || ''),
+            escapeCSVField(node.properties.filePath || ''),
+            escapeCSVField(node.properties.description || ''),
+          ].join(','),
+        );
+        break;
+      default: {
+        // Code element nodes (Function, Class, Interface, CodeElement)
+        const writer = codeWriterMap[node.label];
+        if (writer) {
+          const content = await extractContent(node, contentCache);
+          await writer.addRow(
+            [
               escapeCSVField(node.id),
               escapeCSVField(node.properties.name || ''),
               escapeCSVField(node.properties.filePath || ''),
               escapeCSVNumber(node.properties.startLine, -1),
               escapeCSVNumber(node.properties.endLine, -1),
+              node.properties.isExported ? 'true' : 'false',
               escapeCSVField(content),
-              escapeCSVField((node.properties as any).description || ''),
-            ].join(','));
+              escapeCSVField(node.properties.description || ''),
+            ].join(','),
+          );
+        } else {
+          // Multi-language node types (Struct, Impl, Trait, Macro, etc.)
+          const mlWriter = multiLangWriters.get(node.label);
+          if (mlWriter) {
+            const content = await extractContent(node, contentCache);
+            await mlWriter.addRow(
+              [
+                escapeCSVField(node.id),
+                escapeCSVField(node.properties.name || ''),
+                escapeCSVField(node.properties.filePath || ''),
+                escapeCSVNumber(node.properties.startLine, -1),
+                escapeCSVNumber(node.properties.endLine, -1),
+                escapeCSVField(content),
+                escapeCSVField(node.properties.description || ''),
+              ].join(','),
+            );
           }
         }
         break;
@@ -395,37 +496,65 @@ export const streamAllCSVsToDisk = async (
   }
 
   // Finish all node writers
-  const allWriters = [fileWriter, folderWriter, functionWriter, classWriter, interfaceWriter, methodWriter, codeElemWriter, communityWriter, processWriter, ...multiLangWriters.values()];
-  await Promise.all(allWriters.map(w => w.finish()));
+  const allWriters = [
+    fileWriter,
+    folderWriter,
+    functionWriter,
+    classWriter,
+    interfaceWriter,
+    methodWriter,
+    codeElemWriter,
+    communityWriter,
+    processWriter,
+    sectionWriter,
+    routeWriter,
+    toolWriter,
+    ...multiLangWriters.values(),
+  ];
+  await Promise.all(allWriters.map((w) => w.finish()));
 
   // --- Stream relationship CSV ---
   const relCsvPath = path.join(csvDir, 'relations.csv');
   const relWriter = new BufferedCSVWriter(relCsvPath, 'from,to,type,confidence,reason,step');
   for (const rel of graph.iterRelationships()) {
-    await relWriter.addRow([
-      escapeCSVField(rel.sourceId),
-      escapeCSVField(rel.targetId),
-      escapeCSVField(rel.type),
-      escapeCSVNumber(rel.confidence, 1.0),
-      escapeCSVField(rel.reason),
-      escapeCSVNumber((rel as any).step, 0),
-    ].join(','));
+    await relWriter.addRow(
+      [
+        escapeCSVField(rel.sourceId),
+        escapeCSVField(rel.targetId),
+        escapeCSVField(rel.type),
+        escapeCSVNumber(rel.confidence, 1.0),
+        escapeCSVField(rel.reason),
+        escapeCSVNumber((rel as any).step, 0),
+      ].join(','),
+    );
   }
   await relWriter.finish();
 
   // Build result map — only include tables that have rows
   const nodeFiles = new Map<NodeTableName, { csvPath: string; rows: number }>();
   const tableMap: [NodeTableName, BufferedCSVWriter][] = [
-    ['File', fileWriter], ['Folder', folderWriter],
-    ['Function', functionWriter], ['Class', classWriter],
-    ['Interface', interfaceWriter], ['Method', methodWriter],
+    ['File', fileWriter],
+    ['Folder', folderWriter],
+    ['Function', functionWriter],
+    ['Class', classWriter],
+    ['Interface', interfaceWriter],
+    ['Method', methodWriter],
     ['CodeElement', codeElemWriter],
-    ['Community', communityWriter], ['Process', processWriter],
-    ...Array.from(multiLangWriters.entries()).map(([name, w]) => [name as NodeTableName, w] as [NodeTableName, BufferedCSVWriter]),
+    ['Community', communityWriter],
+    ['Process', processWriter],
+    ['Section' as NodeTableName, sectionWriter],
+    ['Route' as NodeTableName, routeWriter],
+    ['Tool' as NodeTableName, toolWriter],
+    ...Array.from(multiLangWriters.entries()).map(
+      ([name, w]) => [name as NodeTableName, w] as [NodeTableName, BufferedCSVWriter],
+    ),
   ];
   for (const [name, writer] of tableMap) {
     if (writer.rows > 0) {
-      nodeFiles.set(name, { csvPath: path.join(csvDir, `${name.toLowerCase()}.csv`), rows: writer.rows });
+      nodeFiles.set(name, {
+        csvPath: path.join(csvDir, `${name.toLowerCase()}.csv`),
+        rows: writer.rows,
+      });
     }
   }
 

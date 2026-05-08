@@ -1,9 +1,9 @@
 /**
  * Community Detection Processor
- * 
+ *
  * Uses the Leiden algorithm (via graphology-communities-leiden) to detect
  * communities/clusters in the code graph based on CALLS relationships.
- * 
+ *
  * Communities represent groups of code that work together frequently,
  * helping agents navigate the codebase by functional area rather than file structure.
  */
@@ -12,17 +12,34 @@
 // (src/communities-leiden) because it was never published to npm.
 // We use createRequire to load the CommonJS vendored files in ESM context.
 import Graph from 'graphology';
+import type { AbstractGraph, Attributes } from 'graphology-types';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { KnowledgeGraph, NodeLabel } from '../graph/types.js';
+import type { NodeLabel } from 'gitnexus-shared';
+import { KnowledgeGraph } from '../graph/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 // Navigate to package root (works from both src/ and dist/)
 const leidenPath = resolve(__dirname, '..', '..', '..', 'vendor', 'leiden', 'index.cjs');
 const _require = createRequire(import.meta.url);
-const leiden = _require(leidenPath);
+/** Graphology Graph instance type (AbstractGraph from graphology-types avoids CJS/ESM interop namespace issue) */
+type GraphInstance = AbstractGraph<Attributes, Attributes, Attributes>;
+
+const leiden: LeidenModule = _require(leidenPath);
+
+/** Vendored Leiden algorithm module shape */
+interface LeidenModule {
+  detailed: (graph: GraphInstance, options: Record<string, unknown>) => LeidenDetailedResult;
+}
+
+/** Result returned by leiden.detailed() */
+interface LeidenDetailedResult {
+  communities: Record<string, number>;
+  count: number;
+  modularity: number;
+}
 
 // ============================================================================
 // TYPES
@@ -80,20 +97,25 @@ export const getCommunityColor = (communityIndex: number): string => {
 
 /**
  * Detect communities in the knowledge graph using Leiden algorithm
- * 
+ *
  * This runs AFTER all relationships (CALLS, IMPORTS, etc.) have been built.
  * It uses primarily CALLS edges to cluster code that works together.
  */
 export const processCommunities = async (
   knowledgeGraph: KnowledgeGraph,
-  onProgress?: (message: string, progress: number) => void
+  onProgress?: (message: string, progress: number) => void,
 ): Promise<CommunityDetectionResult> => {
   onProgress?.('Building graph for community detection...', 0);
 
   // Pre-check total symbol count to determine large-graph mode before building
   let symbolCount = 0;
-  knowledgeGraph.forEachNode(node => {
-    if (node.label === 'Function' || node.label === 'Class' || node.label === 'Method' || node.label === 'Interface') {
+  knowledgeGraph.forEachNode((node) => {
+    if (
+      node.label === 'Function' ||
+      node.label === 'Class' ||
+      node.label === 'Method' ||
+      node.label === 'Interface'
+    ) {
       symbolCount++;
     }
   });
@@ -105,28 +127,33 @@ export const processCommunities = async (
     return {
       communities: [],
       memberships: [],
-      stats: { totalCommunities: 0, modularity: 0, nodesProcessed: 0 }
+      stats: { totalCommunities: 0, modularity: 0, nodesProcessed: 0 },
     };
   }
 
   const nodeCount = graph.order;
   const edgeCount = graph.size;
 
-  onProgress?.(`Running Leiden on ${nodeCount} nodes, ${edgeCount} edges${isLarge ? ` (filtered from ${symbolCount} symbols)` : ''}...`, 30);
+  onProgress?.(
+    `Running Leiden on ${nodeCount} nodes, ${edgeCount} edges${isLarge ? ` (filtered from ${symbolCount} symbols)` : ''}...`,
+    30,
+  );
 
   // Large graphs: higher resolution + capped iterations (matching Python leidenalg default of 2).
   // The first 2 iterations capture ~95%+ of modularity; additional iterations have diminishing returns.
   // Timeout: abort after 60s for pathological graph structures.
   const LEIDEN_TIMEOUT_MS = 60_000;
-  let details: any;
+  let details: LeidenDetailedResult;
   try {
     details = await Promise.race([
-      Promise.resolve((leiden as any).detailed(graph, {
-        resolution: isLarge ? 2.0 : 1.0,
-        maxIterations: isLarge ? 3 : 0,
-      })),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Leiden timeout')), LEIDEN_TIMEOUT_MS)
+      Promise.resolve(
+        leiden.detailed(graph, {
+          resolution: isLarge ? 2.0 : 1.0,
+          maxIterations: isLarge ? 3 : 0,
+        }),
+      ),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Leiden timeout')), LEIDEN_TIMEOUT_MS),
       ),
     ]);
   } catch (e: any) {
@@ -134,7 +161,9 @@ export const processCommunities = async (
       onProgress?.('Community detection timed out, using fallback...', 60);
       // Fallback: assign all nodes to community 0
       const communities: Record<string, number> = {};
-      graph.forEachNode((node: string) => { communities[node] = 0; });
+      graph.forEachNode((node: string) => {
+        communities[node] = 0;
+      });
       details = { communities, count: 1, modularity: 0 };
     } else {
       throw e;
@@ -148,7 +177,7 @@ export const processCommunities = async (
     details.communities as Record<string, number>,
     details.count,
     graph,
-    knowledgeGraph
+    knowledgeGraph,
   );
 
   onProgress?.('Creating membership edges...', 80);
@@ -171,7 +200,7 @@ export const processCommunities = async (
       totalCommunities: details.count,
       modularity: details.modularity,
       nodesProcessed: graph.order,
-    }
+    },
   };
 };
 
@@ -186,15 +215,19 @@ export const processCommunities = async (
  */
 const MIN_CONFIDENCE_LARGE = 0.5;
 
-const buildGraphologyGraph = (knowledgeGraph: KnowledgeGraph, isLarge: boolean): any => {
-  const graph = new (Graph as any)({ type: 'undirected', allowSelfLoops: false });
+const buildGraphologyGraph = (knowledgeGraph: KnowledgeGraph, isLarge: boolean): GraphInstance => {
+  const GraphCtor = Graph as unknown as new (options: {
+    type: string;
+    allowSelfLoops: boolean;
+  }) => GraphInstance;
+  const graph = new GraphCtor({ type: 'undirected', allowSelfLoops: false });
 
   const symbolTypes = new Set<NodeLabel>(['Function', 'Class', 'Method', 'Interface']);
   const clusteringRelTypes = new Set(['CALLS', 'EXTENDS', 'IMPLEMENTS']);
   const connectedNodes = new Set<string>();
   const nodeDegree = new Map<string, number>();
 
-  knowledgeGraph.forEachRelationship(rel => {
+  knowledgeGraph.forEachRelationship((rel) => {
     if (!clusteringRelTypes.has(rel.type) || rel.sourceId === rel.targetId) return;
     if (isLarge && rel.confidence < MIN_CONFIDENCE_LARGE) return;
 
@@ -204,7 +237,7 @@ const buildGraphologyGraph = (knowledgeGraph: KnowledgeGraph, isLarge: boolean):
     nodeDegree.set(rel.targetId, (nodeDegree.get(rel.targetId) || 0) + 1);
   });
 
-  knowledgeGraph.forEachNode(node => {
+  knowledgeGraph.forEachNode((node) => {
     if (!symbolTypes.has(node.label) || !connectedNodes.has(node.id)) return;
     // For large graphs, skip degree-1 nodes — they just become singletons or
     // get absorbed into their single neighbor's community, but cost iteration time.
@@ -217,10 +250,14 @@ const buildGraphologyGraph = (knowledgeGraph: KnowledgeGraph, isLarge: boolean):
     });
   });
 
-  knowledgeGraph.forEachRelationship(rel => {
+  knowledgeGraph.forEachRelationship((rel) => {
     if (!clusteringRelTypes.has(rel.type)) return;
     if (isLarge && rel.confidence < MIN_CONFIDENCE_LARGE) return;
-    if (graph.hasNode(rel.sourceId) && graph.hasNode(rel.targetId) && rel.sourceId !== rel.targetId) {
+    if (
+      graph.hasNode(rel.sourceId) &&
+      graph.hasNode(rel.targetId) &&
+      rel.sourceId !== rel.targetId
+    ) {
       if (!graph.hasEdge(rel.sourceId, rel.targetId)) {
         graph.addEdge(rel.sourceId, rel.targetId);
       }
@@ -240,12 +277,12 @@ const buildGraphologyGraph = (knowledgeGraph: KnowledgeGraph, isLarge: boolean):
 const createCommunityNodes = (
   communities: Record<string, number>,
   communityCount: number,
-  graph: any,
-  knowledgeGraph: KnowledgeGraph
+  graph: GraphInstance,
+  knowledgeGraph: KnowledgeGraph,
 ): CommunityNode[] => {
   // Group node IDs by community
   const communityMembers = new Map<number, string[]>();
-  
+
   Object.entries(communities).forEach(([nodeId, commNum]) => {
     if (!communityMembers.has(commNum)) {
       communityMembers.set(commNum, []);
@@ -263,13 +300,13 @@ const createCommunityNodes = (
 
   // Create community nodes - SKIP SINGLETONS (isolated nodes)
   const communityNodes: CommunityNode[] = [];
-  
+
   communityMembers.forEach((memberIds, commNum) => {
     // Skip singleton communities - they're just isolated nodes
     if (memberIds.length < 2) return;
-    
+
     const heuristicLabel = generateHeuristicLabel(memberIds, nodePathMap, graph, commNum);
-    
+
     communityNodes.push({
       id: `comm_${commNum}`,
       label: heuristicLabel,
@@ -295,21 +332,25 @@ const createCommunityNodes = (
 const generateHeuristicLabel = (
   memberIds: string[],
   nodePathMap: Map<string, string>,
-  graph: any,
-  commNum: number
+  graph: GraphInstance,
+  commNum: number,
 ): string => {
   // Collect folder names from file paths
   const folderCounts = new Map<string, number>();
-  
-  memberIds.forEach(nodeId => {
+
+  memberIds.forEach((nodeId) => {
     const filePath = nodePathMap.get(nodeId) || '';
     const parts = filePath.split('/').filter(Boolean);
-    
+
     // Get the most specific folder (parent directory)
     if (parts.length >= 2) {
       const folder = parts[parts.length - 2];
       // Skip generic folder names
-      if (!['src', 'lib', 'core', 'utils', 'common', 'shared', 'helpers'].includes(folder.toLowerCase())) {
+      if (
+        !['src', 'lib', 'core', 'utils', 'common', 'shared', 'helpers'].includes(
+          folder.toLowerCase(),
+        )
+      ) {
         folderCounts.set(folder, (folderCounts.get(folder) || 0) + 1);
       }
     }
@@ -318,7 +359,7 @@ const generateHeuristicLabel = (
   // Find most common folder
   let maxCount = 0;
   let bestFolder = '';
-  
+
   folderCounts.forEach((count, folder) => {
     if (count > maxCount) {
       maxCount = count;
@@ -333,7 +374,7 @@ const generateHeuristicLabel = (
 
   // Fallback: use function names to detect patterns
   const names: string[] = [];
-  memberIds.forEach(nodeId => {
+  memberIds.forEach((nodeId) => {
     const name = graph.getNodeAttribute(nodeId, 'name');
     if (name) names.push(name);
   });
@@ -355,16 +396,16 @@ const generateHeuristicLabel = (
  */
 const findCommonPrefix = (strings: string[]): string => {
   if (strings.length === 0) return '';
-  
+
   const sorted = strings.slice().sort();
   const first = sorted[0];
   const last = sorted[sorted.length - 1];
-  
+
   let i = 0;
   while (i < first.length && first[i] === last[i]) {
     i++;
   }
-  
+
   return first.substring(0, i);
 };
 
@@ -376,16 +417,14 @@ const findCommonPrefix = (strings: string[]): string => {
  * Estimate cohesion score (0-1) based on internal edge density.
  * Uses sampling for large communities to avoid O(N^2) cost.
  */
-const calculateCohesion = (memberIds: string[], graph: any): number => {
+const calculateCohesion = (memberIds: string[], graph: GraphInstance): number => {
   if (memberIds.length <= 1) return 1.0;
 
   const memberSet = new Set(memberIds);
 
   // Sample up to 50 members for large communities
   const SAMPLE_SIZE = 50;
-  const sample = memberIds.length <= SAMPLE_SIZE
-    ? memberIds
-    : memberIds.slice(0, SAMPLE_SIZE);
+  const sample = memberIds.length <= SAMPLE_SIZE ? memberIds : memberIds.slice(0, SAMPLE_SIZE);
 
   let internalEdges = 0;
   let totalEdges = 0;

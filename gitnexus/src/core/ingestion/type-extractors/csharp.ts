@@ -1,6 +1,23 @@
-import type { SyntaxNode } from '../utils.js';
-import type { ConstructorBindingScanner, ForLoopExtractor, LanguageTypeConfig, ParameterExtractor, TypeBindingExtractor, PendingAssignmentExtractor, PatternBindingExtractor } from './types.js';
-import { extractSimpleTypeName, extractVarName, findChildByType, unwrapAwait, extractGenericTypeArgs, resolveIterableElementType, methodToTypeArgPosition, extractElementTypeFromString, type TypeArgPosition } from './shared.js';
+import { findChild, type SyntaxNode } from '../utils/ast-helpers.js';
+import type {
+  ConstructorBindingScanner,
+  ForLoopExtractor,
+  LanguageTypeConfig,
+  ParameterExtractor,
+  TypeBindingExtractor,
+  PendingAssignmentExtractor,
+  PatternBindingExtractor,
+  LiteralTypeInferrer,
+} from './types.js';
+import {
+  extractSimpleTypeName,
+  extractVarName,
+  unwrapAwait,
+  resolveIterableElementType,
+  methodToTypeArgPosition,
+  extractElementTypeFromString,
+  type TypeArgPosition,
+} from './shared.js';
 
 /** Known container property accessors that operate on the container itself (e.g., dict.Keys, dict.Values) */
 const KNOWN_CONTAINER_PROPS: ReadonlySet<string> = new Set(['Keys', 'Values']);
@@ -12,7 +29,10 @@ const DECLARATION_NODE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /** C#: Type x = ...; var x = new Type(); */
-const extractDeclaration: TypeBindingExtractor = (node: SyntaxNode, env: Map<string, string>): void => {
+const extractDeclaration: TypeBindingExtractor = (
+  node: SyntaxNode,
+  env: Map<string, string>,
+): void => {
   // C# tree-sitter: local_declaration_statement > variable_declaration > ...
   // Recursively descend through wrapper nodes
   for (let i = 0; i < node.namedChildCount; i++) {
@@ -50,8 +70,9 @@ const extractDeclaration: TypeBindingExtractor = (node: SyntaxNode, env: Map<str
     // tree-sitter-c-sharp may put object_creation_expression as direct child
     // or inside equals_value_clause depending on grammar version
     if (declarators.length === 1) {
-      const initializer = findChildByType(declarators[0], 'object_creation_expression')
-        ?? findChildByType(declarators[0], 'equals_value_clause')?.firstNamedChild;
+      const initializer =
+        findChild(declarators[0], 'object_creation_expression') ??
+        findChild(declarators[0], 'equals_value_clause')?.firstNamedChild;
       if (initializer?.type === 'object_creation_expression') {
         const ctorType = initializer.childForFieldName('type');
         if (ctorType) typeName = extractSimpleTypeName(ctorType);
@@ -99,8 +120,11 @@ const scanConstructorBinding: ConstructorBindingScanner = (node) => {
   for (let i = 0; i < node.namedChildCount; i++) {
     const child = node.namedChild(i);
     if (!child) continue;
-    if (child.type === 'variable_declarator') { if (!declarator) declarator = child; }
-    else if (!typeNode) { typeNode = child; }
+    if (child.type === 'variable_declarator') {
+      if (!declarator) declarator = child;
+    } else if (!typeNode) {
+      typeNode = child;
+    }
   }
   // Only handle implicit_type (var) — explicit types handled by extractDeclaration
   if (!typeNode || typeNode.type !== 'implicit_type') return undefined;
@@ -113,8 +137,18 @@ const scanConstructorBinding: ConstructorBindingScanner = (node) => {
   for (let i = 0; i < declarator.namedChildCount; i++) {
     const child = declarator.namedChild(i);
     if (!child) continue;
-    if (child.type === 'equals_value_clause') { value = child.firstNamedChild; break; }
-    if (child.type === 'invocation_expression' || child.type === 'object_creation_expression' || child.type === 'await_expression') { value = child; break; }
+    if (child.type === 'equals_value_clause') {
+      value = child.firstNamedChild;
+      break;
+    }
+    if (
+      child.type === 'invocation_expression' ||
+      child.type === 'object_creation_expression' ||
+      child.type === 'await_expression'
+    ) {
+      value = child;
+      break;
+    }
   }
   if (!value) return undefined;
   // Unwrap await: `var user = await svc.GetUserAsync()` → await_expression wraps invocation_expression
@@ -146,19 +180,21 @@ const scanConstructorBinding: ConstructorBindingScanner = (node) => {
   return { varName: nameNode.text, calleeName, inferredTypeName };
 };
 
-const FOR_LOOP_NODE_TYPES: ReadonlySet<string> = new Set([
-  'foreach_statement',
-]);
+const FOR_LOOP_NODE_TYPES: ReadonlySet<string> = new Set(['foreach_statement']);
 
 /** Extract element type from a C# type annotation AST node.
  *  Handles generic_name (List<User>), array_type (User[]), nullable_type (?).
  *  `pos` selects which type arg: 'first' for keys, 'last' for values (default). */
-const extractCSharpElementTypeFromTypeNode = (typeNode: SyntaxNode, pos: TypeArgPosition = 'last', depth = 0): string | undefined => {
+const extractCSharpElementTypeFromTypeNode = (
+  typeNode: SyntaxNode,
+  pos: TypeArgPosition = 'last',
+  depth = 0,
+): string | undefined => {
   if (depth > 50) return undefined;
   // generic_name: List<User>, IEnumerable<User>, Dictionary<string, User>
   // C# uses generic_name (not generic_type)
   if (typeNode.type === 'generic_name') {
-    const argList = findChildByType(typeNode, 'type_argument_list');
+    const argList = findChild(typeNode, 'type_argument_list');
     if (argList && argList.namedChildCount >= 1) {
       if (pos === 'first') {
         const firstArg = argList.namedChild(0);
@@ -183,7 +219,11 @@ const extractCSharpElementTypeFromTypeNode = (typeNode: SyntaxNode, pos: TypeArg
 };
 
 /** Walk up from a foreach to the enclosing method and search parameters. */
-const findCSharpParamElementType = (iterableName: string, startNode: SyntaxNode, pos: TypeArgPosition = 'last'): string | undefined => {
+const findCSharpParamElementType = (
+  iterableName: string,
+  startNode: SyntaxNode,
+  pos: TypeArgPosition = 'last',
+): string | undefined => {
   let current: SyntaxNode | null = startNode.parent;
   while (current) {
     if (current.type === 'method_declaration' || current.type === 'local_function_statement') {
@@ -207,7 +247,10 @@ const findCSharpParamElementType = (iterableName: string, startNode: SyntaxNode,
 
 /** C#: foreach (User user in users) — extract loop variable binding.
  *  Tier 1c: for `foreach (var user in users)`, resolves element type from iterable. */
-const extractForLoopBinding: ForLoopExtractor = (node, { scopeEnv, declarationTypeNodes, scope, returnTypeLookup }): void => {
+const extractForLoopBinding: ForLoopExtractor = (
+  node,
+  { scopeEnv, declarationTypeNodes, scope, returnTypeLookup },
+): void => {
   const typeNode = node.childForFieldName('type');
   const nameNode = node.childForFieldName('left');
   if (!typeNode || !nameNode) return;
@@ -272,8 +315,13 @@ const extractForLoopBinding: ForLoopExtractor = (node, { scopeEnv, declarationTy
     const containerTypeName = scopeEnv.get(iterableName!);
     const typeArgPos = methodToTypeArgPosition(methodName, containerTypeName);
     elementType = resolveIterableElementType(
-      iterableName!, node, scopeEnv, declarationTypeNodes, scope,
-      extractCSharpElementTypeFromTypeNode, findCSharpParamElementType,
+      iterableName!,
+      node,
+      scopeEnv,
+      declarationTypeNodes,
+      scope,
+      extractCSharpElementTypeFromTypeNode,
+      findCSharpParamElementType,
       typeArgPos,
     );
   }
@@ -294,18 +342,92 @@ const extractForLoopBinding: ForLoopExtractor = (node, { scopeEnv, declarationTy
  * declaration_pattern, or when the type/name cannot be extracted.
  * No scopeEnv lookup is needed — the pattern explicitly declares the new variable's type.
  */
-const extractPatternBinding: PatternBindingExtractor = (node) => {
+/**
+ * Find the if-body (consequence) block for a C# null-check.
+ * Walks up from the expression to find the enclosing if_statement,
+ * then returns its first block child (the truthy branch body).
+ */
+const findCSharpIfConsequenceBlock = (expr: SyntaxNode): SyntaxNode | undefined => {
+  let current = expr.parent;
+  while (current) {
+    if (current.type === 'if_statement') {
+      // C# if_statement consequence is the 'consequence' field or first block child
+      const consequence = current.childForFieldName('consequence');
+      if (consequence) return consequence;
+      for (let i = 0; i < current.childCount; i++) {
+        const child = current.child(i);
+        if (child?.type === 'block') return child;
+      }
+      return undefined;
+    }
+    if (
+      current.type === 'block' ||
+      current.type === 'method_declaration' ||
+      current.type === 'constructor_declaration' ||
+      current.type === 'local_function_statement' ||
+      current.type === 'lambda_expression'
+    )
+      return undefined;
+    current = current.parent;
+  }
+  return undefined;
+};
+
+/** Check if a C# declaration type node represents a nullable type.
+ *  Checks for nullable_type AST node or '?' in the type text (e.g., User?). */
+const isCSharpNullableDecl = (declTypeNode: SyntaxNode): boolean => {
+  if (declTypeNode.type === 'nullable_type') return true;
+  return declTypeNode.text.includes('?');
+};
+
+const extractPatternBinding: PatternBindingExtractor = (
+  node,
+  scopeEnv,
+  declarationTypeNodes,
+  scope,
+) => {
   // is_pattern_expression: `obj is User user` — has a declaration_pattern child
+  // Also handles `x is not null` for null-check narrowing
   if (node.type === 'is_pattern_expression') {
     const pattern = node.childForFieldName('pattern');
-    if (pattern?.type !== 'declaration_pattern' && pattern?.type !== 'recursive_pattern') return undefined;
-    const typeNode = pattern.childForFieldName('type');
-    const nameNode = pattern.childForFieldName('name');
-    if (!typeNode || !nameNode) return undefined;
-    const typeName = extractSimpleTypeName(typeNode);
-    const varName = extractVarName(nameNode);
-    if (!typeName || !varName) return undefined;
-    return { varName, typeName };
+    if (!pattern) return undefined;
+
+    // Standard type pattern: `obj is User user`
+    if (pattern.type === 'declaration_pattern' || pattern.type === 'recursive_pattern') {
+      const typeNode = pattern.childForFieldName('type');
+      const nameNode = pattern.childForFieldName('name');
+      if (!typeNode || !nameNode) return undefined;
+      const typeName = extractSimpleTypeName(typeNode);
+      const varName = extractVarName(nameNode);
+      if (!typeName || !varName) return undefined;
+      return { varName, typeName };
+    }
+
+    // Null-check: `x is not null` — negated_pattern > constant_pattern > null_literal
+    if (pattern.type === 'negated_pattern') {
+      const inner = pattern.firstNamedChild;
+      if (inner?.type === 'constant_pattern') {
+        const literal = inner.firstNamedChild ?? inner.firstChild;
+        if (literal?.type === 'null_literal' || literal?.text === 'null') {
+          const expr = node.childForFieldName('expression');
+          if (!expr || expr.type !== 'identifier') return undefined;
+          const varName = expr.text;
+          const resolvedType = scopeEnv.get(varName);
+          if (!resolvedType) return undefined;
+          // Verify the original declaration was nullable
+          const declTypeNode = declarationTypeNodes.get(`${scope}\0${varName}`);
+          if (!declTypeNode || !isCSharpNullableDecl(declTypeNode)) return undefined;
+          const ifBody = findCSharpIfConsequenceBlock(node);
+          if (!ifBody) return undefined;
+          return {
+            varName,
+            typeName: resolvedType,
+            narrowingRange: { startIndex: ifBody.startIndex, endIndex: ifBody.endIndex },
+          };
+        }
+      }
+    }
+    return undefined;
   }
   // declaration_pattern / recursive_pattern: standalone in switch statements and switch expressions
   // `case User u:` or `User u =>` or `User { Name: "Alice" } u =>`
@@ -318,6 +440,37 @@ const extractPatternBinding: PatternBindingExtractor = (node) => {
     const varName = extractVarName(nameNode);
     if (!typeName || !varName) return undefined;
     return { varName, typeName };
+  }
+  // Null-check: `x != null` — binary_expression with != operator
+  if (node.type === 'binary_expression') {
+    const op = node.children.find((c) => !c.isNamed && c.text === '!=');
+    if (!op) return undefined;
+    const left = node.namedChild(0);
+    const right = node.namedChild(1);
+    if (!left || !right) return undefined;
+    let varNode: SyntaxNode | undefined;
+    if (left.type === 'identifier' && (right.type === 'null_literal' || right.text === 'null')) {
+      varNode = left;
+    } else if (
+      right.type === 'identifier' &&
+      (left.type === 'null_literal' || left.text === 'null')
+    ) {
+      varNode = right;
+    }
+    if (!varNode) return undefined;
+    const varName = varNode.text;
+    const resolvedType = scopeEnv.get(varName);
+    if (!resolvedType) return undefined;
+    // Verify the original declaration was nullable
+    const declTypeNode = declarationTypeNodes.get(`${scope}\0${varName}`);
+    if (!declTypeNode || !isCSharpNullableDecl(declTypeNode)) return undefined;
+    const ifBody = findCSharpIfConsequenceBlock(node);
+    if (!ifBody) return undefined;
+    return {
+      varName,
+      typeName: resolvedType,
+      narrowingRange: { startIndex: ifBody.startIndex, endIndex: ifBody.endIndex },
+    };
   }
   return undefined;
 };
@@ -337,24 +490,121 @@ const extractPendingAssignment: PendingAssignmentExtractor = (node, scopeEnv) =>
     // C# wraps value in equals_value_clause; fall back to last named child
     let evc: SyntaxNode | null = null;
     for (let j = 0; j < child.childCount; j++) {
-      if (child.child(j)?.type === 'equals_value_clause') { evc = child.child(j); break; }
+      if (child.child(j)?.type === 'equals_value_clause') {
+        evc = child.child(j);
+        break;
+      }
     }
     const valueNode = evc?.firstNamedChild ?? child.namedChild(child.namedChildCount - 1);
-    if (valueNode && valueNode !== nameNode && (valueNode.type === 'identifier' || valueNode.type === 'simple_identifier')) {
+    if (
+      valueNode &&
+      valueNode !== nameNode &&
+      (valueNode.type === 'identifier' || valueNode.type === 'simple_identifier')
+    ) {
       return { kind: 'copy', lhs, rhs: valueNode.text };
+    }
+    // member_access_expression RHS → fieldAccess (a.Field)
+    if (valueNode?.type === 'member_access_expression') {
+      const expr = valueNode.childForFieldName('expression');
+      const name = valueNode.childForFieldName('name');
+      if (expr?.type === 'identifier' && name?.type === 'identifier') {
+        return { kind: 'fieldAccess', lhs, receiver: expr.text, field: name.text };
+      }
+    }
+    // invocation_expression RHS
+    if (valueNode?.type === 'invocation_expression') {
+      const funcNode = valueNode.firstNamedChild;
+      if (funcNode?.type === 'identifier_name' || funcNode?.type === 'identifier') {
+        return { kind: 'callResult', lhs, callee: funcNode.text };
+      }
+      // method call with receiver → methodCallResult: a.GetC()
+      if (funcNode?.type === 'member_access_expression') {
+        const expr = funcNode.childForFieldName('expression');
+        const name = funcNode.childForFieldName('name');
+        if (expr?.type === 'identifier' && name?.type === 'identifier') {
+          return { kind: 'methodCallResult', lhs, receiver: expr.text, method: name.text };
+        }
+      }
+    }
+    // await_expression → unwrap and check inner
+    if (valueNode?.type === 'await_expression') {
+      const inner = valueNode.firstNamedChild;
+      if (inner?.type === 'invocation_expression') {
+        const funcNode = inner.firstNamedChild;
+        if (funcNode?.type === 'identifier_name' || funcNode?.type === 'identifier') {
+          return { kind: 'callResult', lhs, callee: funcNode.text };
+        }
+        if (funcNode?.type === 'member_access_expression') {
+          const expr = funcNode.childForFieldName('expression');
+          const name = funcNode.childForFieldName('name');
+          if (expr?.type === 'identifier' && name?.type === 'identifier') {
+            return { kind: 'methodCallResult', lhs, receiver: expr.text, method: name.text };
+          }
+        }
+      }
     }
   }
   return undefined;
 };
 
+/** Infer the type of a literal AST node for C# overload disambiguation. */
+const inferLiteralType: LiteralTypeInferrer = (node) => {
+  switch (node.type) {
+    case 'integer_literal':
+      if (node.text.endsWith('L') || node.text.endsWith('l')) return 'long';
+      return 'int';
+    case 'real_literal':
+      if (node.text.endsWith('f') || node.text.endsWith('F')) return 'float';
+      if (node.text.endsWith('m') || node.text.endsWith('M')) return 'decimal';
+      return 'double';
+    case 'string_literal':
+    case 'verbatim_string_literal':
+    case 'raw_string_literal':
+    case 'interpolated_string_expression':
+      return 'string';
+    case 'character_literal':
+      return 'char';
+    case 'boolean_literal':
+      return 'bool';
+    case 'null_literal':
+      return 'null';
+    default:
+      return undefined;
+  }
+};
+
 export const typeConfig: LanguageTypeConfig = {
   declarationNodeTypes: DECLARATION_NODE_TYPES,
+  getDeclarationTypeNode: (node) => {
+    // C# field_declaration / local_declaration_statement wrap type inside variable_declaration.
+    // Prefer the wrapper node's `type` field when present.
+    const direct = node.childForFieldName('type');
+    if (direct) return direct;
+
+    const wrapped =
+      node.childForFieldName('declaration') ??
+      (() => {
+        for (let i = 0; i < node.namedChildCount; i++) {
+          const c = node.namedChild(i);
+          if (c?.type === 'variable_declaration') return c;
+        }
+        return null;
+      })();
+
+    return wrapped?.childForFieldName('type') ?? null;
+  },
   forLoopNodeTypes: FOR_LOOP_NODE_TYPES,
-  patternBindingNodeTypes: new Set(['is_pattern_expression', 'declaration_pattern', 'recursive_pattern']),
+  patternBindingNodeTypes: new Set([
+    'is_pattern_expression',
+    'declaration_pattern',
+    'recursive_pattern',
+    'binary_expression',
+  ]),
   extractDeclaration,
   extractParameter,
   scanConstructorBinding,
   extractForLoopBinding,
   extractPendingAssignment,
   extractPatternBinding,
+  inferLiteralType,
 };

@@ -1,11 +1,30 @@
-import type { SyntaxNode } from './utils.js';
-import { FUNCTION_NODE_TYPES, extractFunctionName, CLASS_CONTAINER_TYPES, isBuiltInOrNoise } from './utils.js';
-import { SupportedLanguages } from '../../config/supported-languages.js';
-import { typeConfigs, TYPED_PARAMETER_TYPES } from './type-extractors/index.js';
-import type { ClassNameLookup, ReturnTypeLookup, ForLoopExtractorContext } from './type-extractors/types.js';
-import { extractSimpleTypeName, extractVarName, stripNullable, extractReturnTypeName } from './type-extractors/shared.js';
-import type { SymbolTable } from './symbol-table.js';
+import {
+  type SyntaxNode,
+  FUNCTION_NODE_TYPES,
+  CLASS_CONTAINER_TYPES,
+  genericFuncName,
+} from './utils/ast-helpers.js';
+import { CALL_EXPRESSION_TYPES } from './utils/call-analysis.js';
+import { SupportedLanguages } from 'gitnexus-shared';
+import { TYPED_PARAMETER_TYPES } from './type-extractors/shared.js';
+import { getProvider } from './languages/index.js';
+import type { BindingAccumulator, BindingEntry } from './binding-accumulator.js';
+import type {
+  ClassNameLookup,
+  ReturnTypeLookup,
+  ForLoopExtractorContext,
+  PendingAssignment,
+} from './type-extractors/types.js';
+import {
+  extractSimpleTypeName,
+  extractVarName,
+  stripNullable,
+  extractReturnTypeName,
+} from './type-extractors/shared.js';
+import type { SemanticModel } from './model/index.js';
+import type { NodeLabel } from 'gitnexus-shared';
 
+import { logger } from '../logger.js';
 /**
  * Per-file scoped type environment: maps (scope, variableName) → typeName.
  * Scope-aware: variables inside functions are keyed by function name,
@@ -19,10 +38,27 @@ import type { SymbolTable } from './symbol-table.js';
  * - Conservative: complex/generic types extract the base name only
  * - Per-file: built once, used for receiver resolution, then discarded
  */
-export type TypeEnv = Map<string, Map<string, string>>;
+type TypeEnv = Map<string, Map<string, string>>;
 
 /** File-level scope key */
 const FILE_SCOPE = '';
+
+/** Shared empty map for files with no file-scope bindings. */
+/**
+ * Create a fresh empty Map for the "no file-scope bindings" fallback.
+ *
+ * **Why not a shared sentinel**: we previously used a module-level
+ * `const EMPTY_FILE_SCOPE = new Map()` typed as `ReadonlyMap` and shared
+ * across every TypeEnv instance. That was a latent singleton-poisoning
+ * footgun: any caller that did `(fileScope() as Map).set(...)` — or any
+ * future refactor that widened the return type — would silently corrupt
+ * every subsequent "empty" return for the process lifetime. A Proxy
+ * wrapper was considered but broke Map's internal-slot methods (`.size`,
+ * iteration protocol). Allocating a fresh empty Map per call is a few
+ * bytes per file — immediately GC'd, no measurable cost even at 10k files
+ * — and eliminates the shared-mutation hazard entirely.
+ */
+const emptyFileScope = (): ReadonlyMap<string, string> => new Map();
 
 /** Fallback for languages where class names aren't in a 'name' field (e.g. Kotlin uses type_identifier). */
 const findTypeIdentifierChild = (node: SyntaxNode): SyntaxNode | null => {
@@ -44,8 +80,19 @@ export interface TypeEnvironment {
   lookup(varName: string, callNode: SyntaxNode): string | undefined;
   /** Unverified cross-file constructor bindings for SymbolTable verification. */
   readonly constructorBindings: readonly ConstructorBinding[];
-  /** Raw per-scope type bindings — for testing and debugging. */
-  readonly env: TypeEnv;
+  /** Get all file-scope bindings (scope key = '') as a read-only map. */
+  fileScope(): ReadonlyMap<string, string>;
+  /** All scoped bindings as a read-only nested map (scope → varName → type).
+   *  Use for diagnostics/testing. Prefer lookup() for production call resolution. */
+  allScopes(): ReadonlyMap<string, ReadonlyMap<string, string>>;
+  /** Maps `scope\0varName` → constructor type for virtual dispatch override.
+   *  Populated when a variable has BOTH a declared base type AND a more specific
+   *  constructor type (e.g., `Animal a = new Dog()` → key maps to 'Dog'). */
+  readonly constructorTypeMap: ReadonlyMap<string, string>;
+  /** Copy all scoped bindings into a BindingAccumulator.
+   *  Must be called at most once per TypeEnv instance — throws on second call.
+   *  The source `env` is not cleared (TypeEnv is per-file and discarded immediately after). */
+  flush(filePath: string, accumulator: BindingAccumulator): void;
 }
 
 /**
@@ -61,17 +108,22 @@ interface PatternOverride {
 /** scope → varName → overrides (checked in order, first range match wins) */
 type PatternOverrides = Map<string, Map<string, PatternOverride[]>>;
 
-/** AST node types that represent mutually exclusive branch containers for pattern bindings. */
-const PATTERN_BRANCH_TYPES = new Set([
-  'when_entry',          // Kotlin when
-  'switch_block_label',  // Java switch (enhanced)
+/** AST node types that represent mutually exclusive branch containers for pattern bindings.
+ *  Includes both multi-arm pattern-match branches AND if-statement bodies for null-check narrowing. */
+const NARROWING_BRANCH_TYPES = new Set([
+  'when_entry', // Kotlin when
+  'switch_block_label', // Java switch (enhanced)
+  'if_statement', // TS/JS, Java, C/C++
+  'if_expression', // Kotlin (if is an expression)
+  'statement_block', // TS/JS: { ... } body of if
+  'control_structure_body', // Kotlin: body of if
 ]);
 
 /** Walk up the AST from a pattern node to find the enclosing branch container. */
-const findPatternBranchScope = (node: SyntaxNode): SyntaxNode | undefined => {
+const findNarrowingBranchScope = (node: SyntaxNode): SyntaxNode | undefined => {
   let current = node.parent;
   while (current) {
-    if (PATTERN_BRANCH_TYPES.has(current.type)) return current;
+    if (NARROWING_BRANCH_TYPES.has(current.type)) return current;
     if (FUNCTION_NODE_TYPES.has(current.type)) return undefined;
     current = current.parent;
   }
@@ -88,7 +140,7 @@ const FAST_NULLABLE_KEYWORDS = new Set(['null', 'undefined', 'void', 'None', 'ni
  */
 const fastStripNullable = (typeName: string): string | undefined => {
   if (FAST_NULLABLE_KEYWORDS.has(typeName)) return undefined;
-  return (typeName.indexOf('|') === -1 && typeName.indexOf('?') === -1)
+  return typeName.indexOf('|') === -1 && typeName.indexOf('?') === -1
     ? typeName
     : stripNullable(typeName);
 };
@@ -99,6 +151,8 @@ const lookupInEnv = (
   varName: string,
   callNode: SyntaxNode,
   patternOverrides?: PatternOverrides,
+  enclosingFunctionFinder?: (n: SyntaxNode) => { funcName: string; label: NodeLabel } | null,
+  extractFunctionNameHook?: (n: SyntaxNode) => { funcName: string | null; label: NodeLabel } | null,
 ): string | undefined => {
   // Self/this receiver: resolve to enclosing class name via AST walk
   if (varName === 'self' || varName === 'this' || varName === '$this') {
@@ -112,7 +166,11 @@ const lookupInEnv = (
   }
 
   // Determine the enclosing function scope for the call
-  const scopeKey = findEnclosingScopeKey(callNode);
+  const scopeKey = findEnclosingScopeKey(
+    callNode,
+    enclosingFunctionFinder,
+    extractFunctionNameHook,
+  );
 
   // Check position-indexed pattern overrides first (e.g., Kotlin when/is smart casts).
   // These take priority over flat scopeEnv because they represent per-branch narrowing.
@@ -143,22 +201,48 @@ const lookupInEnv = (
   return raw ? fastStripNullable(raw) : undefined;
 };
 
+/** Per-file memoization caches for expensive parent-walk functions.
+ *  Cleared at the start of each buildTypeEnv call (one call per file). */
+const enclosingClassNameCache = new Map<SyntaxNode, string | undefined>();
+const enclosingParentClassNameCache = new Map<SyntaxNode, string | undefined>();
 
 /**
  * Walk up the AST from a node to find the enclosing class/module name.
  * Used to resolve `self`/`this` receivers to their containing type.
+ * Memoized per-file: cache is cleared at buildTypeEnv entry.
  */
 const findEnclosingClassName = (node: SyntaxNode): string | undefined => {
+  if (enclosingClassNameCache.has(node)) return enclosingClassNameCache.get(node);
   let current = node.parent;
   while (current) {
     if (CLASS_CONTAINER_TYPES.has(current.type)) {
-      const nameNode = current.childForFieldName('name')
-        ?? findTypeIdentifierChild(current);
-      if (nameNode) return nameNode.text;
+      const nameNode = current.childForFieldName('name') ?? findTypeIdentifierChild(current);
+      if (nameNode) {
+        enclosingClassNameCache.set(node, nameNode.text);
+        return nameNode.text;
+      }
     }
     current = current.parent;
   }
+  enclosingClassNameCache.set(node, undefined);
   return undefined;
+};
+
+/** Keywords that refer to the current instance across languages. */
+const THIS_RECEIVERS = new Set(['this', 'self', '$this', 'Me']);
+
+/**
+ * If a pending assignment's receiver is this/self/$this/Me, substitute the
+ * enclosing class name. Returns the item unchanged for non-receiver kinds
+ * or when the receiver is not a this-keyword. Properties are readonly in the
+ * discriminated union, so a new object is returned when substitution occurs.
+ */
+const substituteThisReceiver = (item: PendingAssignment, node: SyntaxNode): PendingAssignment => {
+  if (item.kind !== 'fieldAccess' && item.kind !== 'methodCallResult') return item;
+  if (!THIS_RECEIVERS.has(item.receiver)) return item;
+  const className = findEnclosingClassName(node);
+  if (!className) return item;
+  return { ...item, receiver: className };
 };
 
 /**
@@ -176,13 +260,17 @@ const findEnclosingClassName = (node: SyntaxNode): string | undefined => {
  * - Swift: unnamed `inheritance_specifier` child → user_type → type_identifier
  */
 const findEnclosingParentClassName = (node: SyntaxNode): string | undefined => {
+  if (enclosingParentClassNameCache.has(node)) return enclosingParentClassNameCache.get(node);
   let current = node.parent;
   while (current) {
     if (CLASS_CONTAINER_TYPES.has(current.type)) {
-      return extractParentClassFromNode(current);
+      const result = extractParentClassFromNode(current);
+      enclosingParentClassNameCache.set(node, result);
+      return result;
     }
     current = current.parent;
   }
+  enclosingParentClassNameCache.set(node, undefined);
   return undefined;
 };
 
@@ -192,9 +280,8 @@ const extractParentClassFromNode = (classNode: SyntaxNode): string | undefined =
   const superclassNode = classNode.childForFieldName('superclass');
   if (superclassNode) {
     // Java: superclass > type_identifier or generic_type, Ruby: superclass > constant
-    const inner = superclassNode.childForFieldName('type')
-      ?? superclassNode.firstNamedChild
-      ?? superclassNode;
+    const inner =
+      superclassNode.childForFieldName('type') ?? superclassNode.firstNamedChild ?? superclassNode;
     return extractSimpleTypeName(inner) ?? inner.text;
   }
 
@@ -291,13 +378,30 @@ const extractParentClassFromNode = (classNode: SyntaxNode): string | undefined =
   return undefined;
 };
 
-/** Find the enclosing function name for scope lookup. */
-const findEnclosingScopeKey = (node: SyntaxNode): string | undefined => {
+/** Find the enclosing function name for scope lookup.
+ *  When an `enclosingFunctionFinder` hook is provided (from the language provider),
+ *  it is consulted for each ancestor before the default FUNCTION_NODE_TYPES check.
+ *  This handles languages like Dart where the function body is a sibling of the
+ *  signature instead of a child. */
+const findEnclosingScopeKey = (
+  node: SyntaxNode,
+  enclosingFunctionFinder?: (n: SyntaxNode) => { funcName: string; label: NodeLabel } | null,
+  extractFunctionNameHook?: (n: SyntaxNode) => { funcName: string | null; label: NodeLabel } | null,
+): string | undefined => {
   let current = node.parent;
   while (current) {
     if (FUNCTION_NODE_TYPES.has(current.type)) {
-      const { funcName } = extractFunctionName(current);
+      const funcName = extractFunctionNameHook?.(current)?.funcName ?? genericFuncName(current);
       if (funcName) return `${funcName}@${current.startIndex}`;
+    }
+    // Language-specific hook (e.g., Dart function_body → sibling function_signature)
+    if (enclosingFunctionFinder) {
+      const result = enclosingFunctionFinder(current);
+      if (result) {
+        const sigNode = current.previousSibling;
+        const startIdx = sigNode?.startIndex ?? current.startIndex;
+        return `${result.funcName}@${startIdx}`;
+      }
     }
     current = current.parent;
   }
@@ -311,13 +415,10 @@ const findEnclosingScopeKey = (node: SyntaxNode): string | undefined => {
  * using cross-file type information when available.
  *
  * Only `.has()` is exposed — the SymbolTable doesn't support iteration.
- * Results are memoized to avoid redundant lookupFuzzy scans across declarations.
+ * Results are memoized to avoid redundant class-index scans across declarations.
  */
-const createClassNameLookup = (
-  localNames: Set<string>,
-  symbolTable?: SymbolTable,
-): ClassNameLookup => {
-  if (!symbolTable) return localNames;
+const createClassNameLookup = (localNames: Set<string>, model?: SemanticModel): ClassNameLookup => {
+  if (!model) return localNames;
 
   const memo = new Map<string, boolean>();
   return {
@@ -325,9 +426,9 @@ const createClassNameLookup = (
       if (localNames.has(name)) return true;
       const cached = memo.get(name);
       if (cached !== undefined) return cached;
-      const result = symbolTable.lookupFuzzy(name).some(def =>
-        def.type === 'Class' || def.type === 'Enum' || def.type === 'Struct',
-      );
+      const result = model.types
+        .lookupClassByName(name)
+        .some((def) => def.type === 'Class' || def.type === 'Enum' || def.type === 'Struct');
       memo.set(name, result);
       return result;
     },
@@ -353,62 +454,467 @@ const createClassNameLookup = (
 const SKIP_SUBTREE_TYPES = new Set([
   // Plain string literals (NOT template_string — it contains interpolated expressions
   // that can hold arrow functions with typed parameters, e.g. `${(x: T) => x}`)
-  'string',              'string_literal',
-  'string_content',      'string_fragment',      'heredoc_body',
+  'string',
+  'string_literal',
+  'string_content',
+  'string_fragment',
+  'heredoc_body',
   // Comments
-  'comment',             'line_comment',         'block_comment',
+  'comment',
+  'line_comment',
+  'block_comment',
   // Numeric/boolean/null literals
-  'number',              'integer_literal',      'float_literal',
-  'true',                'false',                'null',
+  'number',
+  'integer_literal',
+  'float_literal',
+  'true',
+  'false',
+  'null',
   // Regex
-  'regex',               'regex_pattern',
+  'regex',
+  'regex_pattern',
 ]);
+
+const CLASS_LIKE_TYPES = new Set(['Class', 'Struct', 'Interface']);
+type ClassDefRef = { nodeId: string; type: string; filePath: string };
+
+const lookupClassDefsByName = (
+  model: SemanticModel,
+  name: string,
+  allowedTypes: ReadonlySet<string> = CLASS_LIKE_TYPES,
+): ClassDefRef[] => model.types.lookupClassByName(name).filter((d) => allowedTypes.has(d.type));
+
+/** Memoize class definition lookups during fixpoint iteration.
+ *  SymbolTable is immutable during type resolution, so results never change.
+ *  Eliminates redundant array allocations + filter scans across iterations. */
+const createClassDefCache = (model?: SemanticModel) => {
+  const cache = new Map<string, ClassDefRef[]>();
+  return (typeName: string) => {
+    let result = cache.get(typeName);
+    if (result === undefined) {
+      result = model ? lookupClassDefsByName(model, typeName) : [];
+      cache.set(typeName, result);
+    }
+    return result;
+  };
+};
+
+/** AST node types representing constructor expressions across languages.
+ *  Note: C# also has `implicit_object_creation_expression` (`new()` with type
+ *  inference) which is NOT captured — the type is inferred, not explicit.
+ *  Kotlin constructors use `call_expression` (no `new` keyword) — not detected. */
+const CONSTRUCTOR_EXPR_TYPES = new Set([
+  'new_expression', // TS/JS/C++: new Dog()
+  'object_creation_expression', // Java/C#: new Dog()
+]);
+
+/** Extract the constructor class name from a declaration node's initializer.
+ *  Searches for new_expression / object_creation_expression in the node's subtree.
+ *  Returns the class name or undefined if no constructor is found.
+ *  Depth-limited to 5 to avoid expensive traversals. */
+const extractConstructorTypeName = (node: SyntaxNode, depth = 0): string | undefined => {
+  if (depth > 5) return undefined;
+  if (CONSTRUCTOR_EXPR_TYPES.has(node.type)) {
+    // Java/C#: object_creation_expression has 'type' field
+    const typeField = node.childForFieldName('type');
+    if (typeField) return extractSimpleTypeName(typeField);
+    // TS/JS: new_expression has 'constructor' field (but tree-sitter often just has identifier child)
+    const ctorField = node.childForFieldName('constructor');
+    if (ctorField) return extractSimpleTypeName(ctorField);
+    // Fallback: first named child is often the class identifier
+    if (node.firstNamedChild) return extractSimpleTypeName(node.firstNamedChild);
+  }
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+    // Don't descend into nested functions/classes or call expressions (prevents
+    // finding constructor args inside method calls, e.g. processAll(new Dog()))
+    if (
+      FUNCTION_NODE_TYPES.has(child.type) ||
+      CLASS_CONTAINER_TYPES.has(child.type) ||
+      CALL_EXPRESSION_TYPES.has(child.type)
+    )
+      continue;
+    const result = extractConstructorTypeName(child, depth + 1);
+    if (result) return result;
+  }
+  return undefined;
+};
+
+/** Max depth for MRO parent chain walking. Real-world inheritance rarely exceeds 3-4 levels. */
+const MAX_MRO_DEPTH = 5;
+
+/** Check if `child` is a subclass of `parent` using the parentMap.
+ *  BFS up from child, depth-limited (5), cycle-safe. */
+export const isSubclassOf = (
+  child: string,
+  parent: string,
+  parentMap: ReadonlyMap<string, readonly string[]> | undefined,
+): boolean => {
+  if (!parentMap || child === parent) return false;
+  const visited = new Set<string>([child]);
+  let current = [child];
+  for (let depth = 0; depth < MAX_MRO_DEPTH && current.length > 0; depth++) {
+    const next: string[] = [];
+    for (const cls of current) {
+      const parents = parentMap.get(cls);
+      if (!parents) continue;
+      for (const p of parents) {
+        if (p === parent) return true;
+        if (!visited.has(p)) {
+          visited.add(p);
+          next.push(p);
+        }
+      }
+    }
+    current = next;
+  }
+  return false;
+};
+
+/** Walk up the parent class chain to find a field or method on an ancestor.
+ *  BFS-like traversal with depth limit and cycle detection. First match wins.
+ *  Used by resolveFieldType and resolveMethodReturnType when direct lookup fails. */
+const walkParentChain = <T>(
+  typeName: string,
+  parentMap: ReadonlyMap<string, readonly string[]> | undefined,
+  getClassDefs: (name: string) => ClassDefRef[],
+  lookupOnClass: (nodeId: string) => T | undefined,
+): T | undefined => {
+  if (!parentMap) return undefined;
+  const visited = new Set<string>([typeName]);
+  let current = [typeName];
+  for (let depth = 0; depth < MAX_MRO_DEPTH && current.length > 0; depth++) {
+    const next: string[] = [];
+    for (const cls of current) {
+      const parents = parentMap.get(cls);
+      if (!parents) continue;
+      for (const parent of parents) {
+        if (visited.has(parent)) continue;
+        visited.add(parent);
+        const parentDefs = getClassDefs(parent);
+        if (parentDefs.length === 1) {
+          const result = lookupOnClass(parentDefs[0].nodeId);
+          if (result !== undefined) return result;
+        }
+        next.push(parent);
+      }
+    }
+    current = next;
+  }
+  return undefined;
+};
+
+/** Resolve a field's declared type given a receiver variable and field name.
+ *  Uses SymbolTable to find the class nodeId for the receiver's type, then
+ *  looks up the field via the eagerly-populated fieldByOwner index.
+ *  Falls back to MRO parent chain walking if direct lookup fails (Phase 11A). */
+const resolveFieldType = (
+  receiver: string,
+  field: string,
+  scopeEnv: ReadonlyMap<string, string>,
+  model?: SemanticModel,
+  getClassDefs?: (typeName: string) => ClassDefRef[],
+  parentMap?: ReadonlyMap<string, readonly string[]>,
+): string | undefined => {
+  if (!model) return undefined;
+  const receiverType = scopeEnv.get(receiver);
+  if (!receiverType) return undefined;
+  const lookup = getClassDefs ?? ((name: string) => lookupClassDefsByName(model, name));
+  const classDefs = lookup(receiverType);
+  if (classDefs.length !== 1) return undefined;
+  // Direct lookup first
+  const fieldDef = model.fields.lookupFieldByOwner(classDefs[0].nodeId, field);
+  if (fieldDef?.declaredType) return extractReturnTypeName(fieldDef.declaredType);
+  // MRO parent chain walking on miss
+  const inherited = walkParentChain(receiverType, parentMap, lookup, (nodeId) => {
+    const f = model.fields.lookupFieldByOwner(nodeId, field);
+    return f?.declaredType ? extractReturnTypeName(f.declaredType) : undefined;
+  });
+  return inherited;
+};
+
+/** Resolve a method's return type given a receiver variable and method name.
+ *  Uses SymbolTable to find class nodeIds for the receiver's type, then
+ *  looks up the method via owner-scoped lookupMethodByOwner.
+ *  Falls back to MRO parent chain walking if direct lookup fails (Phase 11A). */
+const resolveMethodReturnType = (
+  receiver: string,
+  method: string,
+  scopeEnv: ReadonlyMap<string, string>,
+  model?: SemanticModel,
+  getClassDefs?: (typeName: string) => ClassDefRef[],
+  parentMap?: ReadonlyMap<string, readonly string[]>,
+): string | undefined => {
+  if (!model) return undefined;
+  let receiverType = scopeEnv.get(receiver);
+  // When substituteThisReceiver replaced $this/self with the enclosing class name,
+  // the receiver IS the type — look it up directly as a class name.
+  if (!receiverType) {
+    const lookup = getClassDefs ?? ((name: string) => lookupClassDefsByName(model, name));
+    if (lookup(receiver).length > 0) receiverType = receiver;
+  }
+  if (!receiverType) return undefined;
+  const lookup = getClassDefs ?? ((name: string) => lookupClassDefsByName(model, name));
+  const classDefs = lookup(receiverType);
+  if (classDefs.length === 0) return undefined;
+  // Direct lookup first
+  const directMethodLookups = classDefs.map((d) => ({
+    classDef: d,
+    methodDef: model.methods.lookupMethodByOwner(d.nodeId, method),
+  }));
+  const hasAmbiguousDirectLookup = directMethodLookups.some(({ classDef, methodDef }) => {
+    if (methodDef) return false;
+    return model.symbols
+      .lookupExactAll(classDef.filePath, method)
+      .some((d) => d.ownerId === classDef.nodeId);
+  });
+  if (hasAmbiguousDirectLookup) return undefined;
+  const methods = directMethodLookups
+    .map(({ methodDef }) => methodDef)
+    .filter((d): d is NonNullable<typeof d> => d !== undefined);
+  if (methods.length === 1 && methods[0].returnType) {
+    return extractReturnTypeName(methods[0].returnType);
+  }
+  // MRO parent chain walking on miss
+  if (methods.length === 0) {
+    const inherited = walkParentChain(receiverType, parentMap, lookup, (nodeId) => {
+      const parentMethod = model.methods.lookupMethodByOwner(nodeId, method);
+      if (!parentMethod?.returnType) return undefined;
+      return extractReturnTypeName(parentMethod.returnType);
+    });
+    return inherited;
+  }
+  return undefined;
+};
+
+/**
+ * Unified fixpoint propagation: iterate over ALL pending items (copy, callResult,
+ * fieldAccess, methodCallResult) until no new bindings are produced.
+ * Handles arbitrary-depth mixed chains:
+ *   const user = getUser();      // callResult → User
+ *   const addr = user.address;   // fieldAccess → Address (depends on user)
+ *   const city = addr.getCity(); // methodCallResult → City (depends on addr)
+ *   const alias = city;          // copy → City (depends on city)
+ * Data flow: SymbolTable (immutable) + scopeEnv → resolve → scopeEnv.
+ * Termination: finite entries, each bound at most once (first-writer-wins), max 10 iterations.
+ */
+const MAX_FIXPOINT_ITERATIONS = 10;
+
+const resolveFixpointBindings = (
+  pendingItems: Array<{ scope: string } & PendingAssignment>,
+  env: TypeEnv,
+  returnTypeLookup: ReturnTypeLookup,
+  model?: SemanticModel,
+  parentMap?: ReadonlyMap<string, readonly string[]>,
+): void => {
+  if (pendingItems.length === 0) return;
+  const getClassDefs = createClassDefCache(model);
+  const resolved = new Set<number>();
+  for (let iter = 0; iter < MAX_FIXPOINT_ITERATIONS; iter++) {
+    let changed = false;
+    for (let i = 0; i < pendingItems.length; i++) {
+      if (resolved.has(i)) continue;
+      const item = pendingItems[i];
+      const scopeEnv = env.get(item.scope);
+      if (!scopeEnv || scopeEnv.has(item.lhs)) {
+        resolved.add(i);
+        continue;
+      }
+
+      let typeName: string | undefined;
+      switch (item.kind) {
+        case 'callResult':
+          // Phase 9: Prefer FQN lookup when available for higher precision
+          typeName = item.calleeFqn
+            ? returnTypeLookup.lookupReturnType(item.calleeFqn)
+            : returnTypeLookup.lookupReturnType(item.callee);
+          break;
+        case 'copy':
+          typeName = scopeEnv.get(item.rhs) ?? env.get(FILE_SCOPE)?.get(item.rhs);
+          break;
+        case 'fieldAccess':
+          typeName = resolveFieldType(
+            item.receiver,
+            item.field,
+            scopeEnv,
+            model,
+            getClassDefs,
+            parentMap,
+          );
+          break;
+        case 'methodCallResult':
+          typeName = resolveMethodReturnType(
+            item.receiver,
+            item.method,
+            scopeEnv,
+            model,
+            getClassDefs,
+            parentMap,
+          );
+          break;
+        default: {
+          // Exhaustive check: TypeScript will error here if a new PendingAssignment
+          // kind is added without handling it in the switch.
+          const _exhaustive: never = item;
+          break;
+        }
+      }
+      if (typeName) {
+        scopeEnv.set(item.lhs, typeName);
+        resolved.add(i);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+    if (iter === MAX_FIXPOINT_ITERATIONS - 1 && process.env.GITNEXUS_DEBUG) {
+      const unresolved = pendingItems.length - resolved.size;
+      if (unresolved > 0) {
+        logger.warn(
+          `[type-env] fixpoint hit iteration cap (${MAX_FIXPOINT_ITERATIONS}), ${unresolved} items unresolved`,
+        );
+      }
+    }
+  }
+};
+
+/**
+ * Options for buildTypeEnv.
+ * Uses an options object to allow future extensions without positional parameter sprawl.
+ */
+export interface BuildTypeEnvOptions {
+  model?: SemanticModel;
+  parentMap?: ReadonlyMap<string, readonly string[]>;
+  /** Pre-resolved bindings from upstream files (Phase 14).
+   *  Seeded into FILE_SCOPE after walk() for names with no local binding.
+   *  Local declarations always take precedence (first-writer-wins). */
+  importedBindings?: ReadonlyMap<string, string>;
+  /** Cross-file return type fallback for imported callables (Phase 14 E3).
+   *  Consulted ONLY when SymbolTable has no unambiguous match.
+   *  Local definitions always take precedence (local-first principle). */
+  importedReturnTypes?: ReadonlyMap<string, string>;
+  /** Cross-file RAW return types for imported callables (Phase 14 E3).
+   *  Stores raw declared return type strings (e.g., 'User[]', 'List<User>').
+   *  Used by lookupRawReturnType for for-loop element extraction. */
+  importedRawReturnTypes?: ReadonlyMap<string, string>;
+  /** Language-specific enclosing function resolver for scope key lookup.
+   *  Same hook as LanguageProvider.enclosingFunctionFinder — handles languages
+   *  where function_body is a sibling of the signature (e.g., Dart). */
+  enclosingFunctionFinder?: (
+    ancestorNode: SyntaxNode,
+  ) => { funcName: string; label: NodeLabel } | null;
+  /** Language-specific function name extraction from an AST node.
+   *  Replaces the generic name-field lookup for languages with non-standard
+   *  AST structures (C/C++ declarator unwrapping, Swift init/deinit, etc.).
+   *  When null is returned or not provided, falls back to node.childForFieldName('name')?.text. */
+  extractFunctionName?: (node: SyntaxNode) => { funcName: string | null; label: NodeLabel } | null;
+}
+
+/** Seed cross-file type bindings into the file scope.
+ *  MUST be called AFTER walk() completes so that local declarations
+ *  (Tier 0/1) always take precedence over imported bindings (first-writer-wins). */
+function seedImportedBindings(env: TypeEnv, importedBindings: ReadonlyMap<string, string>): void {
+  let fileEnv = env.get(FILE_SCOPE);
+  if (!fileEnv) {
+    fileEnv = new Map();
+    env.set(FILE_SCOPE, fileEnv);
+  }
+  for (const [name, type] of importedBindings) {
+    if (!fileEnv.has(name)) {
+      fileEnv.set(name, type);
+    }
+  }
+}
 
 export const buildTypeEnv = (
   tree: { rootNode: SyntaxNode },
   language: SupportedLanguages,
-  symbolTable?: SymbolTable,
+  options?: BuildTypeEnvOptions,
 ): TypeEnvironment => {
+  // Clear per-file memoization caches from the previous file.
+  enclosingClassNameCache.clear();
+  enclosingParentClassNameCache.clear();
+
+  const model = options?.model;
+  const parentMap = options?.parentMap;
+  const extractFuncNameHook = options?.extractFunctionName;
   const env: TypeEnv = new Map();
+  let flushed = false;
   const patternOverrides: PatternOverrides = new Map();
+  // Phase P: maps `scope\0varName` → constructor type when a declaration has BOTH
+  // a base type annotation AND a more specific constructor initializer.
+  // e.g., `Animal a = new Dog()` → constructorTypeMap.set('func@42\0a', 'Dog')
+  const constructorTypeMap = new Map<string, string>();
   const localClassNames = new Set<string>();
-  const classNames = createClassNameLookup(localClassNames, symbolTable);
-  const config = typeConfigs[language];
+  const classNames = createClassNameLookup(localClassNames, model);
+  const provider = getProvider(language);
+  const config = provider.typeConfig;
   const bindings: ConstructorBinding[] = [];
 
-  // Build ReturnTypeLookup from optional SymbolTable.
-  // Conservative: returns undefined when callee is ambiguous (0 or 2+ matches).
+  // Build ReturnTypeLookup: SymbolTable is authoritative when it has an unambiguous match.
+  // Cross-file importedReturnTypes are consulted ONLY when SymbolTable has 0 matches.
+  // Ambiguous (2+) → undefined, no cross-file fallback (conservative, local-first principle).
+  // Post-A4 Unit 4: callableByName no longer holds Method/Constructor, so
+  // for-loop binding inference must also consult methodsByName to find
+  // return types on class methods (e.g. `user.getItems()` iteration).
+  // Take `model` as an explicit argument so the non-null precondition
+  // is visible at the type level. Callers must enter these via an
+  // `if (model)` guard on their side and pass the narrowed reference.
+  const getCallableUnionCount = (m: SemanticModel, callee: string): number => {
+    return (
+      m.symbols.lookupCallableByName(callee).length + m.methods.lookupMethodByName(callee).length
+    );
+  };
+  const getFirstCallable = (m: SemanticModel, callee: string) => {
+    const free = m.symbols.lookupCallableByName(callee);
+    if (free.length > 0) return free[0];
+    const methods = m.methods.lookupMethodByName(callee);
+    return methods.length > 0 ? methods[0] : undefined;
+  };
+
   const returnTypeLookup: ReturnTypeLookup = {
     lookupReturnType(callee: string): string | undefined {
-      if (!symbolTable) return undefined;
-      if (isBuiltInOrNoise(callee)) return undefined;
-      const callables = symbolTable.lookupFuzzyCallable(callee);
-      if (callables.length !== 1) return undefined;
-      const rawReturn = callables[0].returnType;
-      if (!rawReturn) return undefined;
-      return extractReturnTypeName(rawReturn);
+      // SymbolTable is authoritative when it has an unambiguous match
+      if (model) {
+        if (provider.isBuiltInName(callee)) return undefined;
+        const count = getCallableUnionCount(model, callee);
+        if (count === 1) {
+          const rawReturn = getFirstCallable(model, callee)?.returnType;
+          if (rawReturn) return extractReturnTypeName(rawReturn);
+        }
+        // Ambiguous (2+) → return undefined (conservative, no cross-file fallback)
+        if (count > 1) return undefined;
+      }
+      // No match (0 results or no symbolTable) → fall back to cross-file
+      return options?.importedReturnTypes?.get(callee);
     },
     lookupRawReturnType(callee: string): string | undefined {
-      if (!symbolTable) return undefined;
-      if (isBuiltInOrNoise(callee)) return undefined;
-      const callables = symbolTable.lookupFuzzyCallable(callee);
-      if (callables.length !== 1) return undefined;
-      return callables[0].returnType;
-    }
+      if (model) {
+        if (provider.isBuiltInName(callee)) return undefined;
+        const count = getCallableUnionCount(model, callee);
+        if (count === 1) return getFirstCallable(model, callee)?.returnType;
+        // Ambiguous (2+) → return undefined (conservative, no cross-file fallback)
+        if (count > 1) return undefined;
+      }
+      // Cross-file fallback uses importedRawReturnTypes (raw declared types, e.g., 'User[]')
+      // NOT importedReturnTypes (which contains processed/simple types via extractReturnTypeName)
+      return options?.importedRawReturnTypes?.get(callee);
+    },
   };
 
   // Pre-compute combined set of node types that need extractTypeBinding.
   // Single Set.has() replaces 3 separate checks per node in walk().
   const interestingNodeTypes = new Set<string>();
-  TYPED_PARAMETER_TYPES.forEach(t => interestingNodeTypes.add(t));
-  config.declarationNodeTypes.forEach(t => interestingNodeTypes.add(t));
-  config.forLoopNodeTypes?.forEach(t => interestingNodeTypes.add(t));
-  // Tier 2: copy-propagation (`const b = a`) and call-result propagation (`const b = foo()`)
-  const pendingCopies: Array<{ scope: string; lhs: string; rhs: string }> = [];
-  // NOTE: Infrastructure-ready — no language extractor currently returns { kind: 'callResult' }
-  // from extractPendingAssignment. When one does, this array will bind variables to their
-  // function return types at TypeEnv build time. See PendingAssignment in types.ts.
-  const pendingCallResults: Array<{ scope: string; lhs: string; callee: string }> = [];
+  TYPED_PARAMETER_TYPES.forEach((t) => interestingNodeTypes.add(t));
+  config.declarationNodeTypes.forEach((t) => interestingNodeTypes.add(t));
+  config.forLoopNodeTypes?.forEach((t) => interestingNodeTypes.add(t));
+  // Tier 2: unified fixpoint propagation — collects copy, callResult, fieldAccess, and
+  // methodCallResult items during walk(), then iterates until no new bindings are produced.
+  // Handles arbitrary-depth mixed chains: callResult → fieldAccess → methodCallResult → copy.
+  const pendingItems: Array<{ scope: string } & PendingAssignment> = [];
+  // For-loop nodes whose iterable was unresolved at walk-time. Replayed after the fixpoint
+  // resolves the iterable's type, bridging the walk-time/fixpoint gap (Phase 10 / ex-9B).
+  const pendingForLoops: Array<{ node: SyntaxNode; scope: string }> = [];
   // Maps `scope\0varName` → the type annotation AST node from the original declaration.
   // Allows pattern extractors to navigate back to the declaration's generic type arguments
   // (e.g., to extract T from Result<T, E> for `if let Ok(x) = res`).
@@ -429,17 +935,24 @@ export const buildTypeEnv = (
    * retrieve generic type arguments from the original declaration (e.g., extracting T
    * from Result<T, E> for `if let Ok(x) = res`).
    */
-  const extractTypeBinding = (node: SyntaxNode, scopeEnv: Map<string, string>, scope: string): void => {
+  const extractTypeBinding = (
+    node: SyntaxNode,
+    scopeEnv: Map<string, string>,
+    scope: string,
+  ): void => {
     // This guard eliminates 90%+ of calls before any language dispatch.
     if (TYPED_PARAMETER_TYPES.has(node.type)) {
       // Capture the raw type annotation BEFORE extractParameter.
       // Most languages use 'name' field; Rust uses 'pattern'; TS uses 'pattern' for some param types.
       // Kotlin `parameter` nodes use positional children instead of named fields,
       // so we fall back to scanning children by type when childForFieldName returns null.
-      let typeNode = node.childForFieldName('type');
+      const typeNode = node.childForFieldName('type');
       if (typeNode) {
-        const nameNode = node.childForFieldName('name')
-          ?? node.childForFieldName('pattern');
+        const nameNode =
+          node.childForFieldName('name') ??
+          node.childForFieldName('pattern') ??
+          // Python typed_parameter: name is a positional child (identifier), not a named field
+          (node.firstNamedChild?.type === 'identifier' ? node.firstNamedChild : null);
         if (nameNode) {
           const varName = extractVarName(nameNode);
           if (varName && !declarationTypeNodes.has(`${scope}\0${varName}`)) {
@@ -453,11 +966,20 @@ export const buildTypeEnv = (
         for (let i = 0; i < node.namedChildCount; i++) {
           const child = node.namedChild(i);
           if (!child) continue;
-          if (!fallbackName && (child.type === 'simple_identifier' || child.type === 'identifier')) {
+          if (
+            !fallbackName &&
+            (child.type === 'simple_identifier' || child.type === 'identifier')
+          ) {
             fallbackName = child;
           }
-          if (!fallbackType && (child.type === 'user_type' || child.type === 'type_identifier'
-            || child.type === 'generic_type' || child.type === 'parameterized_type')) {
+          if (
+            !fallbackType &&
+            (child.type === 'user_type' ||
+              child.type === 'type_identifier' ||
+              child.type === 'generic_type' ||
+              child.type === 'parameterized_type' ||
+              child.type === 'nullable_type')
+          ) {
             fallbackType = child;
           }
         }
@@ -475,8 +997,19 @@ export const buildTypeEnv = (
     // Checked before declarationNodeTypes — loop variables are not declarations.
     if (config.forLoopNodeTypes?.has(node.type)) {
       if (config.extractForLoopBinding) {
-        const forLoopCtx: ForLoopExtractorContext = { scopeEnv, declarationTypeNodes, scope, returnTypeLookup };
+        const sizeBefore = scopeEnv.size;
+        const forLoopCtx: ForLoopExtractorContext = {
+          scopeEnv,
+          declarationTypeNodes,
+          scope,
+          returnTypeLookup,
+        };
         config.extractForLoopBinding(node, forLoopCtx);
+        // If no new binding was produced, the iterable's type may not yet be resolved.
+        // Store for post-fixpoint replay (Phase 10 / ex-9B loop-fixpoint bridge).
+        if (scopeEnv.size === sizeBefore) {
+          pendingForLoops.push({ node, scope });
+        }
       }
       return;
     }
@@ -485,26 +1018,27 @@ export const buildTypeEnv = (
       // This decouples type node capture from scopeEnv success — container types
       // (User[], []User, List[User]) that fail extractSimpleTypeName still get
       // their AST type node recorded for Strategy 1 for-loop resolution.
-      // Try direct extraction first (works for Go var_spec, Python assignment, Rust let_declaration).
-      // Try direct type field first, then unwrap wrapper nodes (C# field_declaration,
-      // local_declaration_statement wrap their type inside a variable_declaration child).
-      let typeNode = node.childForFieldName('type');
+      //
+      // Prefer language-specific locator when provided (keeps buildTypeEnv generic),
+      // then fall back to a small set of safe, cross-grammar heuristics.
+      let typeNode =
+        config.getDeclarationTypeNode?.(node) ?? node.childForFieldName('type') ?? null;
+      // Fallback: some grammars wrap type annotations in a `type_annotation` child
+      // instead of exposing a named `type` field on the declaration node.
       if (!typeNode) {
-        // C# field_declaration / local_declaration_statement wrap type inside variable_declaration.
-        // Use manual loop instead of namedChildren.find() to avoid array allocation on hot path.
-        let wrapped = node.childForFieldName('declaration');
-        if (!wrapped) {
-          for (let i = 0; i < node.namedChildCount; i++) {
-            const c = node.namedChild(i);
-            if (c?.type === 'variable_declaration') { wrapped = c; break; }
+        for (let i = 0; i < node.namedChildCount; i++) {
+          const c = node.namedChild(i);
+          if (c?.type === 'type_annotation') {
+            typeNode = c.firstNamedChild ?? c;
+            break;
           }
         }
-        if (wrapped) typeNode = wrapped.childForFieldName('type');
       }
       if (typeNode) {
-        const nameNode = node.childForFieldName('name')
-          ?? node.childForFieldName('left')
-          ?? node.childForFieldName('pattern');
+        const nameNode =
+          node.childForFieldName('name') ??
+          node.childForFieldName('left') ??
+          node.childForFieldName('pattern');
         if (nameNode) {
           const varName = extractVarName(nameNode);
           if (varName && !declarationTypeNodes.has(`${scope}\0${varName}`)) {
@@ -513,13 +1047,20 @@ export const buildTypeEnv = (
         }
       }
       // Run the language-specific declaration extractor (may or may not add to scopeEnv).
-      const keysBefore = typeNode ? new Set(scopeEnv.keys()) : undefined;
+      const sizeBefore = typeNode ? scopeEnv.size : -1;
       config.extractDeclaration(node, scopeEnv);
       // Fallback: for multi-declarator languages (TS, C#, Java) where the type field
-      // is on variable_declarator children, capture via keysBefore/keysAfter diff.
-      if (typeNode && keysBefore) {
+      // is on variable_declarator children, capture newly-added keys.
+      // Map preserves insertion order, so new keys are always at the end —
+      // skip the first sizeBefore entries to find only newly-added variables.
+      if (sizeBefore >= 0 && scopeEnv.size > sizeBefore) {
+        let skip = sizeBefore;
         for (const varName of scopeEnv.keys()) {
-          if (!keysBefore.has(varName) && !declarationTypeNodes.has(`${scope}\0${varName}`)) {
+          if (skip > 0) {
+            skip--;
+            continue;
+          }
+          if (!declarationTypeNodes.has(`${scope}\0${varName}`)) {
             declarationTypeNodes.set(`${scope}\0${varName}`, typeNode);
           }
         }
@@ -531,10 +1072,43 @@ export const buildTypeEnv = (
       if (config.extractInitializer) {
         config.extractInitializer(node, scopeEnv, classNames);
       }
+
+      // Phase P: detect constructor-visible virtual dispatch.
+      // When a declaration has BOTH a type annotation AND a constructor initializer,
+      // record the constructor type for receiver override at call resolution time.
+      // e.g., `Animal a = new Dog()` → constructorTypeMap.set('scope\0a', 'Dog')
+      if (sizeBefore >= 0 && scopeEnv.size > sizeBefore) {
+        let ctorSkip = sizeBefore;
+        for (const varName of scopeEnv.keys()) {
+          if (ctorSkip > 0) {
+            ctorSkip--;
+            continue;
+          }
+          const declaredType = scopeEnv.get(varName);
+          if (!declaredType) continue;
+          const ctorType =
+            extractConstructorTypeName(node) ?? config.detectConstructorType?.(node, classNames);
+          if (!ctorType || ctorType === declaredType) continue;
+          // Unwrap wrapper types (e.g., C++ shared_ptr<Animal> → Animal) for an
+          // accurate isSubclassOf comparison. Language-specific via config hook.
+          const declTypeNode = declarationTypeNodes.get(`${scope}\0${varName}`);
+          const effectiveDeclaredType =
+            declTypeNode && config.unwrapDeclaredType
+              ? (config.unwrapDeclaredType(declaredType, declTypeNode) ?? declaredType)
+              : declaredType;
+          if (ctorType !== effectiveDeclaredType) {
+            constructorTypeMap.set(`${scope}\0${varName}`, ctorType);
+          }
+        }
+      }
     }
   };
 
-  const walk = (node: SyntaxNode, currentScope: string): void => {
+  const stack: Array<{ node: SyntaxNode; scope: string }> = [
+    { node: tree.rootNode, scope: FILE_SCOPE },
+  ];
+
+  const processNode = (node: SyntaxNode, currentScope: string): void => {
     // Fast skip: subtrees that can never contain type-relevant nodes (leaf-like literals).
     if (SKIP_SUBTREE_TYPES.has(node.type)) return;
 
@@ -543,15 +1117,14 @@ export const buildTypeEnv = (
     // Currently only C++ uses this locally; other languages rely on the SymbolTable path.
     if (CLASS_CONTAINER_TYPES.has(node.type)) {
       // Most languages use 'name' field; Kotlin uses a type_identifier child instead
-      const nameNode = node.childForFieldName('name')
-        ?? findTypeIdentifierChild(node);
+      const nameNode = node.childForFieldName('name') ?? findTypeIdentifierChild(node);
       if (nameNode) localClassNames.add(nameNode.text);
     }
 
     // Detect scope boundaries (function/method definitions)
     let scope = currentScope;
     if (FUNCTION_NODE_TYPES.has(node.type)) {
-      const { funcName } = extractFunctionName(node);
+      const funcName = extractFuncNameHook?.(node)?.funcName ?? genericFuncName(node);
       if (funcName) scope = `${funcName}@${node.startIndex}`;
     }
 
@@ -564,20 +1137,40 @@ export const buildTypeEnv = (
     }
 
     // Pattern binding extraction: handles constructs that introduce NEW typed variables
-    // via pattern matching (e.g. `if let Some(x) = opt`, `x instanceof T t`).
+    // via pattern matching (e.g. `if let Some(x) = opt`, `x instanceof T t`)
+    // or narrow existing variables within a branch (null-check narrowing).
     // Runs after Tier 0/1 so scopeEnv already contains the source variable's type.
     // Conservative: extractor returns undefined when source type is unknown.
-    if (config.extractPatternBinding && (!config.patternBindingNodeTypes || config.patternBindingNodeTypes.has(node.type))) {
+    if (
+      config.extractPatternBinding &&
+      (!config.patternBindingNodeTypes || config.patternBindingNodeTypes.has(node.type))
+    ) {
       // Ensure scopeEnv exists for pattern binding reads/writes
       if (!env.has(scope)) env.set(scope, new Map());
       const scopeEnv = env.get(scope)!;
-      const patternBinding = config.extractPatternBinding(node, scopeEnv, declarationTypeNodes, scope);
+      const patternBinding = config.extractPatternBinding(
+        node,
+        scopeEnv,
+        declarationTypeNodes,
+        scope,
+      );
       if (patternBinding) {
-        if (config.allowPatternBindingOverwrite) {
+        if (patternBinding.narrowingRange) {
+          // Explicit narrowing range (null-check narrowing): always store in patternOverrides
+          // using the extractor-provided range (typically the if-body block).
+          if (!patternOverrides.has(scope)) patternOverrides.set(scope, new Map());
+          const varMap = patternOverrides.get(scope)!;
+          if (!varMap.has(patternBinding.varName)) varMap.set(patternBinding.varName, []);
+          varMap.get(patternBinding.varName)!.push({
+            rangeStart: patternBinding.narrowingRange.startIndex,
+            rangeEnd: patternBinding.narrowingRange.endIndex,
+            typeName: patternBinding.typeName,
+          });
+        } else if (config.allowPatternBindingOverwrite) {
           // Position-indexed: store per-branch binding for smart-cast narrowing.
           // Each when arm / switch case gets its own type for the variable,
           // preventing cross-arm contamination (e.g., Kotlin when/is).
-          const branchNode = findPatternBranchScope(node);
+          const branchNode = findNarrowingBranchScope(node);
           if (branchNode) {
             if (!patternOverrides.has(scope)) patternOverrides.set(scope, new Map());
             const varMap = patternOverrides.get(scope)!;
@@ -602,6 +1195,7 @@ export const buildTypeEnv = (
     // Delegates to per-language extractPendingAssignment — AST shapes differ widely
     // (JS uses variable_declarator/name/value, Rust uses let_declaration/pattern/value,
     // Python uses assignment/left/right, Go uses short_var_declaration/expression_list).
+    // May return a single item or an array (for destructuring: N fieldAccess items).
     if (config.extractPendingAssignment && config.declarationNodeTypes.has(node.type)) {
       // scopeEnv is guaranteed to exist here because declarationNodeTypes is a subset
       // of interestingNodeTypes, so extractTypeBinding already created the scope map above.
@@ -609,10 +1203,11 @@ export const buildTypeEnv = (
       if (scopeEnv) {
         const pending = config.extractPendingAssignment(node, scopeEnv);
         if (pending) {
-          if (pending.kind === 'copy') {
-            pendingCopies.push({ scope, lhs: pending.lhs, rhs: pending.rhs });
-          } else {
-            pendingCallResults.push({ scope, lhs: pending.lhs, callee: pending.callee });
+          const items = Array.isArray(pending) ? pending : [pending];
+          for (const item of items) {
+            // Substitute this/self/$this/Me receivers with enclosing class name
+            const resolved = substituteThisReceiver(item, node);
+            pendingItems.push({ scope, ...resolved });
           }
         }
       }
@@ -630,43 +1225,109 @@ export const buildTypeEnv = (
       }
     }
 
-    // Recurse into children
-    for (let i = 0; i < node.childCount; i++) {
+    // Push children onto stack (reverse order so first child is processed first)
+    for (let i = node.childCount - 1; i >= 0; i--) {
       const child = node.child(i);
-      if (child) walk(child, scope);
+      if (child) stack.push({ node: child, scope });
     }
   };
 
-  walk(tree.rootNode, FILE_SCOPE);
-
-  // Tier 2a: copy-propagation — `const b = a` where `a` has a known type from Tier 0/1.
-  // Multi-hop chains resolve when forward-declared (a→b→c in source order);
-  // reverse-order assignments are depth-1 only. No fixpoint iteration —
-  // this covers 95%+ of real-world patterns.
-  for (const { scope, lhs, rhs } of pendingCopies) {
-    const scopeEnv = env.get(scope);
-    if (!scopeEnv || scopeEnv.has(lhs)) continue;
-    const rhsType = scopeEnv.get(rhs) ?? env.get(FILE_SCOPE)?.get(rhs);
-    if (rhsType) scopeEnv.set(lhs, rhsType);
+  // Iterative traversal using explicit stack instead of recursion
+  // to avoid "Maximum call stack size exceeded" on large files (2000+ lines)
+  while (stack.length > 0) {
+    const { node, scope } = stack.pop()!;
+    processNode(node, scope);
   }
 
-  // Tier 2b: call-result propagation — `const b = foo()` where `foo` has a declared return type.
-  // Uses ReturnTypeLookup which is backed by SymbolTable.lookupFuzzyCallable.
-  // Conservative: only binds when exactly one callable matches (avoids overload ambiguity).
-  // NOTE: Currently dormant — no extractPendingAssignment implementation emits 'callResult' yet.
-  // The loop is structurally complete and will activate when any language extractor starts
-  // returning { kind: 'callResult', lhs, callee } from extractPendingAssignment.
-  for (const { scope, lhs, callee } of pendingCallResults) {
-    const scopeEnv = env.get(scope);
-    if (!scopeEnv || scopeEnv.has(lhs)) continue;
-    const typeName = returnTypeLookup.lookupReturnType(callee);
-    if (typeName) scopeEnv.set(lhs, typeName);
+  // Phase 14: Seed cross-file bindings from upstream files AFTER walk
+  // (local declarations from walk() take precedence — first-writer-wins)
+  if (options?.importedBindings && options.importedBindings.size > 0) {
+    seedImportedBindings(env, options.importedBindings);
+  }
+
+  resolveFixpointBindings(pendingItems, env, returnTypeLookup, model, parentMap);
+
+  // Post-fixpoint for-loop replay (Phase 10 / ex-9B loop-fixpoint bridge):
+  // For-loop nodes whose iterables were unresolved at walk-time may now be
+  // resolvable because the fixpoint bound the iterable's type.
+  // Example: `const users = getUsers(); for (const u of users) { u.save(); }`
+  //   - walk-time: users untyped → u unresolved
+  //   - fixpoint: users → User[]
+  //   - replay: users now typed → u → User
+  if (pendingForLoops.length > 0 && config.extractForLoopBinding) {
+    for (const { node, scope } of pendingForLoops) {
+      if (!env.has(scope)) env.set(scope, new Map());
+      const scopeEnv = env.get(scope)!;
+      config.extractForLoopBinding(node, {
+        scopeEnv,
+        declarationTypeNodes,
+        scope,
+        returnTypeLookup,
+      });
+    }
+    // Re-run the main fixpoint to resolve items that depended on loop variables.
+    // Only needed if replay actually produced new bindings.
+    const unresolvedBefore = pendingItems.filter((item) => {
+      const scopeEnv = env.get(item.scope);
+      return scopeEnv && !scopeEnv.has(item.lhs);
+    });
+    if (unresolvedBefore.length > 0) {
+      resolveFixpointBindings(unresolvedBefore, env, returnTypeLookup, model);
+    }
   }
 
   return {
-    lookup: (varName, callNode) => lookupInEnv(env, varName, callNode, patternOverrides),
+    lookup: (varName, callNode) =>
+      lookupInEnv(
+        env,
+        varName,
+        callNode,
+        patternOverrides,
+        options?.enclosingFunctionFinder,
+        extractFuncNameHook,
+      ),
     constructorBindings: bindings,
-    env,
+    fileScope: () => env.get(FILE_SCOPE) ?? emptyFileScope(),
+    allScopes: () => env as ReadonlyMap<string, ReadonlyMap<string, string>>,
+    constructorTypeMap,
+    flush(filePath: string, accumulator: BindingAccumulator): void {
+      if (flushed) {
+        throw new Error(
+          `[TypeEnvironment] flush called twice for ${filePath} — flush is single-use`,
+        );
+      }
+      // Narrow flush() to iterate only the FILE_SCOPE entry, mirroring the
+      // worker-path narrowing in parse-worker.ts (commit 803631fe). Before
+      // this change, both execution paths had the same asymmetry bug: the
+      // worker path was fixed but the sequential path (this code) still
+      // wrote function-scope entries into long-lived accumulator storage
+      // that no consumer reads until Phase 9 lands.
+      //
+      // Phase 9 reversion: when a downstream consumer of function-scope
+      // bindings exists, restore the nested iteration:
+      //
+      //   for (const [scope, scopeMap] of env) {
+      //     for (const [varName, typeName] of scopeMap) {
+      //       entries.push({ scope, varName, typeName });
+      //     }
+      //   }
+      //
+      // See BindingAccumulator class JSDoc and FileScopeBindings JSDoc in
+      // parse-worker.ts for the full reversion checklist.
+      const fileScope = env.get(FILE_SCOPE) ?? emptyFileScope();
+      const entries: BindingEntry[] = [];
+      for (const [varName, typeName] of fileScope) {
+        entries.push({ scope: '', varName, typeName });
+      }
+      if (entries.length > 0) {
+        accumulator.appendFile(filePath, entries);
+      }
+      // Mark the env as flushed AFTER the successful append. If appendFile
+      // throws (e.g., accumulator is already finalized due to a lifecycle
+      // ordering bug), the caller can catch and retry — the single-use
+      // guard now tracks "data was written", not "flush was attempted".
+      flushed = true;
+    },
   };
 };
 

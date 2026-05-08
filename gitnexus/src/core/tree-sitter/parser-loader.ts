@@ -1,22 +1,11 @@
 import Parser from 'tree-sitter';
-import JavaScript from 'tree-sitter-javascript';
-import TypeScript from 'tree-sitter-typescript';
-import Python from 'tree-sitter-python';
-import Java from 'tree-sitter-java';
-import C from 'tree-sitter-c';
-import CPP from 'tree-sitter-cpp';
-import CSharp from 'tree-sitter-c-sharp';
-import Go from 'tree-sitter-go';
-import Rust from 'tree-sitter-rust';
-import PHP from 'tree-sitter-php';
-import Ruby from 'tree-sitter-ruby';
 import { createRequire } from 'node:module';
 import { SupportedLanguages } from '../../config/supported-languages.js';
 import { getTreeSitterBufferSize } from '../ingestion/constants.js';
 
 const _require = createRequire(import.meta.url);
 
-let parser: Parser | null = null;
+const ISSUES_URL = 'https://github.com/abhigyanpatwari/GitNexus/issues';
 
 const requiredLanguageMap: Record<string, any> = {
   [SupportedLanguages.JavaScript]: JavaScript,
@@ -91,15 +80,27 @@ const resolveLanguage = (key: string, language: SupportedLanguages): any | null 
 export const isLanguageAvailable = (language: SupportedLanguages): boolean =>
   language in requiredLanguageMap || isOptionalLanguageInstalled(language);
 
-export const loadParser = async (): Promise<Parser> => {
-  if (parser) return parser;
-  parser = new Parser();
-  return parser;
+const loadCache = new Map<string, LoadResult>();
+const logged = new Set<string>();
+
+const logFailure = (key: string, result: LoadResult): void => {
+  if (result.ok === true) return;
+  if (logged.has(key)) return;
+  logged.add(key);
+  const message = `[gitnexus] ${result.note} (${result.error.message})`;
+
+  // Severity routes to the correct pino level. Both go to stderr (pino's
+  // default destination), so MCP stdio framing is preserved either way —
+  // the level tag drives log filtering, not channel selection.
+  if (result.severity === 'error') {
+    logger.error(message);
+  } else {
+    logger.warn(message);
+  }
 };
 
-export const loadLanguage = async (language: SupportedLanguages, filePath?: string): Promise<void> => {
-  if (!parser) await loadParser();
-  const key = language === SupportedLanguages.TypeScript && filePath?.endsWith('.tsx')
+export const resolveLanguageKey = (language: SupportedLanguages, filePath?: string): string =>
+  language === SupportedLanguages.TypeScript && filePath?.endsWith('.tsx')
     ? `${language}:tsx`
     : language;
 
@@ -107,7 +108,58 @@ export const loadLanguage = async (language: SupportedLanguages, filePath?: stri
   if (!lang) {
     throw new Error(`Unsupported language: ${language}`);
   }
-  parser!.setLanguage(lang);
+
+  let result: LoadResult;
+  try {
+    result = { ok: true, grammar: source.load() };
+  } catch (err) {
+    const fatal = !source.optional;
+    result = {
+      ok: false,
+      error: err as Error,
+      note: source.unavailableNote,
+      fatal,
+      severity: source.severity ?? (fatal ? 'error' : 'warn'),
+    };
+  }
+  loadCache.set(key, result);
+  if (result.ok === false) logFailure(key, result);
+  return result;
+};
+
+export const isLanguageAvailable = (language: SupportedLanguages, filePath?: string): boolean =>
+  loadGrammar(resolveLanguageKey(language, filePath)).ok;
+
+export const getLanguageGrammar = (language: SupportedLanguages, filePath?: string): unknown => {
+  const key = resolveLanguageKey(language, filePath);
+  const result = loadGrammar(key);
+  if (result.ok === true) return result.grammar;
+  // Fatal failures throw the original underlying error (preserving stack)
+  // after the note has been logged. Optional failures fall through to the
+  // standard "Unsupported language" message that callers already handle.
+  if (result.fatal) throw result.error;
+  throw new Error(`Unsupported language: ${language}`);
+};
+
+let sharedParser: Parser | null = null;
+
+export const loadParser = async (): Promise<Parser> => (sharedParser ??= new Parser());
+
+export const loadLanguage = async (
+  language: SupportedLanguages,
+  filePath?: string,
+): Promise<void> => {
+  const parser = await loadParser();
+  parser.setLanguage(getLanguageGrammar(language, filePath));
+};
+
+export const createParserForLanguage = async (
+  language: SupportedLanguages,
+  filePath?: string,
+): Promise<Parser> => {
+  const parser = new Parser();
+  parser.setLanguage(getLanguageGrammar(language, filePath));
+  return parser;
 };
 
 /**

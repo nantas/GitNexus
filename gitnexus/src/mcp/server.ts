@@ -24,6 +24,7 @@ import {
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { GITNEXUS_TOOLS } from './tools.js';
+import { installGlobalStdoutSentinel } from './stdio-context.js';
 import type { LocalBackend } from './local/local-backend.js';
 import { getResourceDefinitions, getResourceTemplates, readResource } from './resources.js';
 
@@ -94,14 +95,14 @@ export function createMCPServer(backend: LocalBackend): Server {
         resources: {},
         prompts: {},
       },
-    }
+    },
   );
 
   // Handle list resources request
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const resources = getResourceDefinitions();
     return {
-      resources: resources.map(r => ({
+      resources: resources.map((r) => ({
         uri: r.uri,
         name: r.name,
         description: r.description,
@@ -114,7 +115,7 @@ export function createMCPServer(backend: LocalBackend): Server {
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
     const templates = getResourceTemplates();
     return {
-      resourceTemplates: templates.map(t => ({
+      resourceTemplates: templates.map((t) => ({
         uriTemplate: t.uriTemplate,
         name: t.name,
         description: t.description,
@@ -151,13 +152,13 @@ export function createMCPServer(backend: LocalBackend): Server {
     }
   });
 
-
   // Handle list tools request
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: GITNEXUS_TOOLS.map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema,
+      annotations: tool.annotations,
     })),
   }));
 
@@ -197,17 +198,27 @@ export function createMCPServer(backend: LocalBackend): Server {
     prompts: [
       {
         name: 'detect_impact',
-        description: 'Analyze the impact of your current changes before committing. Guides through scope selection, change detection, process analysis, and risk assessment.',
+        description:
+          'Analyze the impact of your current changes before committing. Guides through scope selection, change detection, process analysis, and risk assessment.',
         arguments: [
-          { name: 'scope', description: 'What to analyze: unstaged, staged, all, or compare', required: false },
+          {
+            name: 'scope',
+            description: 'What to analyze: unstaged, staged, all, or compare',
+            required: false,
+          },
           { name: 'base_ref', description: 'Branch/commit for compare scope', required: false },
         ],
       },
       {
         name: 'generate_map',
-        description: 'Generate architecture documentation from the knowledge graph. Creates a codebase overview with execution flows and mermaid diagrams.',
+        description:
+          'Generate architecture documentation from the knowledge graph. Creates a codebase overview with execution flows and mermaid diagrams.',
         arguments: [
-          { name: 'repo', description: 'Repository name (omit if only one indexed)', required: false },
+          {
+            name: 'repo',
+            description: 'Repository name (omit if only one indexed)',
+            required: false,
+          },
         ],
       },
     ],
@@ -276,23 +287,66 @@ Follow these steps:
 export async function startMCPServer(backend: LocalBackend): Promise<void> {
   const server = createMCPServer(backend);
 
-  // Connect to stdio transport
-  const transport = new CompatibleStdioServerTransport();
+  // Idempotent global sentinel install. cli/mcp.ts calls this first thing
+  // (before warnMissingOptionalGrammars / backend.init can emit to stdout);
+  // calling again here is a safety net for direct callers of startMCPServer
+  // (tests, future entry points). The transport's _safeStdout Proxy is a
+  // second layer that guarantees transport writes reach the sentinel even
+  // if anything else re-replaces process.stdout.write later. Tagged
+  // transport writes (wrapped in withMcpWrite by compatible-stdio-transport.send)
+  // pass through to the captured realStdoutWrite; untagged writes reaching
+  // the Proxy or process.stdout get redirected to stderr with the
+  // [mcp:stdout-redirect] prefix. See stdio-context.ts.
+  const sentinel = installGlobalStdoutSentinel();
+  const safeStdout = new Proxy(process.stdout, {
+    get(target, prop, receiver) {
+      if (prop === 'write') return sentinel.write;
+      const val = Reflect.get(target, prop, receiver);
+      return typeof val === 'function' ? val.bind(target) : val;
+    },
+  });
+  const transport = new CompatibleStdioServerTransport(process.stdin, safeStdout);
   await server.connect(transport);
 
-  // Graceful shutdown helper
+  // Surface the redirect counter on shutdown so users see the volume of
+  // stray writes even when individual payloads were truncated/suppressed.
+  process.on('exit', () => sentinel.flushSummary());
+
+  // Graceful shutdown helper. Pino's default destination is `sync: false`
+  // (buffered), so we must `flushLoggerSync()` before `process.exit` —
+  // otherwise records emitted during disconnect/close are lost. The flush
+  // is a no-op when the singleton was never used or when running under
+  // vitest. See `gitnexus/src/core/logger.ts`.
   let shuttingDown = false;
-  const shutdown = async () => {
+  const shutdown = async (exitCode = 0) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    try { await backend.disconnect(); } catch {}
-    try { await server.close(); } catch {}
-    process.exit(0);
+    try {
+      await backend.disconnect();
+    } catch {}
+    try {
+      await server.close();
+    } catch {}
+    const { flushLoggerSync } = await import('../core/logger.js');
+    flushLoggerSync();
+    process.exit(exitCode);
   };
 
   // Handle graceful shutdown
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  // Log crashes to stderr so they aren't silently lost.
+  // uncaughtException is fatal — shut down.
+  // unhandledRejection is logged but kept non-fatal (availability-first):
+  // killing the server for one missed catch would be worse than logging it.
+  process.on('uncaughtException', (err) => {
+    process.stderr.write(`GitNexus MCP uncaughtException: ${err?.stack || err}\n`);
+    shutdown(1);
+  });
+  process.on('unhandledRejection', (reason: any) => {
+    process.stderr.write(`GitNexus MCP unhandledRejection: ${reason?.stack || reason}\n`);
+  });
 
   // Handle stdio errors — stdin close means the parent process is gone
   process.stdin.on('end', shutdown);

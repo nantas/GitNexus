@@ -64,14 +64,73 @@ function readInput() {
  * Find the .gitnexus directory by walking up from startDir.
  * Returns the path to .gitnexus/ or null if not found.
  */
-function findGitNexusDir(startDir) {
-  let dir = startDir || process.cwd();
+function isGlobalRegistryDir(candidate) {
+  if (fs.existsSync(path.join(candidate, 'meta.json'))) return false;
+  return (
+    fs.existsSync(path.join(candidate, 'registry.json')) ||
+    fs.existsSync(path.join(candidate, 'repos'))
+  );
+}
+
+/**
+ * Walk up from `startDir` looking for a non-registry `.gitnexus/` folder.
+ * Returns the path to `.gitnexus/` or null if not found within 5 levels.
+ */
+function walkForGitNexusDir(startDir) {
+  let dir = startDir;
   for (let i = 0; i < 5; i++) {
     const candidate = path.join(dir, '.gitnexus');
-    if (fs.existsSync(candidate)) return candidate;
+    if (fs.existsSync(candidate)) {
+      if (!isGlobalRegistryDir(candidate)) return candidate;
+    }
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
+  }
+  return null;
+}
+
+/**
+ * Resolve the canonical (main) worktree root for `cwd`, when `cwd` is inside
+ * any git working tree — including a *linked* worktree created via
+ * `git worktree add`. Linked worktrees never contain `.gitnexus/`, so the
+ * upward walk from cwd alone misses the index. Returns null when `cwd` is
+ * not inside a git repo or `git` is not available.
+ *
+ * Implementation: `git rev-parse --git-common-dir` resolves to the canonical
+ * `.git/` directory (or `.git/worktrees/...` parent) that is shared across
+ * all linked worktrees. The canonical repo root is its parent directory.
+ */
+function findCanonicalRepoRoot(cwd) {
+  try {
+    const result = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+      encoding: 'utf-8',
+      timeout: 2000,
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    if (result.error || result.status !== 0) return null;
+    const commonDir = (result.stdout || '').trim();
+    if (!commonDir || !path.isAbsolute(commonDir)) return null;
+    return path.dirname(commonDir);
+  } catch {
+    return null;
+  }
+}
+
+function findGitNexusDir(startDir) {
+  const cwd = startDir || process.cwd();
+
+  // Fast path: the cwd is inside the canonical repo (most common case).
+  const fromCwd = walkForGitNexusDir(cwd);
+  if (fromCwd) return fromCwd;
+
+  // Fallback: cwd may be inside a linked git worktree whose `.gitnexus/`
+  // only lives in the canonical repo root. Resolve the shared git dir
+  // and retry from there.
+  const canonicalRoot = findCanonicalRepoRoot(cwd);
+  if (canonicalRoot && canonicalRoot !== cwd) {
+    return walkForGitNexusDir(canonicalRoot);
   }
   return null;
 }
@@ -97,10 +156,26 @@ function extractPattern(toolName, toolInput) {
     const tokens = cmd.split(/\s+/);
     let foundCmd = false;
     let skipNext = false;
-    const flagsWithValues = new Set(['-e', '-f', '-m', '-A', '-B', '-C', '-g', '--glob', '-t', '--type', '--include', '--exclude']);
+    const flagsWithValues = new Set([
+      '-e',
+      '-f',
+      '-m',
+      '-A',
+      '-B',
+      '-C',
+      '-g',
+      '--glob',
+      '-t',
+      '--type',
+      '--include',
+      '--exclude',
+    ]);
 
     for (const token of tokens) {
-      if (skipNext) { skipNext = false; continue; }
+      if (skipNext) {
+        skipNext = false;
+        continue;
+      }
       if (!foundCmd) {
         if (/\brg$|\bgrep$/.test(token)) foundCmd = true;
         continue;
@@ -131,18 +206,23 @@ function runGitNexusCli(args, cwd, timeout, npxSpec) {
   // Detect whether 'gitnexus' is on PATH (cheap check, no execution)
   let useDirectBinary = false;
   try {
-    const which = spawnSync(
-      isWin ? 'where' : 'which', ['gitnexus'],
-      { encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }
-    );
+    const which = spawnSync(isWin ? 'where' : 'which', ['gitnexus'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     useDirectBinary = which.status === 0;
-  } catch { /* not on PATH */ }
+  } catch {
+    /* not on PATH */
+  }
 
   if (useDirectBinary) {
-    return spawnSync(
-      isWin ? 'gitnexus.cmd' : 'gitnexus', args,
-      { encoding: 'utf-8', timeout, cwd, stdio: ['pipe', 'pipe', 'pipe'] }
-    );
+    return spawnSync(isWin ? 'gitnexus.cmd' : 'gitnexus', args, {
+      encoding: 'utf-8',
+      timeout,
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
   }
   if (!npxSpec) return null;
   // npx fallback needs shell on Windows since npx is a .cmd script
@@ -156,9 +236,11 @@ function runGitNexusCli(args, cwd, timeout, npxSpec) {
  * Emit a hook response with additional context for the agent.
  */
 function sendHookResponse(hookEventName, message) {
-  console.log(JSON.stringify({
-    hookSpecificOutput: { hookEventName, additionalContext: message }
-  }));
+  console.log(
+    JSON.stringify({
+      hookSpecificOutput: { hookEventName, additionalContext: message },
+    }),
+  );
 }
 
 /**
@@ -184,7 +266,9 @@ function handlePreToolUse(input) {
     if (child && !child.error && child.status === 0) {
       result = child.stderr || '';
     }
-  } catch { /* graceful failure */ }
+  } catch {
+    /* graceful failure */
+  }
 
   if (result && result.trim()) {
     sendHookResponse('PreToolUse', result.trim());
@@ -220,10 +304,15 @@ function handlePostToolUse(input) {
   let currentHead = '';
   try {
     const headResult = spawnSync('git', ['rev-parse', 'HEAD'], {
-      encoding: 'utf-8', timeout: 3000, cwd, stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+      timeout: 3000,
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
     currentHead = (headResult.stdout || '').trim();
-  } catch { return; }
+  } catch {
+    return;
+  }
 
   if (!currentHead) return;
 
@@ -232,8 +321,10 @@ function handlePostToolUse(input) {
   try {
     const meta = JSON.parse(fs.readFileSync(path.join(gitNexusDir, 'meta.json'), 'utf-8'));
     lastCommit = meta.lastCommit || '';
-    hadEmbeddings = (meta.stats && meta.stats.embeddings > 0);
-  } catch { /* no meta — treat as stale */ }
+    hadEmbeddings = meta.stats && meta.stats.embeddings > 0;
+  } catch {
+    /* no meta — treat as stale */
+  }
 
   // If HEAD matches last indexed commit, no reindex needed
   if (currentHead && currentHead === lastCommit) return;

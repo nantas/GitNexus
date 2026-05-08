@@ -1,16 +1,12 @@
 /**
- * LadybugDB Adapter (Connection Pool)
+ * LadybugDB connection pool — re-exported from core.
  *
- * Manages a pool of LadybugDB databases keyed by repoId, each with
- * multiple Connection objects for safe concurrent query execution.
- *
- * LadybugDB Connections are NOT thread-safe — a single Connection
- * segfaults if concurrent .query() calls hit it simultaneously.
- * This adapter provides a checkout/return connection pool so each
- * concurrent query gets its own Connection from the same Database.
- *
- * @see https://docs.ladybugdb.com/concurrency — multiple Connections
- * from the same Database is the officially supported concurrency pattern.
+ * KEEP THIS FILE. It is intentionally a shim re-export of
+ * `../../core/lbug/pool-adapter.js`. The MCP test suite uses this path as
+ * a vi.mock seam so unit tests can stub LadybugDB without affecting other
+ * importers of `core/lbug/pool-adapter.js` (which is shared with the
+ * analyze pipeline). New non-test code MAY import from `pool-adapter.js`
+ * directly, but the shim must continue to exist for the mock seam to work.
  */
 
 import fs from 'fs/promises';

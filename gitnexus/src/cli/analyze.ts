@@ -2,6 +2,10 @@
  * Analyze Command
  *
  * Indexes a repository and stores the knowledge graph in .gitnexus/
+ *
+ * Delegates core analysis to the shared runFullAnalysis orchestrator.
+ * This CLI wrapper handles: heap management, progress bar, SIGINT,
+ * skill generation (--skills), summary output, and process.exit().
  */
 
 import path from 'path';
@@ -34,8 +38,11 @@ import type { UnityParitySeed } from '../core/ingestion/unity-parity-seed.js';
 
 const HEAP_MB = 8192;
 const HEAP_FLAG = `--max-old-space-size=${HEAP_MB}`;
+/** Increase default stack size (KB) to prevent stack overflow on deep class hierarchies. */
+const STACK_KB = 4096;
+const STACK_FLAG = `--stack-size=${STACK_KB}`;
 
-/** Re-exec the process with an 8GB heap if we're currently below that. */
+/** Re-exec the process with an 8GB heap and larger stack if we're currently below that. */
 function ensureHeap(): boolean {
   const nodeOpts = process.env.NODE_OPTIONS || '';
   if (nodeOpts.includes('--max-old-space-size')) return false;
@@ -43,8 +50,13 @@ function ensureHeap(): boolean {
   const v8Heap = v8.getHeapStatistics().heap_size_limit;
   if (v8Heap >= HEAP_MB * 1024 * 1024 * 0.9) return false;
 
+  // --stack-size is a V8 flag not allowed in NODE_OPTIONS on Node 24+,
+  // so pass it only as a direct CLI argument, not via the environment.
+  const cliFlags = [HEAP_FLAG];
+  if (!nodeOpts.includes('--stack-size')) cliFlags.push(STACK_FLAG);
+
   try {
-    execFileSync(process.execPath, [HEAP_FLAG, ...process.argv.slice(1)], {
+    execFileSync(process.execPath, [...cliFlags, ...process.argv.slice(1)], {
       stdio: 'inherit',
       env: { ...process.env, NODE_OPTIONS: `${nodeOpts} ${HEAP_FLAG}`.trim() },
     });
@@ -67,35 +79,132 @@ export interface AnalyzeOptions {
   reuseOptions?: boolean;
   skills?: boolean;
   verbose?: boolean;
+  /** Skip AGENTS.md and CLAUDE.md gitnexus block updates. */
+  skipAgentsMd?: boolean;
+  /** Omit volatile symbol/relationship counts from AGENTS.md and CLAUDE.md. */
+  noStats?: boolean;
+  /** Index the folder even when no .git directory is present. */
+  skipGit?: boolean;
+  /**
+   * Override the default basename-derived registry `name` with a
+   * user-supplied alias (#829). Disambiguates repos whose paths share a
+   * basename. Persisted — subsequent re-analyses of the same path without
+   * `--name` preserve the alias.
+   */
+  name?: string;
+  /**
+   * Allow registration even when another path already uses the same
+   * `--name` alias (#829). Intentionally a distinct flag from `--force`
+   * because the user may want to coexist under the same name WITHOUT
+   * paying the cost of a pipeline re-index. Maps to registerRepo's
+   * `allowDuplicateName` option end-to-end.
+   */
+  allowDuplicateName?: boolean;
+  /**
+   * Override the walker's large-file skip threshold (#991). Value in KB;
+   * clamped downstream to the tree-sitter 32 MB ceiling. Sets
+   * `GITNEXUS_MAX_FILE_SIZE` for the rest of the pipeline.
+   */
+  maxFileSize?: string;
+  /** Override worker sub-batch idle timeout in seconds. */
+  workerTimeout?: string;
+  embeddingThreads?: string;
+  embeddingBatchSize?: string;
+  embeddingSubBatchSize?: string;
+  embeddingDevice?: string;
 }
 
-/** Threshold: auto-skip embeddings for repos with more nodes than this */
-const EMBEDDING_NODE_LIMIT = 50_000;
-
-const PHASE_LABELS: Record<string, string> = {
-  extracting: 'Scanning files',
-  structure: 'Building structure',
-  parsing: 'Parsing code',
-  imports: 'Resolving imports',
-  calls: 'Tracing calls',
-  heritage: 'Extracting inheritance',
-  communities: 'Detecting communities',
-  processes: 'Detecting processes',
-  complete: 'Pipeline complete',
-  lbug: 'Loading into LadybugDB',
-  fts: 'Creating search indexes',
-  embeddings: 'Generating embeddings',
-  done: 'Done',
-};
-
-export const analyzeCommand = async (
-  inputPath?: string,
-  options?: AnalyzeOptions
-) => {
+export const analyzeCommand = async (inputPath?: string, options?: AnalyzeOptions) => {
   if (ensureHeap()) return;
+
+  // Install fatal handlers immediately after re-exec resolution so any
+  // async error that escapes the try/catch below (#1169) surfaces with
+  // a stack trace and a non-zero exit code instead of a silent exit 0.
+  installFatalHandlers();
 
   if (options?.verbose) {
     process.env.GITNEXUS_VERBOSE = '1';
+  }
+
+  if (options?.maxFileSize) {
+    process.env.GITNEXUS_MAX_FILE_SIZE = options.maxFileSize;
+  }
+
+  if (options?.workerTimeout) {
+    const workerTimeoutSeconds = Number(options.workerTimeout);
+    if (!Number.isFinite(workerTimeoutSeconds) || workerTimeoutSeconds < 1) {
+      cliError('  --worker-timeout must be at least 1 second.\n');
+      process.exitCode = 1;
+      return;
+    }
+    process.env.GITNEXUS_WORKER_SUB_BATCH_TIMEOUT_MS = String(
+      Math.round(workerTimeoutSeconds * 1000),
+    );
+  }
+
+  // Parse `--embeddings [limit]`: `true` → default cap, string → numeric cap
+  // (0 disables the cap entirely). Validated up here so failures match the
+  // sibling-validation pattern (exit before bar.start() — otherwise
+  // process.exit() leaves the progress bar's hidden cursor uncleared).
+  let embeddingsNodeLimit: number | undefined;
+  if (typeof options?.embeddings === 'string') {
+    const parsed = Number(options.embeddings);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      cliError(
+        `  --embeddings expects a non-negative integer (got "${options.embeddings}"). ` +
+          `Pass 0 to disable the safety cap, or omit the value to keep the default.\n`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    embeddingsNodeLimit = parsed;
+  }
+  const embeddingsEnabled = !!options?.embeddings;
+
+  const setPositiveEnv = (
+    optionName: string,
+    envName: string,
+    value: string | undefined,
+  ): boolean => {
+    if (value === undefined) return true;
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      cliError(`  ${optionName} must be a positive integer.\n`);
+      process.exitCode = 1;
+      return false;
+    }
+    process.env[envName] = String(parsed);
+    return true;
+  };
+
+  if (
+    !setPositiveEnv(
+      '--embedding-threads',
+      'GITNEXUS_EMBEDDING_THREADS',
+      options?.embeddingThreads,
+    ) ||
+    !setPositiveEnv(
+      '--embedding-batch-size',
+      'GITNEXUS_EMBEDDING_BATCH_SIZE',
+      options?.embeddingBatchSize,
+    ) ||
+    !setPositiveEnv(
+      '--embedding-sub-batch-size',
+      'GITNEXUS_EMBEDDING_SUB_BATCH_SIZE',
+      options?.embeddingSubBatchSize,
+    )
+  ) {
+    return;
+  }
+
+  if (options?.embeddingDevice) {
+    const allowed = new Set(['auto', 'cpu', 'dml', 'cuda', 'wasm']);
+    if (!allowed.has(options.embeddingDevice)) {
+      cliError('  --embedding-device must be one of: auto, cpu, dml, cuda, wasm.\n');
+      process.exitCode = 1;
+      return;
+    }
+    process.env.GITNEXUS_EMBEDDING_DEVICE = options.embeddingDevice;
   }
 
   console.log('\n  GitNexus Analyzer\n');
@@ -103,29 +212,33 @@ export const analyzeCommand = async (
   let repoPath: string;
   if (inputPath) {
     repoPath = path.resolve(inputPath);
+  } else if (options?.skipGit) {
+    // --skip-git: treat cwd as the index root, do not walk up to a parent git repo.
+    repoPath = path.resolve(process.cwd());
   } else {
     const gitRoot = getGitRoot(process.cwd());
     if (!gitRoot) {
-      console.log('  Not inside a git repository\n');
+      console.log(
+        '  Not inside a git repository.\n  Tip: pass --skip-git to index any folder without a .git directory.\n',
+      );
       process.exitCode = 1;
       return;
     }
     repoPath = gitRoot;
   }
 
-  if (!isGitRepo(repoPath)) {
-    console.log('  Not a git repository\n');
+  const repoHasGit = hasGitDir(repoPath);
+  if (!repoHasGit && !options?.skipGit) {
+    console.log(
+      '  Not a git repository.\n  Tip: pass --skip-git to index any folder without a .git directory.\n',
+    );
     process.exitCode = 1;
     return;
   }
-
-  const { storagePath, lbugPath } = getStoragePaths(repoPath);
-
-  // Clean up stale KuzuDB files from before the LadybugDB migration.
-  // If kuzu existed but lbug doesn't, we're doing a migration re-index — say so.
-  const kuzuResult = await cleanupOldKuzuFiles(storagePath);
-  if (kuzuResult.found && kuzuResult.needsReindex) {
-    console.log('  Migrating from KuzuDB to LadybugDB — rebuilding index...\n');
+  if (!repoHasGit) {
+    console.log(
+      '  Warning: no .git directory found \u2014 commit-tracking and incremental updates disabled.\n',
+    );
   }
 
   const currentCommit = getCurrentCommit(repoPath);
@@ -197,64 +310,89 @@ export const analyzeCommand = async (
   }
 
   if (process.env.GITNEXUS_NO_GITIGNORE) {
-    console.log('  GITNEXUS_NO_GITIGNORE is set — skipping .gitignore (still reading .gitnexusignore)\n');
+    console.log(
+      '  GITNEXUS_NO_GITIGNORE is set — skipping .gitignore (still reading .gitnexusignore)\n',
+    );
   }
 
-  // Single progress bar for entire pipeline
-  const bar = new cliProgress.SingleBar({
-    format: '  {bar} {percentage}% | {phase}',
-    barCompleteChar: '\u2588',
-    barIncompleteChar: '\u2591',
-    hideCursor: true,
-    barGlue: '',
-    autopadding: true,
-    clearOnComplete: false,
-    stopOnComplete: false,
-  }, cliProgress.Presets.shades_grey);
+  const maxFileSizeBanner = getMaxFileSizeBannerMessage();
+  if (maxFileSizeBanner) {
+    console.log(`${maxFileSizeBanner}\n`);
+  }
+
+  // ── CLI progress bar setup ─────────────────────────────────────────
+  const bar = new cliProgress.SingleBar(
+    {
+      format: '  {bar} {percentage}% | {phase}',
+      barCompleteChar: '\u2588',
+      barIncompleteChar: '\u2591',
+      hideCursor: true,
+      barGlue: '',
+      autopadding: true,
+      clearOnComplete: false,
+      stopOnComplete: false,
+    },
+    cliProgress.Presets.shades_grey,
+  );
 
   bar.start(100, 0, { phase: 'Initializing...' });
 
-  // Graceful SIGINT handling — clean up resources and exit
+  // Graceful SIGINT handling. Pino's default destination is `sync: false`
+  // (buffered) — flush before exit so in-flight records reach stderr.
+  // See `gitnexus/src/core/logger.ts:flushLoggerSync`.
   let aborted = false;
   const sigintHandler = () => {
-    if (aborted) process.exit(1); // Second Ctrl-C: force exit
+    if (aborted) process.exit(1);
     aborted = true;
     bar.stop();
     console.log('\n  Interrupted — cleaning up...');
-    closeLbug().catch(() => {}).finally(() => process.exit(130));
+    closeLbug()
+      .catch(() => {})
+      .finally(async () => {
+        const { flushLoggerSync } = await import('../core/logger.js');
+        flushLoggerSync();
+        process.exit(130);
+      });
   };
   process.on('SIGINT', sigintHandler);
 
-  // Route all console output through bar.log() so the bar doesn't stamp itself
-  // multiple times when other code writes to stdout/stderr mid-render.
+  // Route console output through bar.log() to prevent progress bar corruption.
+  // This is a deliberate UI pattern (not a logging concern): analyze runs a
+  // long-lived progress bar on stdout; any concurrent console.* write would
+  // overwrite the bar mid-render. We capture originals, swap to barLog for
+  // the lifetime of the run, and restore on completion/error/SIGINT.
   const origLog = console.log.bind(console);
+  // eslint-disable-next-line no-console -- intentional console-routing for progress bar UX
   const origWarn = console.warn.bind(console);
+  // eslint-disable-next-line no-console -- intentional console-routing for progress bar UX
   const origError = console.error.bind(console);
+  let barCurrentValue = 0;
   const barLog = (...args: any[]) => {
-    // Clear the bar line, print the message, then let the next bar.update redraw
     process.stdout.write('\x1b[2K\r');
-    origLog(args.map(a => (typeof a === 'string' ? a : String(a))).join(' '));
+    origLog(args.map((a) => (typeof a === 'string' ? a : String(a))).join(' '));
+    bar.update(barCurrentValue);
   };
   console.log = barLog;
+  // eslint-disable-next-line no-console -- intentional console-routing for progress bar UX
   console.warn = barLog;
+  // eslint-disable-next-line no-console -- intentional console-routing for progress bar UX
   console.error = barLog;
 
-  // Track elapsed time per phase — both updateBar and the interval use the
-  // same format so they don't flicker against each other.
+  // Track elapsed time per phase
   let lastPhaseLabel = 'Initializing...';
   let phaseStart = Date.now();
 
-  /** Update bar with phase label + elapsed seconds (shown after 3s). */
   const updateBar = (value: number, phaseLabel: string) => {
-    if (phaseLabel !== lastPhaseLabel) { lastPhaseLabel = phaseLabel; phaseStart = Date.now(); }
+    barCurrentValue = value;
+    if (phaseLabel !== lastPhaseLabel) {
+      lastPhaseLabel = phaseLabel;
+      phaseStart = Date.now();
+    }
     const elapsed = Math.round((Date.now() - phaseStart) / 1000);
     const display = elapsed >= 3 ? `${phaseLabel} (${elapsed}s)` : phaseLabel;
     bar.update(value, { phase: display });
   };
 
-  // Tick elapsed seconds for phases with infrequent progress callbacks
-  // (e.g. CSV streaming, FTS indexing). Uses the same display format as
-  // updateBar so there's no flickering.
   const elapsedTimer = setInterval(() => {
     const elapsed = Math.round((Date.now() - phaseStart) / 1000);
     if (elapsed >= 3) {
@@ -262,7 +400,7 @@ export const analyzeCommand = async (
     }
   }, 1000);
 
-  const t0Global = Date.now();
+  const t0 = Date.now();
 
   // ── Cache embeddings from existing index before rebuild ────────────
   let cachedEmbeddingNodeIds = new Set<string>();
@@ -390,11 +528,7 @@ export const analyzeCommand = async (
         const label = progress.phase === 'loading-model' ? 'Loading embedding model...' : `Embedding ${progress.nodesProcessed || 0}/${progress.totalNodes || '?'}`;
         updateBar(scaled, label);
       },
-      {},
-      cachedEmbeddingNodeIds.size > 0 ? cachedEmbeddingNodeIds : undefined,
     );
-    embeddingTime = ((Date.now() - t0Emb) / 1000).toFixed(1);
-  }
 
   // ── Phase 5: Finalize (98–100%) ───────────────────────────────────
   updateBar(98, 'Saving metadata...');
@@ -440,7 +574,214 @@ export const analyzeCommand = async (
       const label = c.heuristicLabel || c.label || 'Unknown';
       groups.set(label, (groups.get(label) || 0) + c.symbolCount);
     }
-    aggregatedClusterCount = Array.from(groups.values()).filter(count => count >= 5).length;
+
+    // Post-finalize invariant (#1169): runFullAnalysis nominally writes
+    // meta.json and registers the repo, but on Windows it has been
+    // observed to return successfully with neither artifact present
+    // (banner-only output, exit 0). Verify both before declaring
+    // success so the silent-finalize state surfaces with a non-zero
+    // exit code and an actionable error instead of being mistaken for
+    // a healthy index.
+    await assertAnalysisFinalized(repoPath);
+
+    // Skill generation (CLI-only, uses pipeline result from analysis)
+    if (options?.skills && result.pipelineResult) {
+      updateBar(99, 'Generating skill files...');
+      try {
+        const { generateSkillFiles } = await import('./skill-gen.js');
+        const { generateAIContextFiles } = await import('./ai-context.js');
+        const skillResult = await generateSkillFiles(
+          repoPath,
+          result.repoName,
+          result.pipelineResult,
+        );
+        if (skillResult.skills.length > 0) {
+          barLog(`  Generated ${skillResult.skills.length} skill files`);
+          // Re-generate AI context files now that we have skill info
+          const s = result.stats;
+          const communityResult = result.pipelineResult?.communityResult;
+          let aggregatedClusterCount = 0;
+          if (communityResult?.communities) {
+            const groups = new Map<string, number>();
+            for (const c of communityResult.communities) {
+              const label = c.heuristicLabel || c.label || 'Unknown';
+              groups.set(label, (groups.get(label) || 0) + c.symbolCount);
+            }
+            aggregatedClusterCount = Array.from(groups.values()).filter(
+              (count: number) => count >= 5,
+            ).length;
+          }
+          const { storagePath: sp } = getStoragePaths(repoPath);
+          await generateAIContextFiles(
+            repoPath,
+            sp,
+            result.repoName,
+            {
+              files: s.files ?? 0,
+              nodes: s.nodes ?? 0,
+              edges: s.edges ?? 0,
+              communities: s.communities,
+              clusters: aggregatedClusterCount,
+              processes: s.processes,
+            },
+            skillResult.skills,
+            { skipAgentsMd: options?.skipAgentsMd, noStats: options?.noStats },
+          );
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    const totalTime = ((Date.now() - t0) / 1000).toFixed(1);
+
+    clearInterval(elapsedTimer);
+    process.removeListener('SIGINT', sigintHandler);
+
+    console.log = origLog;
+    // eslint-disable-next-line no-console -- restoring after intentional progress-bar routing
+    console.warn = origWarn;
+    // eslint-disable-next-line no-console -- restoring after intentional progress-bar routing
+    console.error = origError;
+
+    bar.update(100, { phase: 'Done' });
+    bar.stop();
+
+    // ── Summary ────────────────────────────────────────────────────
+    const s = result.stats;
+    console.log(`\n  Repository indexed successfully (${totalTime}s)\n`);
+    console.log(
+      `  ${(s.nodes ?? 0).toLocaleString()} nodes | ${(s.edges ?? 0).toLocaleString()} edges | ${s.communities ?? 0} clusters | ${s.processes ?? 0} flows`,
+    );
+    console.log(`  ${repoPath}`);
+
+    try {
+      await fs.access(getGlobalRegistryPath());
+    } catch {
+      console.log('\n  Tip: Run `gitnexus setup` to configure MCP for your editor.');
+    }
+
+    console.log('');
+  } catch (err: any) {
+    clearInterval(elapsedTimer);
+    process.removeListener('SIGINT', sigintHandler);
+    console.log = origLog;
+    // eslint-disable-next-line no-console -- restoring after intentional progress-bar routing
+    console.warn = origWarn;
+    // eslint-disable-next-line no-console -- restoring after intentional progress-bar routing
+    console.error = origError;
+    bar.stop();
+
+    const msg = err.message || String(err);
+
+    // Registry name-collision from --name (#829) — surface as an
+    // actionable error rather than a generic stack-trace.
+    if (err instanceof RegistryNameCollisionError) {
+      cliError(
+        `\n  Registry name collision:\n` +
+          `    "${err.registryName}" is already used by "${err.existingPath}".\n\n` +
+          `  Options:\n` +
+          `    • Pick a different alias:  gitnexus analyze --name <alias>\n` +
+          `    • Allow the duplicate:     gitnexus analyze --allow-duplicate-name  (leaves "-r ${err.registryName}" ambiguous)\n`,
+        { registryName: err.registryName, existingPath: err.existingPath },
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    // Finalize invariant failure (#1169) — keep the rich actionable
+    // message intact and write through realStderrWrite so it can't be
+    // erased by a leftover bar refresh on slow terminals.
+    if (err instanceof AnalysisNotFinalizedError) {
+      writeFatalToStderr('Analysis did not finalize', err);
+      realStderrWrite(
+        `\n  Diagnostic checklist:\n` +
+          `    1. Re-run "gitnexus analyze" - transient native errors often clear on retry.\n` +
+          `    2. Inspect ${err.storagePath} - a leftover lbug.wal indicates an aborted write.\n` +
+          `    3. If the failure persists, run with NODE_OPTIONS="--max-old-space-size=8192 --trace-exit"\n` +
+          `       and attach the trace to the GitNexus issue tracker.\n\n`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    // HF download failure — show clean guidance without the raw stack trace.
+    // Checked before writeFatalToStderr so the user sees one focused message
+    // rather than a stack-trace dump followed by a second remediation block.
+    if (isHfDownloadFailure(msg) || msg.includes('Failed to download embedding model')) {
+      cliError(
+        `  The embedding model could not be downloaded.\n` +
+          `  huggingface.co may be unreachable from your network\n` +
+          `  (e.g. behind a corporate proxy or a regional firewall).\n` +
+          `  Suggestions:\n` +
+          `    1. Set HF_ENDPOINT to a mirror and retry:\n` +
+          `         HF_ENDPOINT=https://hf-mirror.com npx gitnexus analyze --embeddings\n` +
+          `         (Windows: set HF_ENDPOINT=https://hf-mirror.com && npx gitnexus analyze --embeddings)\n` +
+          `    2. Check your proxy / VPN settings.\n` +
+          `    3. Once downloaded the model is cached — future runs work offline.\n`,
+        { recoveryHint: 'hf-endpoint-unreachable' },
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    // Bypass the redirected console.error and write the full stack to
+    // the real stderr captured at module load. The redirected
+    // console.error wraps every line with `\\x1b[2K\\r` (ANSI clear-line)
+    // and forces a bar.update() afterwards, which on some Windows
+    // terminals visually erases the failure message — the canonical
+    // shape of the silent-exit symptom in #1169.
+    writeFatalToStderr('Analysis failed', err);
+
+    // Provide helpful guidance for known failure modes
+    if (
+      msg.includes('Maximum call stack size exceeded') ||
+      msg.includes('call stack') ||
+      msg.includes('Map maximum size') ||
+      msg.includes('Invalid array length') ||
+      msg.includes('Invalid string length') ||
+      msg.includes('allocation failed') ||
+      msg.includes('heap out of memory') ||
+      msg.includes('JavaScript heap')
+    ) {
+      cliError(
+        `  This error typically occurs on very large repositories.\n` +
+          `  Suggestions:\n` +
+          `    1. Add large vendored/generated directories to .gitnexusignore\n` +
+          `    2. Increase Node.js heap: NODE_OPTIONS="--max-old-space-size=16384"\n` +
+          `    3. Increase stack size: NODE_OPTIONS="--stack-size=4096"\n`,
+        { recoveryHint: 'large-repo' },
+      );
+    } else if (msg.includes('ERESOLVE') || msg.includes('Could not resolve dependency')) {
+      // Note: the original arborist "Cannot destructure property 'package' of
+      // 'node.target'" crash happens inside npm *before* gitnexus code runs,
+      // so it can't be caught here.  This branch handles dependency-resolution
+      // errors that surface at runtime (e.g. dynamic require failures).
+      cliError(
+        `  This looks like an npm dependency resolution issue.\n` +
+          `  Suggestions:\n` +
+          `    1. Clear the npm cache:    npm cache clean --force\n` +
+          `    2. Update npm:             npm install -g npm@latest\n` +
+          `    3. Reinstall gitnexus:     npm install -g gitnexus@latest\n` +
+          `    4. Or try npx directly:    npx gitnexus@latest analyze\n`,
+        { recoveryHint: 'npm-resolution' },
+      );
+    } else if (
+      msg.includes('MODULE_NOT_FOUND') ||
+      msg.includes('Cannot find module') ||
+      msg.includes('ERR_MODULE_NOT_FOUND')
+    ) {
+      cliError(
+        `  A required module could not be loaded. The installation may be corrupt.\n` +
+          `  Suggestions:\n` +
+          `    1. Reinstall:   npm install -g gitnexus@latest\n` +
+          `    2. Clear cache: npm cache clean --force && npx gitnexus@latest analyze\n`,
+        { recoveryHint: 'module-not-found' },
+      );
+    }
+
+    process.exitCode = 1;
+    return;
   }
 
   let generatedSkills: GeneratedSkillInfo[] = [];

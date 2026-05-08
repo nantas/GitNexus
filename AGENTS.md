@@ -1,3 +1,64 @@
+<!-- version: 1.7.0 -->
+<!-- Last updated: 2026-04-23 -->
+
+Last reviewed: 2026-04-23
+
+**Project:** GitNexus · **Environment:** dev · **Maintainer:** repository maintainers (see GitHub)
+
+## Scope
+
+| Boundary | Rule |
+|----------|------|
+| **Reads** | `gitnexus/`, `gitnexus-web/`, `eval/`, plugin packages, `.github/`, `.gitnexus/`, docs. |
+| **Writes** | Only paths required for the change; keep diffs minimal. Update lockfiles when deps change. |
+| **Executes** | `npm`, `npx`, `node` under `gitnexus/` and `gitnexus-web/`; `uv run` for Python under `eval/`; documented CI/dev workflows. |
+| **Off-limits** | Real `.env` / secrets, production credentials, unrelated repos, destructive git ops without confirmation. |
+
+## Model Configuration
+
+- **Primary:** Use a named model (e.g. Claude Sonnet 4.x). Avoid `Auto` or unversioned `latest` when reproducibility matters.
+- **Notes:** The GitNexus CLI indexer does not call an LLM.
+
+## Execution Sequence (complex tasks)
+
+For multi-step work, state up front:
+1. Which rules in this file and **[GUARDRAILS.md](GUARDRAILS.md)** apply (and any relevant Signs).
+2. Current **Scope** boundaries.
+3. Which **validation commands** you will run (`cd gitnexus && npm test`, `npx tsc --noEmit`).
+
+On long threads, *"Remember: apply all AGENTS.md rules"* re-weights these instructions against context dilution.
+
+## Claude Code hooks
+
+**PreToolUse** hooks can block tools (e.g. `git_commit`) until checks pass. Adapt to this repo: `cd gitnexus && npm test` before commit.
+
+## Context budget
+
+Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.md](CONTRIBUTING.md)**. If always-on rules grow, split into **`.cursor/rules/*.mdc`** (globs). **Cursor:** project-wide rules in `.cursor/index.mdc`. **Claude Code:** load `STANDARDS.md` only when needed.
+
+## Reference docs
+
+- **[ARCHITECTURE.md](ARCHITECTURE.md)**, **[CONTRIBUTING.md](CONTRIBUTING.md)**, **[GUARDRAILS.md](GUARDRAILS.md)**
+- **Call-resolution DAG (legacy path):** See ARCHITECTURE.md § Call-Resolution DAG. Typed 6-stage DAG inside the `parse` phase; language-specific behavior behind `inferImplicitReceiver` / `selectDispatch` hooks on `LanguageProvider`. Shared code in `gitnexus/src/core/ingestion/` must not name languages. Types: `gitnexus/src/core/ingestion/call-types.ts`.
+- **Scope-resolution pipeline (RFC #909 Ring 3):** See ARCHITECTURE.md § Scope-Resolution Pipeline. Replaces the legacy DAG for languages in `MIGRATED_LANGUAGES` (see `registry-primary-flag.ts`). A language plugs in by implementing `ScopeResolver` (`scope-resolution/contract/scope-resolver.ts`) and registering it in `SCOPE_RESOLVERS`. CI parity gate runs BOTH paths per migrated language on every PR.
+- **Cursor:** `.cursor/index.mdc` (always-on); `.cursor/rules/*.mdc` (glob-scoped). Legacy `.cursorrules` deprecated.
+- **GitNexus:** skills in `.claude/skills/gitnexus/`; MCP rules in `gitnexus:start` block below.
+
+## Changelog
+
+| Date | Version | Change |
+|------|---------|--------|
+| 2026-04-23 | 1.7.0 | TypeScript added to `MIGRATED_LANGUAGES` (registry-primary call resolution by default). |
+| 2026-04-20 | 1.6.0 | Added scope-resolution pipeline pointer (RFC #909 Ring 3); Python migrated to registry-primary. |
+| 2026-04-19 | 1.5.0 | Cross-repo impact (#794): `impact`/`query`/`context` accept `repo: "@<group>"` + `service`. Removed `group_query`/`group_contracts`/`group_status` MCP tools; added `gitnexus://group/{name}/contracts` and `gitnexus://group/{name}/status` resources. |
+| 2026-04-16 | 1.4.0 | Fixed: web UI description, pre-commit behavior, MCP tools (7->16), added gitnexus-shared, removed stale vite-plugin-wasm gotcha. |
+| 2026-04-13 | 1.3.0 | Updated GitNexus index stats after DAG refactor. |
+| 2026-03-24 | 1.2.0 | Fixed gitnexus:start block duplication. |
+| 2026-03-23 | 1.1.0 | Updated agent instructions, references, Cursor layout. |
+| 2026-03-22 | 1.0.0 | Initial structured header and changelog. |
+
+---
+
 <!-- gitnexus:start -->
 # GitNexus MCP
 

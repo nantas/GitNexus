@@ -2,7 +2,7 @@
 MCP Bridge for GitNexus
 
 Starts the GitNexus MCP server as a subprocess and provides a Python interface
-to call MCP tools. Used by the bash wrapper scripts and the augmentation layer.
+to call MCP tools. Used by the bash wrapper scripts and the augmentation layer..
 
 The bridge communicates with the MCP server via stdio using the JSON-RPC protocol.
 """
@@ -16,6 +16,14 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+
+from constants import (
+    MCP_FIND_GITNEXUS_FALLBACK_TIMEOUT_SECONDS,
+    MCP_FIND_GITNEXUS_TIMEOUT_SECONDS,
+    MCP_READ_TIMEOUT_SECONDS,
+    MCP_STOP_WAIT_SECONDS,
+)
+from utils.errors import is_debug_enabled, log_safe_exception
 
 logger = logging.getLogger("mcp_bridge")
 
@@ -45,13 +53,13 @@ class MCPBridge:
 
         try:
             # Find gitnexus binary
-            gitnexus_bin = self._find_gitnexus()
-            if not gitnexus_bin:
+            gitnexus_cmd = self._find_gitnexus_command()
+            if not gitnexus_cmd:
                 logger.error("GitNexus not found. Install with: npm install -g gitnexus")
                 return False
 
             self.process = subprocess.Popen(
-                [gitnexus_bin, "mcp"],
+                [*gitnexus_cmd, "mcp"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -78,7 +86,7 @@ class MCPBridge:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to start MCP bridge: {e}")
+            log_safe_exception(logger, "Failed to start MCP bridge", e, include_debug=is_debug_enabled())
             self.stop()
             return False
 
@@ -86,9 +94,14 @@ class MCPBridge:
         """Stop the MCP server subprocess."""
         if self.process:
             try:
-                self.process.stdin.close()
+                if self.process.stdin:
+                    self.process.stdin.close()
+                if self.process.stdout:
+                    self.process.stdout.close()
+                if self.process.stderr:
+                    self.process.stderr.close()
                 self.process.terminate()
-                self.process.wait(timeout=5)
+                self.process.wait(timeout=MCP_STOP_WAIT_SECONDS)
             except Exception:
                 try:
                     self.process.kill()
@@ -139,8 +152,8 @@ class MCPBridge:
                 return contents[0].get("text", "")
         return None
 
-    def _find_gitnexus(self) -> str | None:
-        """Find the gitnexus CLI binary."""
+    def _find_gitnexus_command(self) -> list[str] | None:
+        """Find the gitnexus CLI command prefix."""
         # Check if npx is available (preferred - uses local install)
         for cmd in ["npx"]:
             try:
@@ -158,10 +171,13 @@ class MCPBridge:
         try:
             result = subprocess.run(
                 ["gitnexus", "--version"],
-                capture_output=True, text=True, timeout=10,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=MCP_FIND_GITNEXUS_FALLBACK_TIMEOUT_SECONDS,
             )
             if result.returncode == 0:
-                return "gitnexus"
+                return ["gitnexus"]
         except Exception:
             pass
 
@@ -194,7 +210,7 @@ class MCPBridge:
             self.process.stdin.flush()
 
             # Read response
-            response = self._read_response(timeout=30)
+            response = self._read_response(timeout=MCP_READ_TIMEOUT_SECONDS)
             if response and response.get("id") == request_id:
                 if "error" in response:
                     logger.error(f"MCP error: {response['error']}")
@@ -203,7 +219,7 @@ class MCPBridge:
             return None
 
         except Exception as e:
-            logger.error(f"MCP request failed: {e}")
+            log_safe_exception(logger, "MCP request failed", e, include_debug=is_debug_enabled())
             return None
 
     def _send_notification(self, method: str, params: dict):
@@ -224,42 +240,67 @@ class MCPBridge:
             self.process.stdin.write(message.encode("utf-8"))
             self.process.stdin.flush()
         except Exception as e:
-            logger.error(f"MCP notification failed: {e}")
+            log_safe_exception(logger, "MCP notification failed", e, include_debug=is_debug_enabled())
 
-    def _read_response(self, timeout: float = 30) -> dict | None:
+    def _read_content_length(self, deadline: float) -> int | None:
+        """Read Content-Length header, returning the byte length or None."""
+        if not self.process or not self.process.stdout:
+            return None
+
+        header_line = b""
+        while time.time() < deadline:
+            byte = self.process.stdout.read(1)
+            if not byte:
+                return None
+            header_line += byte
+            if header_line.endswith(b"\r\n\r\n") or header_line.endswith(b"\n\n"):
+                break
+
+        if not header_line:
+            return None
+
+        header_str = header_line.decode("utf-8").strip()
+        for line in header_str.split("\r\n"):
+            if line.lower().startswith("content-length:"):
+                try:
+                    return int(line.split(":", 1)[1].strip())
+                except (ValueError, IndexError):
+                    return None
+        return None
+
+    def _read_body(self, content_length: int, deadline: float) -> bytes | None:
+        """Read a response body of the expected length before deadline."""
+        if not self.process or not self.process.stdout:
+            return None
+
+        remaining = content_length
+        chunks: list[bytes] = []
+
+        while remaining > 0 and time.time() < deadline:
+            chunk = self.process.stdout.read(remaining)
+            if not chunk:
+                return None
+            chunks.append(chunk)
+            remaining -= len(chunk)
+
+        if remaining > 0:
+            return None
+
+        return b"".join(chunks)
+
+    def _read_response(self, timeout: float = MCP_READ_TIMEOUT_SECONDS) -> dict | None:
         """Read a JSON-RPC response from the MCP server."""
         if not self.process or not self.process.stdout:
             return None
 
-        start = time.time()
-
         try:
-            while time.time() - start < timeout:
-                # Read Content-Length header
-                header_line = b""
-                while True:
-                    byte = self.process.stdout.read(1)
-                    if not byte:
-                        return None
-                    header_line += byte
-                    if header_line.endswith(b"\r\n\r\n"):
-                        break
-                    if header_line.endswith(b"\n\n"):
-                        break
-
-                # Parse content length
-                header_str = header_line.decode("utf-8").strip()
-                content_length = None
-                for line in header_str.split("\r\n"):
-                    if line.lower().startswith("content-length:"):
-                        content_length = int(line.split(":")[1].strip())
-                        break
-
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                content_length = self._read_content_length(deadline)
                 if content_length is None:
                     continue
 
-                # Read body
-                body = self.process.stdout.read(content_length)
+                body = self._read_body(content_length, deadline)
                 if not body:
                     return None
 
@@ -272,7 +313,7 @@ class MCPBridge:
             return None
 
         except Exception as e:
-            logger.error(f"Error reading MCP response: {e}")
+            log_safe_exception(logger, "Error reading MCP response", e, include_debug=is_debug_enabled())
             return None
 
 

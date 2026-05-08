@@ -14,21 +14,67 @@ if (!process.env.ORT_LOG_LEVEL) {
   process.env.ORT_LOG_LEVEL = '3';
 }
 
-import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
+import {
+  pipeline,
+  env,
+  type FeatureExtractionPipeline,
+  type ProgressInfo,
+} from '@huggingface/transformers';
 import { existsSync } from 'fs';
 import { execFileSync } from 'child_process';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { createRequire } from 'module';
 import { DEFAULT_EMBEDDING_CONFIG, type EmbeddingConfig, type ModelProgress } from './types.js';
+import { isHttpMode, getHttpDimensions, httpEmbed } from './http-client.js';
+import { resolveEmbeddingConfig } from './config.js';
+import { applyHfEnvOverrides, isHfDownloadFailure, withHfDownloadRetry } from './hf-env.js';
+import { logger } from '../logger.js';
+
+/**
+ * Check whether the onnxruntime-node package that @huggingface/transformers
+ * will actually load at runtime ships the CUDA execution provider.
+ *
+ * Critical: we resolve from transformers' own module scope, NOT from ours.
+ * npm may install two copies — a top-level 1.24.x (our dep) and a nested
+ * 1.21.0 (transformers' pinned dep). The guard must inspect whichever copy
+ * transformers.js will dlopen, otherwise the check is meaningless.
+ */
+function hasOrtCudaProvider(): boolean {
+  try {
+    const require = createRequire(import.meta.url);
+    // Resolve from @huggingface/transformers' scope so we find the same
+    // onnxruntime-node binary that transformers.js will use at runtime
+    const transformersDir = dirname(require.resolve('@huggingface/transformers/package.json'));
+    const ortRequire = createRequire(join(transformersDir, 'package.json'));
+    const ortPath = dirname(ortRequire.resolve('onnxruntime-node/package.json'));
+    // ORT 1.24.x only ships CUDA binaries for linux/x64 (downloaded from NuGet
+    // at postinstall). arm64 will correctly return false here until ORT adds support.
+    const arch = process.arch;
+    return existsSync(
+      join(ortPath, 'bin', 'napi-v6', 'linux', arch, 'libonnxruntime_providers_cuda.so'),
+    );
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Check whether CUDA libraries are actually available on this system.
  * ONNX Runtime's native layer crashes (uncatchable) if we attempt CUDA
  * without the required shared libraries, so we probe first.
  *
- * Checks the dynamic linker cache (ldconfig) which covers all architectures
- * and install paths, then falls back to CUDA_PATH / LD_LIBRARY_PATH env vars.
+ * Checks both:
+ * 1. That system CUDA libraries (libcublasLt) are present
+ * 2. That onnxruntime-node ships the CUDA execution provider binary
+ *
+ * Both conditions must be true — system CUDA libs alone are not enough
+ * if onnxruntime-node is a CPU-only build (versions < 1.24.0).
  */
 function isCudaAvailable(): boolean {
+  // First, verify onnxruntime-node has the CUDA provider binary.
+  // Without this, requesting CUDA causes an uncatchable native crash.
+  if (!hasOrtCudaProvider()) return false;
+
   // Primary: query the dynamic linker cache — covers all architectures,
   // distro layouts, and custom install paths registered with ldconfig
   try {
@@ -44,9 +90,12 @@ function isCudaAvailable(): boolean {
     const val = process.env[envVar];
     if (!val) continue;
     for (const dir of val.split(':').filter(Boolean)) {
-      if (existsSync(join(dir, 'lib64', 'libcublasLt.so.12')) ||
-          existsSync(join(dir, 'lib', 'libcublasLt.so.12')) ||
-          existsSync(join(dir, 'libcublasLt.so.12'))) return true;
+      if (
+        existsSync(join(dir, 'lib64', 'libcublasLt.so.12')) ||
+        existsSync(join(dir, 'lib', 'libcublasLt.so.12')) ||
+        existsSync(join(dir, 'libcublasLt.so.12'))
+      )
+        return true;
     }
   }
 
@@ -72,7 +121,7 @@ export const getCurrentDevice = (): 'dml' | 'cuda' | 'cpu' | 'wasm' | null => cu
 /**
  * Initialize the embedding model
  * Uses singleton pattern - only loads once, subsequent calls return cached instance
- * 
+ *
  * @param onProgress - Optional callback for model download progress
  * @param config - Optional configuration override
  * @param forceDevice - Force a specific device
@@ -81,8 +130,15 @@ export const getCurrentDevice = (): 'dml' | 'cuda' | 'cpu' | 'wasm' | null => cu
 export const initEmbedder = async (
   onProgress?: ModelProgressCallback,
   config: Partial<EmbeddingConfig> = {},
-  forceDevice?: 'dml' | 'cuda' | 'cpu' | 'wasm'
+  forceDevice?: 'dml' | 'cuda' | 'cpu' | 'wasm',
 ): Promise<FeatureExtractionPipeline> => {
+  if (isHttpMode()) {
+    throw new Error(
+      'initEmbedder() should not be called in HTTP mode. ' +
+        'Use embedText()/embedBatch() which handle HTTP transparently.',
+    );
+  }
+
   // Return existing instance if available
   if (embedderInstance) {
     return embedderInstance;
@@ -94,81 +150,123 @@ export const initEmbedder = async (
   }
 
   isInitializing = true;
-  
-  const finalConfig = { ...DEFAULT_EMBEDDING_CONFIG, ...config };
-  // On Windows, use DirectML for GPU acceleration (via DirectX12)
-  // CUDA is only available on Linux x64 with onnxruntime-node
+
+  const finalConfig = resolveEmbeddingConfig(config);
+  // CUDA is probe-gated because ONNX Runtime can crash in native code when
+  // provider libraries are missing. DirectML stays opt-in for the same reason.
   // Probe for CUDA first — ONNX Runtime crashes (uncatchable native error)
   // if we attempt CUDA without the required shared libraries
-  const isWindows = process.platform === 'win32';
-  const gpuDevice = isWindows ? 'dml' : (isCudaAvailable() ? 'cuda' : 'cpu');
-  let requestedDevice = forceDevice || (finalConfig.device === 'auto' ? gpuDevice : finalConfig.device);
+  const gpuDevice = isCudaAvailable() ? 'cuda' : 'cpu';
+  const requestedDevice =
+    forceDevice || (finalConfig.device === 'auto' ? gpuDevice : finalConfig.device);
 
   initPromise = (async () => {
     try {
       // Configure transformers.js environment
       env.allowLocalModels = false;
-      
+      // Bridge user-controlled env vars to transformers.js: HF_HOME →
+      // env.cacheDir, HF_ENDPOINT → env.remoteHost (#1205). Centralised in
+      // applyHfEnvOverrides so the MCP embedder entry point behaves
+      // identically.
+      applyHfEnvOverrides(env);
+
       const isDev = process.env.NODE_ENV === 'development';
       if (isDev) {
-        console.log(`🧠 Loading embedding model: ${finalConfig.modelId}`);
+        logger.info(`🧠 Loading embedding model: ${finalConfig.modelId}`);
       }
 
-      const progressCallback = onProgress ? (data: any) => {
-        const progress: ModelProgress = {
-          status: data.status || 'progress',
-          file: data.file,
-          progress: data.progress,
-          loaded: data.loaded,
-          total: data.total,
-        };
-        onProgress(progress);
-      } : undefined;
+      const progressCallback = onProgress
+        ? (data: ProgressInfo) => {
+            const progress: ModelProgress = {
+              // Map the `progress_total` aggregate event (not in ModelProgress.status)
+              // back to 'progress' so callers don't need to handle it separately.
+              status:
+                data.status === 'progress_total'
+                  ? 'progress'
+                  : ((data.status as ModelProgress['status']) ?? 'progress'),
+              file: 'file' in data ? data.file : undefined,
+              progress: 'progress' in data ? data.progress : undefined,
+              loaded: 'loaded' in data ? data.loaded : undefined,
+              total: 'total' in data ? data.total : undefined,
+            };
+            onProgress(progress);
+          }
+        : undefined;
 
       // Try GPU first if auto, fall back to CPU
       // Windows: dml (DirectML/DirectX12), Linux: cuda
-      const devicesToTry: Array<'dml' | 'cuda' | 'cpu' | 'wasm'> = 
-        (requestedDevice === 'dml' || requestedDevice === 'cuda') 
-          ? [requestedDevice, 'cpu'] 
+      const devicesToTry: Array<'dml' | 'cuda' | 'cpu' | 'wasm'> =
+        requestedDevice === 'dml' || requestedDevice === 'cuda'
+          ? [requestedDevice, 'cpu']
           : [requestedDevice as 'cpu' | 'wasm'];
 
       for (const device of devicesToTry) {
         try {
           if (isDev && device === 'dml') {
-            console.log('🔧 Trying DirectML (DirectX12) GPU backend...');
+            logger.info('🔧 Trying DirectML (DirectX12) GPU backend...');
           } else if (isDev && device === 'cuda') {
-            console.log('🔧 Trying CUDA GPU backend...');
+            logger.info('🔧 Trying CUDA GPU backend...');
           } else if (isDev && device === 'cpu') {
-            console.log('🔧 Using CPU backend...');
+            logger.info('🔧 Using CPU backend...');
           } else if (isDev && device === 'wasm') {
-            console.log('🔧 Using WASM backend (slower)...');
+            logger.info('🔧 Using WASM backend (slower)...');
           }
 
-          embedderInstance = await (pipeline as any)(
-            'feature-extraction',
-            finalConfig.modelId,
+          embedderInstance = await withHfDownloadRetry(
+            () =>
+              pipeline('feature-extraction', finalConfig.modelId, {
+                device: device,
+                dtype: 'fp32',
+                progress_callback: progressCallback,
+                session_options: {
+                  logSeverityLevel: 3,
+                  intraOpNumThreads: finalConfig.threads,
+                  interOpNumThreads: 1,
+                  executionMode: 'sequential',
+                },
+              }),
             {
-              device: device,
-              dtype: 'fp32',
-              progress_callback: progressCallback,
-              session_options: { logSeverityLevel: 3 },
-            }
+              onRetry: isDev
+                ? (attempt, max, err) =>
+                    logger.warn(
+                      { attempt, max, err: err.message },
+                      `⚠️  Model download network error (attempt ${attempt}/${max}), retrying…`,
+                    )
+                : undefined,
+            },
           );
           currentDevice = device;
 
           if (isDev) {
-            const label = device === 'dml' ? 'GPU (DirectML/DirectX12)' 
-                        : device === 'cuda' ? 'GPU (CUDA)' 
-                        : device.toUpperCase();
-            console.log(`✅ Using ${label} backend`);
-            console.log('✅ Embedding model loaded successfully');
+            const label =
+              device === 'dml'
+                ? 'GPU (DirectML/DirectX12)'
+                : device === 'cuda'
+                  ? 'GPU (CUDA)'
+                  : device.toUpperCase();
+            logger.info(`✅ Using ${label} backend`);
+            logger.info('✅ Embedding model loaded successfully');
           }
 
           return embedderInstance!;
         } catch (deviceError) {
+          // Network errors and circuit-open errors are not device-specific —
+          // they will fail the same way on every device. Rethrow immediately
+          // with actionable HF_ENDPOINT guidance rather than silently falling
+          // back to the next device.
+          const errMsg = deviceError instanceof Error ? deviceError.message : String(deviceError);
+          if (isHfDownloadFailure(errMsg)) {
+            const endpointHint = process.env.HF_ENDPOINT
+              ? `The configured endpoint (${process.env.HF_ENDPOINT}) may be unreachable.`
+              : `huggingface.co may be unreachable from your network.\n` +
+                `  Set HF_ENDPOINT to a mirror and retry:\n` +
+                `    HF_ENDPOINT=https://hf-mirror.com npx gitnexus analyze --embeddings\n` +
+                `    (Windows: set HF_ENDPOINT=https://hf-mirror.com && npx gitnexus analyze --embeddings)`;
+            throw new Error(`Failed to download embedding model: ${errMsg}\n  ${endpointHint}`);
+          }
           if (isDev && (device === 'cuda' || device === 'dml')) {
             const gpuType = device === 'dml' ? 'DirectML' : 'CUDA';
-            console.log(`⚠️  ${gpuType} not available, falling back to CPU...`);
+            logger.info(`⚠️  ${gpuType} not available, falling back to CPU...`);
           }
           // Continue to next device in list
           if (device === devicesToTry[devicesToTry.length - 1]) {
@@ -195,13 +293,29 @@ export const initEmbedder = async (
  * Check if the embedder is initialized and ready
  */
 export const isEmbedderReady = (): boolean => {
-  return embedderInstance !== null;
+  return isHttpMode() || embedderInstance !== null;
+};
+
+/**
+ * Get the effective embedding dimensions.
+ * In HTTP mode, uses GITNEXUS_EMBEDDING_DIMS if set, otherwise the default.
+ */
+export const getEmbeddingDimensions = (): number => {
+  if (isHttpMode()) {
+    return getHttpDimensions() ?? DEFAULT_EMBEDDING_CONFIG.dimensions;
+  }
+  return DEFAULT_EMBEDDING_CONFIG.dimensions;
 };
 
 /**
  * Get the embedder instance (throws if not initialized)
  */
 export const getEmbedder = (): FeatureExtractionPipeline => {
+  if (isHttpMode()) {
+    throw new Error(
+      'getEmbedder() is not available in HTTP embedding mode. Use embedText()/embedBatch() instead.',
+    );
+  }
   if (!embedderInstance) {
     throw new Error('Embedder not initialized. Call initEmbedder() first.');
   }
@@ -210,18 +324,23 @@ export const getEmbedder = (): FeatureExtractionPipeline => {
 
 /**
  * Embed a single text string
- * 
+ *
  * @param text - Text to embed
- * @returns Float32Array of embedding vector (384 dimensions)
+ * @returns Float32Array of embedding vector
  */
 export const embedText = async (text: string): Promise<Float32Array> => {
+  if (isHttpMode()) {
+    const [vec] = await httpEmbed([text]);
+    return vec;
+  }
+
   const embedder = getEmbedder();
-  
+
   const result = await embedder(text, {
     pooling: 'mean',
     normalize: true,
   });
-  
+
   // Result is a Tensor, convert to Float32Array
   return new Float32Array(result.data as ArrayLike<number>);
 };
@@ -229,7 +348,7 @@ export const embedText = async (text: string): Promise<Float32Array> => {
 /**
  * Embed multiple texts in a single batch
  * More efficient than calling embedText multiple times
- * 
+ *
  * @param texts - Array of texts to embed
  * @returns Array of Float32Array embedding vectors
  */
@@ -238,26 +357,30 @@ export const embedBatch = async (texts: string[]): Promise<Float32Array[]> => {
     return [];
   }
 
+  if (isHttpMode()) {
+    return httpEmbed(texts);
+  }
+
   const embedder = getEmbedder();
-  
+
   // Process batch
   const result = await embedder(texts, {
     pooling: 'mean',
     normalize: true,
   });
-  
+
   // Result shape is [batch_size, dimensions]
   // Need to split into individual vectors
   const data = result.data as ArrayLike<number>;
   const dimensions = DEFAULT_EMBEDDING_CONFIG.dimensions;
   const embeddings: Float32Array[] = [];
-  
+
   for (let i = 0; i < texts.length; i++) {
     const start = i * dimensions;
     const end = start + dimensions;
     embeddings.push(new Float32Array(Array.prototype.slice.call(data, start, end)));
   }
-  
+
   return embeddings;
 };
 
@@ -286,4 +409,3 @@ export const disposeEmbedder = async (): Promise<void> => {
     initPromise = null;
   }
 };
-

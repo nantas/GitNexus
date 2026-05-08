@@ -12,8 +12,11 @@
  * NOTE: We test the server handler logic by calling the request handlers
  * directly through the MCP Server's handler dispatch.
  */
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMCPServer } from '../../src/mcp/server.js';
+import { GITNEXUS_TOOLS } from '../../src/mcp/tools.js';
 
 // ─── Mock backend ──────────────────────────────────────────────────
 
@@ -21,7 +24,9 @@ function createMockBackend(overrides: Record<string, any> = {}): any {
   return {
     callTool: vi.fn().mockResolvedValue({ result: 'ok' }),
     listRepos: vi.fn().mockResolvedValue([]),
-    resolveRepo: vi.fn().mockResolvedValue({ name: 'test', repoPath: '/tmp/test', lastCommit: 'abc' }),
+    resolveRepo: vi
+      .fn()
+      .mockResolvedValue({ name: 'test', repoPath: '/tmp/test', lastCommit: 'abc' }),
     getContext: vi.fn().mockReturnValue(null),
     queryClusters: vi.fn().mockResolvedValue({ clusters: [] }),
     queryProcesses: vi.fn().mockResolvedValue({ processes: [] }),
@@ -49,6 +54,28 @@ describe('createMCPServer', () => {
     const server = createMCPServer(backend);
     // The server has registered handlers — verify it was created without errors
     expect(server).toBeTruthy();
+  });
+
+  it('tools/list response includes tool annotations', async () => {
+    const backend = createMockBackend();
+    const server = createMCPServer(backend);
+    const client = new Client({ name: 'test-client', version: '0.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    try {
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+      const response = await client.listTools();
+      expect(response.tools).toHaveLength(GITNEXUS_TOOLS.length);
+
+      for (const tool of response.tools) {
+        const definition = GITNEXUS_TOOLS.find((t) => t.name === tool.name)!;
+        expect(tool.annotations).toEqual(definition.annotations);
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 });
 

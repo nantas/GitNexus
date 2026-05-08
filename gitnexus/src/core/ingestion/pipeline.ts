@@ -1,3 +1,20 @@
+/**
+ * Pipeline orchestrator — dependency-ordered ingestion pipeline.
+ *
+ * The pipeline is composed of named phases with explicit dependencies.
+ * Each phase is defined in its own file under `pipeline-phases/`.
+ * The runner in `pipeline-phases/runner.ts` executes phases in
+ * topological order, passing typed outputs from upstream phases as
+ * inputs to downstream phases.
+ *
+ * To add a new phase:
+ * 1. Create a new file in `pipeline-phases/` following the pattern
+ * 2. Export it from `pipeline-phases/index.ts`
+ * 3. Add it to the `ALL_PHASES` array below
+ *
+ * See ARCHITECTURE.md for the full phase dependency diagram.
+ */
+
 import { createKnowledgeGraph } from '../graph/graph.js';
 import { processStructure } from './structure-processor.js';
 import { processParsing, type ParsingFileInput } from './parsing-processor.js';
@@ -45,7 +62,56 @@ const AST_CACHE_CAP = 50;
 export interface PipelineOptions extends PipelineRunOptions {
   /** Skip MRO, community detection, and process extraction for faster test runs. */
   skipGraphPhases?: boolean;
+  /** Force sequential parsing (no worker pool). Useful for testing the sequential path. */
+  skipWorkers?: boolean;
+  /**
+   * @internal Test-only override for worker-pool gating thresholds.
+   * When unset, production defaults apply (15 files OR 512 KB total bytes).
+   * Setting either field lowers the corresponding threshold so small test
+   * fixtures can still exercise the worker-pool path. Do not use from
+   * production call sites.
+   */
+  workerThresholdsForTest?: {
+    minFiles?: number;
+    minBytes?: number;
+  };
 }
+
+// ── Phase registry ─────────────────────────────────────────────────────────
+
+/**
+ * All pipeline phases with their dependency relationships.
+ *
+ * Phase dependency graph:
+ *
+ *   scan → structure → [markdown, cobol] → parse → [routes, tools, orm]
+ *     → crossFile → mro → communities → processes
+ *
+ * To add a new phase: create a file in pipeline-phases/, export the phase
+ * object, and add it to the appropriate position in this array.
+ */
+function buildPhaseList(options?: PipelineOptions): PipelinePhase[] {
+  const phases: PipelinePhase[] = [
+    scanPhase,
+    structurePhase,
+    markdownPhase,
+    cobolPhase,
+    parsePhase,
+    routesPhase,
+    toolsPhase,
+    ormPhase,
+    crossFilePhase,
+    scopeResolutionPhase,
+  ];
+
+  if (!options?.skipGraphPhases) {
+    phases.push(mroPhase, communitiesPhase, processesPhase);
+  }
+
+  return phases;
+}
+
+// ── Pipeline orchestrator ─────────────────────────────────────────────────
 
 export const runPipelineFromRepo = async (
   repoPath: string,
@@ -53,14 +119,9 @@ export const runPipelineFromRepo = async (
   options?: PipelineOptions,
 ): Promise<PipelineResult> => {
   const graph = createKnowledgeGraph();
-  const ctx = createResolutionContext();
-  const symbolTable = ctx.symbols;
-  let astCache = createASTCache(AST_CACHE_CAP);
+  const pipelineStart = Date.now();
 
-  const cleanup = () => {
-    astCache.clear();
-    ctx.clear();
-  };
+  const phases = buildPhaseList(options);
 
   let csharpDefineSymbols: Set<string> | undefined;
   const csharpUndefinedSymbols = new Set<string>();
@@ -89,16 +150,11 @@ export const runPipelineFromRepo = async (
       message: 'Scanning repository...',
     });
 
-    const scannedFiles = await walkRepositoryPaths(repoPath, (current, total, filePath) => {
-      const scanProgress = Math.round((current / total) * 15);
-      onProgress({
-        phase: 'extracting',
-        percent: scanProgress,
-        message: 'Scanning repository...',
-        detail: filePath,
-        stats: { filesProcessed: current, totalFiles: total, nodesCreated: graph.nodeCount },
-      });
-    });
+  // Extract final results for the PipelineResult contract
+  const { totalFiles, usedWorkerPool } = getPhaseOutput<{
+    totalFiles: number;
+    usedWorkerPool: boolean;
+  }>(results, 'parse');
 
     const scopeSelection = selectEntriesByScopeRules(scannedFiles, options?.scopeRules || []);
     const scopedFiles = scopeSelection.selected;
@@ -119,12 +175,10 @@ export const runPipelineFromRepo = async (
 
     const totalFiles = extensionFiltered.length;
 
-    onProgress({
-      phase: 'extracting',
-      percent: 15,
-      message: 'Repository scanned successfully',
-      stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: graph.nodeCount },
-    });
+  if (!options?.skipGraphPhases) {
+    communityResult = getPhaseOutput<CommunitiesOutput>(results, 'communities').communityResult;
+    processResult = getPhaseOutput<ProcessesOutput>(results, 'processes').processResult;
+  }
 
     // ── Phase 2: Structure (paths only — no content needed) ────────────
     onProgress({
@@ -640,12 +694,12 @@ export const runPipelineFromRepo = async (
       message: communityResult && processResult
         ? `Graph complete! ${communityResult.stats.totalCommunities} communities, ${processResult.stats.totalProcesses} processes detected.`
         : 'Graph complete! (graph phases skipped)',
-      stats: {
-        filesProcessed: totalFiles,
-        totalFiles,
-        nodesCreated: graph.nodeCount
-      },
-    });
+    stats: {
+      filesProcessed: totalFiles,
+      totalFiles,
+      nodesCreated: graph.nodeCount,
+    },
+  });
 
     astCache.clear();
 

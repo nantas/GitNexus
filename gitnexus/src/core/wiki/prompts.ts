@@ -1,6 +1,6 @@
 /**
  * LLM Prompt Templates for Wiki Generation
- * 
+ *
  * All prompts produce deterministic, source-grounded documentation.
  * Templates use {{PLACEHOLDER}} substitution.
  */
@@ -37,6 +37,8 @@ Example format:
 export const MODULE_SYSTEM_PROMPT = `You are a technical documentation writer. Write clear, developer-focused documentation for a code module.
 
 Rules:
+- Output ONLY the documentation content — no meta-commentary like "I've written...", "Here's the documentation...", "The documentation covers...", or similar
+- Start directly with the module heading and content
 - Reference actual function names, class names, and code patterns — do NOT invent APIs
 - Use the call graph and execution flow data for accuracy, but do NOT mechanically list every edge
 - Include Mermaid diagrams only when they genuinely help understanding. Keep them small (5-10 nodes max)
@@ -65,6 +67,8 @@ Write comprehensive documentation for this module. Cover its purpose, how it wor
 export const PARENT_SYSTEM_PROMPT = `You are a technical documentation writer. Write a summary page for a module that contains sub-modules. Synthesize the children's documentation — do not re-read source code.
 
 Rules:
+- Output ONLY the documentation content — no meta-commentary like "I've written...", "Here's the documentation...", "The documentation covers...", or similar
+- Start directly with the module heading and content
 - Reference actual components from the child modules
 - Focus on how the sub-modules work together, not repeating their individual docs
 - Keep it concise — the reader can click through to child pages for detail
@@ -86,6 +90,8 @@ Write a concise overview of this module group. Explain its purpose, how the sub-
 export const OVERVIEW_SYSTEM_PROMPT = `You are a technical documentation writer. Write the top-level overview page for a repository wiki. This is the first page a new developer sees.
 
 Rules:
+- Output ONLY the documentation content — no meta-commentary like "I've written...", "Here's the documentation...", "The page has been rewritten...", or similar
+- Start directly with the project heading and content
 - Be clear and welcoming — this is the entry point to the entire codebase
 - Reference actual module names so readers can navigate to their docs
 - Include a high-level Mermaid architecture diagram showing only the most important modules and their relationships (max 10 nodes). A new dev should grasp it in 10 seconds
@@ -116,10 +122,7 @@ Write a clear overview of this project: what it does, how it's architected, and 
 /**
  * Replace {{PLACEHOLDER}} tokens in a template string.
  */
-export function fillTemplate(
-  template: string,
-  vars: Record<string, string>,
-): string {
+export function fillTemplate(template: string, vars: Record<string, string>): string {
   let result = template;
   for (const [key, value] of Object.entries(vars)) {
     result = result.replaceAll(`{{${key}}}`, value);
@@ -136,10 +139,11 @@ export function formatFileListForGrouping(
   files: Array<{ filePath: string; symbols: Array<{ name: string; type: string }> }>,
 ): string {
   return files
-    .map(f => {
-      const exports = f.symbols.length > 0
-        ? f.symbols.map(s => `${s.name} (${s.type})`).join(', ')
-        : 'no exports';
+    .map((f) => {
+      const exports =
+        f.symbols.length > 0
+          ? f.symbols.map((s) => `${s.name} (${s.type})`).join(', ')
+          : 'no exports';
       return `- ${f.filePath}: ${exports}`;
     })
     .join('\n');
@@ -160,7 +164,10 @@ export function formatDirectoryTree(filePaths: string[]): string {
   const sorted = Array.from(dirs).sort();
   if (sorted.length === 0) return '(flat structure)';
 
-  return sorted.slice(0, 50).join('\n') + (sorted.length > 50 ? `\n... and ${sorted.length - 50} more directories` : '');
+  return (
+    sorted.slice(0, 50).join('\n') +
+    (sorted.length > 50 ? `\n... and ${sorted.length - 50} more directories` : '')
+  );
 }
 
 /**
@@ -172,7 +179,7 @@ export function formatCallEdges(
   if (edges.length === 0) return 'None';
   return edges
     .slice(0, 30)
-    .map(e => `${e.fromName} (${shortPath(e.fromFile)}) → ${e.toName} (${shortPath(e.toFile)})`)
+    .map((e) => `${e.fromName} (${shortPath(e.fromFile)}) → ${e.toName} (${shortPath(e.toFile)})`)
     .join('\n');
 }
 
@@ -189,9 +196,9 @@ export function formatProcesses(
   if (processes.length === 0) return 'No execution flows detected for this module.';
 
   return processes
-    .map(p => {
+    .map((p) => {
       const stepsText = p.steps
-        .map(s => `  ${s.step}. ${s.name} (${shortPath(s.filePath)})`)
+        .map((s) => `  ${s.step}. ${s.name} (${shortPath(s.filePath)})`)
         .join('\n');
       return `**${p.label}** (${p.type}):\n${stepsText}`;
     })

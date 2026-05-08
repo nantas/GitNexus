@@ -8,6 +8,10 @@ export const LOCAL_BACKEND_SEED_DATA = [
   `CREATE (fn:Function {id: 'func:login', name: 'login', filePath: 'src/auth.ts', startLine: 1, endLine: 15, isExported: true, content: 'function login() {}', description: 'User login'})`,
   `CREATE (fn:Function {id: 'func:validate', name: 'validate', filePath: 'src/auth.ts', startLine: 17, endLine: 25, isExported: true, content: 'function validate() {}', description: 'Validate input'})`,
   `CREATE (fn:Function {id: 'func:hash', name: 'hash', filePath: 'src/utils.ts', startLine: 1, endLine: 8, isExported: true, content: 'function hash() {}', description: 'Hash utility'})`,
+  `CREATE (fn:Function {id: 'func:alpha', name: 'alpha', filePath: 'src/tools.py', startLine: 1, endLine: 8, isExported: true, content: 'def alpha(): pass', description: 'Alpha tool handler'})`,
+  `CREATE (fn:Function {id: 'func:beta', name: 'beta', filePath: 'src/tools.py', startLine: 10, endLine: 18, isExported: true, content: 'def beta(): pass', description: 'Beta tool handler'})`,
+  `CREATE (t:Tool {id: 'Tool:alpha', name: 'alpha', filePath: 'src/tools.py', description: 'Calls chain A.'})`,
+  `CREATE (t:Tool {id: 'Tool:beta', name: 'beta', filePath: 'src/tools.py', description: 'Calls chain B.'})`,
   // Class
   `CREATE (c:Class {id: 'class:AuthService', name: 'AuthService', filePath: 'src/auth.ts', startLine: 30, endLine: 60, isExported: true, content: 'class AuthService {}', description: 'Authentication service'})`,
   `CREATE (c:Class {id: 'class:BaseService', name: 'BaseService', filePath: 'src/base.ts', startLine: 1, endLine: 20, isExported: true, content: 'class BaseService {}', description: 'Base service class'})`,
@@ -49,7 +53,7 @@ export const LOCAL_BACKEND_SEED_DATA = [
    CREATE (c)-[:CodeRelation {type: 'HAS_METHOD', confidence: 1.0, reason: 'class-method', step: 0}]->(m)`,
   // OVERRIDES: AuthService.authenticate -> BaseService.authenticate
   `MATCH (a:Method), (b:Method) WHERE a.id = 'method:AuthService.authenticate' AND b.id = 'method:BaseService.authenticate'
-   CREATE (a)-[:CodeRelation {type: 'OVERRIDES', confidence: 1.0, reason: 'mro-resolution', step: 0}]->(b)`,
+   CREATE (a)-[:CodeRelation {type: 'METHOD_OVERRIDES', confidence: 1.0, reason: 'mro-resolution', step: 0}]->(b)`,
   // HAS_METHOD: BaseService -> authenticate
   `MATCH (c:Class), (m:Method) WHERE c.id = 'class:BaseService' AND m.id = 'method:BaseService.authenticate'
    CREATE (c)-[:CodeRelation {type: 'HAS_METHOD', confidence: 1.0, reason: 'class-method', step: 0}]->(m)`,

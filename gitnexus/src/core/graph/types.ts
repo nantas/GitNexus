@@ -108,24 +108,31 @@ export interface GraphRelationship {
   step?: number,
 }
 
+// CLI-specific: full KnowledgeGraph with mutation methods for incremental updates
 export interface KnowledgeGraph {
-  /** Returns a full array copy — prefer iterNodes() for iteration */
-  nodes: GraphNode[],
-  /** Returns a full array copy — prefer iterRelationships() for iteration */
-  relationships: GraphRelationship[],
-  /** Zero-copy iterator over nodes */
-  iterNodes: () => IterableIterator<GraphNode>,
-  /** Zero-copy iterator over relationships */
-  iterRelationships: () => IterableIterator<GraphRelationship>,
-  /** Zero-copy forEach — avoids iterator protocol overhead in hot loops */
-  forEachNode: (fn: (node: GraphNode) => void) => void,
-  forEachRelationship: (fn: (rel: GraphRelationship) => void) => void,
-  /** Lookup a single node by id — O(1) */
-  getNode: (id: string) => GraphNode | undefined,
-  nodeCount: number,
-  relationshipCount: number,
-  addNode: (node: GraphNode) => void,
-  addRelationship: (relationship: GraphRelationship) => void,
-  removeNode: (nodeId: string) => boolean,
-  removeNodesByFile: (filePath: string) => number,
+  nodes: GraphNode[];
+  relationships: GraphRelationship[];
+  iterNodes: () => IterableIterator<GraphNode>;
+  iterRelationships: () => IterableIterator<GraphRelationship>;
+  /**
+   * Iterate ONLY relationships of the given type, backed by a per-type
+   * index maintained in `addRelationship` / `removeRelationship` /
+   * `removeNode` / `removeNodesByFile`. Returns an empty iterator when
+   * the graph contains no relationships of that type.
+   *
+   * Prefer this over `iterRelationships()` + per-edge type filtering
+   * for hot paths (MRO setup, heritage walks). Backwards-compatible:
+   * existing `iterRelationships()` callers keep working.
+   */
+  iterRelationshipsByType: (type: RelationshipType) => IterableIterator<GraphRelationship>;
+  forEachNode: (fn: (node: GraphNode) => void) => void;
+  forEachRelationship: (fn: (rel: GraphRelationship) => void) => void;
+  getNode: (id: string) => GraphNode | undefined;
+  nodeCount: number;
+  relationshipCount: number;
+  addNode: (node: GraphNode) => void;
+  addRelationship: (relationship: GraphRelationship) => void;
+  removeNode: (nodeId: string) => boolean;
+  removeNodesByFile: (filePath: string) => number;
+  removeRelationship: (relationshipId: string) => boolean;
 }

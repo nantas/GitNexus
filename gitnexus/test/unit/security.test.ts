@@ -10,17 +10,26 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  CYPHER_WRITE_RE,
   VALID_RELATION_TYPES,
   VALID_NODE_LABELS,
-  isWriteQuery,
   isTestFilePath,
 } from '../../src/mcp/local/local-backend.js';
+import { CYPHER_WRITE_RE, isWriteQuery } from '../../src/mcp/core/lbug-adapter.js';
 
 // ─── Write-operation blocking (CYPHER_WRITE_RE) ──────────────────────
 
 describe('CYPHER_WRITE_RE', () => {
-  const writeKeywords = ['CREATE', 'DELETE', 'SET', 'MERGE', 'REMOVE', 'DROP', 'ALTER', 'COPY', 'DETACH'];
+  const writeKeywords = [
+    'CREATE',
+    'DELETE',
+    'SET',
+    'MERGE',
+    'REMOVE',
+    'DROP',
+    'ALTER',
+    'COPY',
+    'DETACH',
+  ];
 
   for (const keyword of writeKeywords) {
     it(`matches "${keyword}" (uppercase)`, () => {
@@ -96,14 +105,27 @@ describe('isWriteQuery', () => {
 // ─── Relation type allowlist ──────────────────────────────────────────
 
 describe('VALID_RELATION_TYPES', () => {
-  it('contains exactly the expected 6 types', () => {
-    expect(VALID_RELATION_TYPES.size).toBe(6);
-    expect(VALID_RELATION_TYPES.has('CALLS')).toBe(true);
-    expect(VALID_RELATION_TYPES.has('IMPORTS')).toBe(true);
-    expect(VALID_RELATION_TYPES.has('EXTENDS')).toBe(true);
-    expect(VALID_RELATION_TYPES.has('IMPLEMENTS')).toBe(true);
-    expect(VALID_RELATION_TYPES.has('HAS_METHOD')).toBe(true);
-    expect(VALID_RELATION_TYPES.has('OVERRIDES')).toBe(true);
+  it('contains all expected relation types', () => {
+    expect(VALID_RELATION_TYPES.size).toBe(15);
+    for (const t of [
+      'CALLS',
+      'IMPORTS',
+      'EXTENDS',
+      'IMPLEMENTS',
+      'HAS_METHOD',
+      'HAS_PROPERTY',
+      'METHOD_OVERRIDES',
+      'OVERRIDES',
+      'METHOD_IMPLEMENTS',
+      'ACCESSES',
+      'HANDLES_ROUTE',
+      'FETCHES',
+      'HANDLES_TOOL',
+      'ENTRY_POINT_OF',
+      'WRAPS',
+    ]) {
+      expect(VALID_RELATION_TYPES.has(t)).toBe(true);
+    }
   });
 
   it('rejects invalid relation types', () => {
@@ -118,7 +140,15 @@ describe('VALID_RELATION_TYPES', () => {
 
 describe('VALID_NODE_LABELS', () => {
   it('contains core node types', () => {
-    for (const label of ['File', 'Folder', 'Function', 'Class', 'Interface', 'Method', 'CodeElement']) {
+    for (const label of [
+      'File',
+      'Folder',
+      'Function',
+      'Class',
+      'Interface',
+      'Method',
+      'CodeElement',
+    ]) {
       expect(VALID_NODE_LABELS.has(label)).toBe(true);
     }
   });

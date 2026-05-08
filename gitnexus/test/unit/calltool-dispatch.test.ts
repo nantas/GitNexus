@@ -9,19 +9,56 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// We need to mock the LadybugDB adapter and repo-manager BEFORE importing LocalBackend
-vi.mock('../../src/mcp/core/lbug-adapter.js', () => ({
-  initLbug: vi.fn().mockResolvedValue(undefined),
-  executeQuery: vi.fn().mockResolvedValue([]),
-  executeParameterized: vi.fn().mockResolvedValue([]),
-  closeLbug: vi.fn().mockResolvedValue(undefined),
-  isLbugReady: vi.fn().mockReturnValue(true),
+// We need to mock the LadybugDB adapter and repo-manager BEFORE importing LocalBackend.
+// local-backend.ts imports from core/lbug/pool-adapter.js; the mcp/core/lbug-adapter.js
+// re-exports from the same module, so we mock the canonical source.
+// vi.hoisted runs before vi.mock hoisting, making the fns available to both factories.
+const { lbugMocks, platformMocks } = vi.hoisted(() => ({
+  lbugMocks: {
+    initLbug: vi.fn().mockResolvedValue(undefined),
+    executeQuery: vi.fn().mockResolvedValue([]),
+    executeParameterized: vi.fn().mockResolvedValue([]),
+    closeLbug: vi.fn().mockResolvedValue(undefined),
+    isLbugReady: vi.fn().mockReturnValue(true),
+  },
+  platformMocks: {
+    isVectorExtensionSupportedByPlatform: vi.fn().mockReturnValue(true),
+  },
 }));
+
+vi.mock('../../src/core/lbug/pool-adapter.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, ...lbugMocks };
+});
+
+// Re-export shim must resolve to the same mocks
+vi.mock('../../src/mcp/core/lbug-adapter.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, ...lbugMocks };
+});
 
 vi.mock('../../src/storage/repo-manager.js', () => ({
   listRegisteredRepos: vi.fn().mockResolvedValue([]),
   cleanupOldKuzuFiles: vi.fn().mockResolvedValue({ found: false, needsReindex: false }),
+  findSiblingClones: vi.fn().mockResolvedValue([]),
 }));
+
+// `core/git-staleness` is also imported by `local-backend.ts` (for
+// `checkStaleness` and `checkCwdMatch`). Stub it out here so unit
+// tests don't shell out to git.
+vi.mock('../../src/core/git-staleness.js', () => ({
+  checkStaleness: vi.fn().mockReturnValue({ isStale: false, commitsBehind: 0 }),
+  checkStalenessAsync: vi.fn().mockResolvedValue({ isStale: false, commitsBehind: 0 }),
+  checkCwdMatch: vi.fn().mockResolvedValue({ match: 'none' }),
+}));
+
+vi.mock('../../src/core/platform/capabilities.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/core/platform/capabilities.js')>();
+  return {
+    ...actual,
+    isVectorExtensionSupportedByPlatform: platformMocks.isVectorExtensionSupportedByPlatform,
+  };
+});
 
 // Also mock the search modules to avoid loading onnxruntime
 vi.mock('../../src/core/search/bm25-index.js', () => ({
@@ -50,7 +87,14 @@ vi.mock('../../src/mcp/local/runtime-claim.js', () => ({
 
 import { LocalBackend } from '../../src/mcp/local/local-backend.js';
 import { listRegisteredRepos, cleanupOldKuzuFiles } from '../../src/storage/repo-manager.js';
-import { initLbug, executeQuery, executeParameterized, isLbugReady, closeLbug } from '../../src/mcp/core/lbug-adapter.js';
+import { _captureLogger } from '../../src/core/logger.js';
+import {
+  initLbug,
+  executeQuery,
+  executeParameterized,
+  isLbugReady,
+  closeLbug,
+} from '../../src/mcp/core/lbug-adapter.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -141,6 +185,7 @@ describe('LocalBackend.callTool', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    platformMocks.isVectorExtensionSupportedByPlatform.mockReturnValue(true);
     backend = new LocalBackend();
     setupSingleRepo();
     await backend.init();
@@ -153,8 +198,9 @@ describe('LocalBackend.callTool', () => {
   });
 
   it('throws for unknown tool name', async () => {
-    await expect(backend.callTool('nonexistent_tool', {}))
-      .rejects.toThrow('Unknown tool: nonexistent_tool');
+    await expect(backend.callTool('nonexistent_tool', {})).rejects.toThrow(
+      'Unknown tool: nonexistent_tool',
+    );
   });
 
   it('dispatches query tool', async () => {
@@ -188,6 +234,58 @@ describe('LocalBackend.callTool', () => {
     expect(result.runtime_preview?.status).toBeDefined();
   });
 
+  it('skips vector index query when VECTOR is unsupported by the platform', async () => {
+    const cap = _captureLogger();
+    platformMocks.isVectorExtensionSupportedByPlatform.mockReturnValue(false);
+    (executeQuery as any).mockImplementation(async (_repoId: string, cypher: string) => {
+      if (cypher.includes('COUNT(*) AS cnt')) return [{ cnt: 1 }];
+      if (cypher.includes('MATCH (e:CodeEmbedding)')) return [];
+      return [];
+    });
+    (executeParameterized as any).mockResolvedValue([]);
+
+    try {
+      await backend.callTool('query', { query: 'auth' });
+
+      const queries = (executeQuery as any).mock.calls.map(
+        ([, cypher]: [string, string]) => cypher,
+      );
+      expect(queries.some((cypher: string) => cypher.includes('QUERY_VECTOR_INDEX'))).toBe(false);
+      expect(
+        queries.some(
+          (cypher: string) =>
+            cypher.includes('RETURN e.nodeId AS nodeId') &&
+            cypher.includes('e.embedding AS embedding'),
+        ),
+      ).toBe(true);
+      expect(
+        cap
+          .records()
+          .some((r) =>
+            String(r.msg ?? '').includes(
+              'GitNexus [query:vector]: VECTOR extension not supported on this platform',
+            ),
+          ),
+      ).toBe(true);
+    } finally {
+      cap.restore();
+    }
+  });
+
+  it('issues vector index query when VECTOR is supported by the platform', async () => {
+    platformMocks.isVectorExtensionSupportedByPlatform.mockReturnValue(true);
+    (executeQuery as any).mockImplementation(async (_repoId: string, cypher: string) => {
+      if (cypher.includes('COUNT(*) AS cnt')) return [{ cnt: 1 }];
+      return [];
+    });
+    (executeParameterized as any).mockResolvedValue([]);
+
+    await backend.callTool('query', { query: 'auth' });
+
+    const queries = (executeQuery as any).mock.calls.map(([, cypher]: [string, string]) => cypher);
+    expect(queries.some((cypher: string) => cypher.includes('QUERY_VECTOR_INDEX'))).toBe(true);
+  });
+
   it('query tool returns error for empty query', async () => {
     const result = await backend.callTool('query', { query: '' });
     expect(result.error).toContain('query parameter is required');
@@ -205,9 +303,7 @@ describe('LocalBackend.callTool', () => {
   });
 
   it('dispatches cypher tool with valid read query', async () => {
-    (executeQuery as any).mockResolvedValue([
-      { name: 'test', filePath: 'src/test.ts' },
-    ]);
+    (executeQuery as any).mockResolvedValue([{ name: 'test', filePath: 'src/test.ts' }]);
     const result = await backend.callTool('cypher', {
       query: 'MATCH (n:Function) RETURN n.name AS name, n.filePath AS filePath LIMIT 5',
     });
@@ -219,7 +315,14 @@ describe('LocalBackend.callTool', () => {
 
   it('dispatches context tool', async () => {
     (executeParameterized as any).mockResolvedValue([
-      { id: 'func:main', name: 'main', type: 'Function', filePath: 'src/index.ts', startLine: 1, endLine: 10 },
+      {
+        id: 'func:main',
+        name: 'main',
+        type: 'Function',
+        filePath: 'src/index.ts',
+        startLine: 1,
+        endLine: 10,
+      },
     ]);
     const result = await backend.callTool('context', { name: 'main' });
     expect(result.status).toBe('found');
@@ -239,12 +342,235 @@ describe('LocalBackend.callTool', () => {
 
   it('context tool returns disambiguation for multiple matches', async () => {
     (executeParameterized as any).mockResolvedValue([
-      { id: 'func:main:1', name: 'main', type: 'Function', filePath: 'src/a.ts', startLine: 1, endLine: 5 },
-      { id: 'func:main:2', name: 'main', type: 'Function', filePath: 'src/b.ts', startLine: 1, endLine: 5 },
+      {
+        id: 'func:main:1',
+        name: 'main',
+        type: 'Function',
+        filePath: 'src/a.ts',
+        startLine: 1,
+        endLine: 5,
+      },
+      {
+        id: 'func:main:2',
+        name: 'main',
+        type: 'Function',
+        filePath: 'src/b.ts',
+        startLine: 1,
+        endLine: 5,
+      },
     ]);
     const result = await backend.callTool('context', { name: 'main' });
     expect(result.status).toBe('ambiguous');
     expect(result.candidates).toHaveLength(2);
+
+    // #470: every candidate carries a relevance score in [0, 1] and the list
+    // is sorted descending by score (with deterministic tiebreakers).
+    for (const c of result.candidates) {
+      expect(typeof c.score).toBe('number');
+      expect(c.score).toBeGreaterThanOrEqual(0);
+      expect(c.score).toBeLessThanOrEqual(1);
+    }
+    expect(result.candidates[0].score).toBeGreaterThanOrEqual(result.candidates[1].score);
+  });
+
+  it('context tool ranks file_path match higher than non-match (#470)', async () => {
+    (executeParameterized as any).mockResolvedValue([
+      {
+        id: 'func:handleConnect:1',
+        name: 'handleConnect',
+        type: 'Function',
+        filePath: 'src/lib/socket.ts',
+        startLine: 10,
+        endLine: 20,
+      },
+      {
+        id: 'func:handleConnect:2',
+        name: 'handleConnect',
+        type: 'Function',
+        filePath: 'src/App.tsx',
+        startLine: 42,
+        endLine: 60,
+      },
+    ]);
+    const result = await backend.callTool('context', {
+      name: 'handleConnect',
+      file_path: 'App.tsx',
+    });
+    // In production, `WHERE n.filePath CONTAINS $filePath` would pre-filter
+    // at the DB layer and only `src/App.tsx` would come back — resolving
+    // via the single-candidate early return rather than via scoring. The
+    // `executeParameterized` mock here returns both rows regardless of the
+    // WHERE clause parameters, so this asserts that the resolver ends up
+    // picking the App.tsx candidate in either case (via mock-relaxed DB
+    // pre-filter or via scoring promotion). The dedicated scoring-promotion
+    // path is covered by the next `it()` block below.
+    expect(result.status).toBe('found');
+    expect(result.symbol.filePath).toBe('src/App.tsx');
+  });
+
+  it('context tool promotes top candidate via scoring when multiple rows survive DB pre-filter (#470)', async () => {
+    // This test explicitly exercises the scored-promotion path (#470
+    // review): both candidates satisfy the file_path hint (so DB
+    // pre-filter would return both in production), and promotion is
+    // determined purely by the combined file_path + kind score.
+    (executeParameterized as any).mockResolvedValue([
+      {
+        id: 'fn:App:1',
+        name: 'render',
+        type: 'Function',
+        filePath: 'src/components/App.tsx',
+        startLine: 10,
+        endLine: 20,
+      },
+      {
+        id: 'method:App:1',
+        name: 'render',
+        type: 'Method',
+        filePath: 'src/pages/App.tsx',
+        startLine: 5,
+        endLine: 15,
+      },
+    ]);
+    const result = await backend.callTool('context', {
+      name: 'render',
+      file_path: 'App.tsx',
+      kind: 'Function',
+    });
+    // Expected scoring:
+    //   Function candidate: 0.50 base + 0.40 file_path + 0.20 kind = 1.10 → cap 1.00
+    //   Method candidate:   0.50 base + 0.40 file_path + 0.00 kind = 0.90
+    // Top score ≥ 0.95 and beats runner-up by 0.10 → confident promotion
+    // to `{ status: 'found' }` with the Function.
+    expect(result.status).toBe('found');
+    expect(result.symbol.filePath).toBe('src/components/App.tsx');
+    expect(result.symbol.kind).toBe('Function');
+  });
+
+  it('context tool returns ranked candidates when file_path only partially narrows (#470)', async () => {
+    (executeParameterized as any).mockResolvedValue([
+      {
+        id: 'func:foo:1',
+        name: 'foo',
+        type: 'Function',
+        filePath: 'src/a.ts',
+        startLine: 1,
+        endLine: 5,
+      },
+      {
+        id: 'func:foo:2',
+        name: 'foo',
+        type: 'Function',
+        filePath: 'src/b.ts',
+        startLine: 1,
+        endLine: 5,
+      },
+    ]);
+    // No hints → both candidates score 0.56 (0.50 base + 0.06 Function
+    // priority). Tied scores fall back to deterministic tiebreakers.
+    const result = await backend.callTool('context', { name: 'foo' });
+    expect(result.status).toBe('ambiguous');
+    expect(result.candidates).toHaveLength(2);
+    expect(result.candidates[0].score).toBeCloseTo(0.56, 2);
+    expect(result.candidates[1].score).toBeCloseTo(0.56, 2);
+  });
+
+  it('context tool boosts the candidate whose kind matches the hint (#470)', async () => {
+    (executeParameterized as any).mockResolvedValue([
+      {
+        id: 'method:save:1',
+        name: 'save',
+        type: 'Method',
+        filePath: 'src/service.ts',
+        startLine: 10,
+        endLine: 20,
+      },
+      {
+        id: 'func:save:1',
+        name: 'save',
+        type: 'Function',
+        filePath: 'src/util.ts',
+        startLine: 5,
+        endLine: 15,
+      },
+    ]);
+    const result = await backend.callTool('context', { name: 'save', kind: 'Function' });
+    // When kind hint is given, kind-priority bonus is suppressed and +0.20
+    // kind-match bonus applies instead. Function becomes the top candidate.
+    expect(result.status).toBe('ambiguous');
+    expect(result.candidates[0].kind).toBe('Function');
+    expect(result.candidates[0].score).toBeGreaterThan(result.candidates[1].score);
+  });
+
+  it('impact tool returns ambiguous shape with ranked candidates when target has multiple matches (#470)', async () => {
+    // resolveSymbolCandidates issues a single name query; mock it to return
+    // two Function rows in different files with no hints.
+    (executeParameterized as any).mockResolvedValue([
+      {
+        id: 'func:login:1',
+        name: 'login',
+        type: 'Function',
+        filePath: 'src/auth.ts',
+        startLine: 5,
+        endLine: 15,
+      },
+      {
+        id: 'func:login:2',
+        name: 'login',
+        type: 'Function',
+        filePath: 'src/admin/login.ts',
+        startLine: 8,
+        endLine: 20,
+      },
+    ]);
+
+    const result = await backend.callTool('impact', { target: 'login', direction: 'upstream' });
+
+    expect(result.status).toBe('ambiguous');
+    expect(result.candidates).toHaveLength(2);
+    expect(result.impactedCount).toBe(0);
+    expect(result.risk).toBe('UNKNOWN');
+    expect(result.target.name).toBe('login');
+    for (const c of result.candidates) {
+      expect(typeof c.score).toBe('number');
+      expect(c.uid).toBeDefined();
+      expect(c.kind).toBe('Function');
+    }
+  });
+
+  it('impact tool resolves via target_uid without running the name-based resolver (#470)', async () => {
+    // UID path: exactly one executeParameterized call for the lookup, then
+    // the BFS issues executeQuery calls (which we mock empty). Crucially,
+    // no `WHERE n.name =` query fires.
+    (executeParameterized as any).mockResolvedValue([
+      {
+        id: 'uid:1234',
+        name: 'pickedByUid',
+        type: 'Function',
+        filePath: 'src/pick.ts',
+        startLine: 1,
+        endLine: 10,
+      },
+    ]);
+    (executeQuery as any).mockResolvedValue([]);
+
+    const result = await backend.callTool('impact', {
+      target: 'ignoredName',
+      target_uid: 'uid:1234',
+      direction: 'upstream',
+    });
+
+    // No ambiguous shape and no name-lookup error — the uid short-circuit won.
+    expect(result.status).not.toBe('ambiguous');
+    expect(result.target).toBeDefined();
+
+    // All executeParameterized calls this test dispatched must have been
+    // uid-keyed, never name-keyed. That proves the name resolver was skipped.
+    const calls = (executeParameterized as any).mock.calls as Array<
+      [string, string, Record<string, unknown>]
+    >;
+    for (const [, cypher] of calls) {
+      expect(cypher).not.toMatch(/WHERE n\.name = \$symName/);
+    }
   });
 
   it('dispatches impact tool', async () => {
@@ -271,7 +597,14 @@ describe('LocalBackend.callTool', () => {
   it('dispatches rename tool', async () => {
     (executeParameterized as any)
       .mockResolvedValueOnce([
-        { id: 'func:oldName', name: 'oldName', type: 'Function', filePath: 'src/test.ts', startLine: 1, endLine: 5 },
+        {
+          id: 'func:oldName',
+          name: 'oldName',
+          type: 'Function',
+          filePath: 'src/test.ts',
+          startLine: 1,
+          endLine: 5,
+        },
       ])
       .mockResolvedValue([]);
 
@@ -288,6 +621,140 @@ describe('LocalBackend.callTool', () => {
     expect(result.error).toContain('Either symbol_name or symbol_uid');
   });
 
+  // api_impact tool
+  it('dispatches api_impact tool with route param', async () => {
+    (executeParameterized as any).mockResolvedValue([
+      {
+        routeId: 'Route:/api/grants',
+        routeName: '/api/grants',
+        handlerFile: 'app/api/grants/route.ts',
+        responseKeys: ['data', 'pagination'],
+        errorKeys: ['error', 'message'],
+        middleware: ['withAuth'],
+        consumerName: 'GrantsList',
+        consumerFile: 'src/GrantsList.tsx',
+        fetchReason: 'fetch-url-match|keys:data,pagination',
+      },
+    ]);
+    const result = await backend.callTool('api_impact', { route: '/api/grants' });
+    expect(result).toHaveProperty('route', '/api/grants');
+    expect(result).toHaveProperty('handler', 'app/api/grants/route.ts');
+    expect(result).toHaveProperty('responseShape');
+    expect(result.responseShape.success).toEqual(['data', 'pagination']);
+    expect(result.responseShape.error).toEqual(['error', 'message']);
+    expect(result).toHaveProperty('middleware', ['withAuth']);
+    expect(result).toHaveProperty('consumers');
+    expect(result.consumers).toHaveLength(1);
+    expect(result).toHaveProperty('impactSummary');
+    expect(result.impactSummary.directConsumers).toBe(1);
+    expect(result.impactSummary.riskLevel).toBe('LOW');
+  });
+
+  it('api_impact returns error when no route or file param', async () => {
+    const result = await backend.callTool('api_impact', {});
+    expect(result.error).toContain('Either "route" or "file"');
+  });
+
+  it('api_impact returns error when no routes found', async () => {
+    (executeParameterized as any).mockResolvedValue([]);
+    const result = await backend.callTool('api_impact', { route: '/api/nonexistent' });
+    expect(result.error).toContain('No routes found');
+  });
+
+  it('api_impact detects mismatches and bumps risk level', async () => {
+    (executeParameterized as any).mockResolvedValue([
+      {
+        routeId: 'Route:/api/data',
+        routeName: '/api/data',
+        handlerFile: 'api/data.ts',
+        responseKeys: ['items'],
+        errorKeys: ['error'],
+        middleware: null,
+        consumerName: 'DataView',
+        consumerFile: 'src/DataView.tsx',
+        fetchReason: 'fetch-url-match|keys:items,meta',
+      },
+    ]);
+    const result = await backend.callTool('api_impact', { route: '/api/data' });
+    expect(result.mismatches).toBeDefined();
+    expect(result.mismatches).toHaveLength(1);
+    expect(result.mismatches[0].field).toBe('meta');
+    expect(result.mismatches[0].reason).toContain('not in response shape');
+    // 1 consumer = LOW, but mismatch bumps to MEDIUM
+    expect(result.impactSummary.riskLevel).toBe('MEDIUM');
+  });
+
+  it('api_impact supports file param lookup', async () => {
+    (executeParameterized as any).mockResolvedValue([
+      {
+        routeId: 'Route:/api/users',
+        routeName: '/api/users',
+        handlerFile: 'app/api/users/route.ts',
+        responseKeys: ['users'],
+        errorKeys: null,
+        middleware: null,
+        consumerName: null,
+        consumerFile: null,
+        fetchReason: null,
+      },
+    ]);
+    const result = await backend.callTool('api_impact', { file: 'app/api/users/route.ts' });
+    expect(result.route).toBe('/api/users');
+    expect(result.impactSummary.directConsumers).toBe(0);
+    expect(result.impactSummary.riskLevel).toBe('LOW');
+  });
+
+  it('api_impact returns array for multiple matching routes', async () => {
+    (executeParameterized as any).mockResolvedValue([
+      {
+        routeId: 'Route:/api/a',
+        routeName: '/api/a',
+        handlerFile: 'api/a.ts',
+        responseKeys: null,
+        errorKeys: null,
+        middleware: null,
+        consumerName: null,
+        consumerFile: null,
+        fetchReason: null,
+      },
+      {
+        routeId: 'Route:/api/b',
+        routeName: '/api/b',
+        handlerFile: 'api/b.ts',
+        responseKeys: null,
+        errorKeys: null,
+        middleware: null,
+        consumerName: null,
+        consumerFile: null,
+        fetchReason: null,
+      },
+    ]);
+    const result = await backend.callTool('api_impact', { route: '/api/' });
+    expect(result.routes).toHaveLength(2);
+    expect(result.total).toBe(2);
+  });
+
+  it('api_impact HIGH risk for 10+ consumers', async () => {
+    const rows = [];
+    for (let i = 0; i < 10; i++) {
+      rows.push({
+        routeId: 'Route:/api/popular',
+        routeName: '/api/popular',
+        handlerFile: 'api/popular.ts',
+        responseKeys: ['data'],
+        errorKeys: null,
+        middleware: null,
+        consumerName: `Consumer${i}`,
+        consumerFile: `src/Consumer${i}.tsx`,
+        fetchReason: null,
+      });
+    }
+    (executeParameterized as any).mockResolvedValue(rows);
+    const result = await backend.callTool('api_impact', { route: '/api/popular' });
+    expect(result.impactSummary.directConsumers).toBe(10);
+    expect(result.impactSummary.riskLevel).toBe('HIGH');
+  });
+
   // Legacy tool aliases
   it('dispatches "search" as alias for query', async () => {
     (executeParameterized as any).mockResolvedValue([]);
@@ -298,7 +765,14 @@ describe('LocalBackend.callTool', () => {
 
   it('dispatches "explore" as alias for context', async () => {
     (executeParameterized as any).mockResolvedValue([
-      { id: 'func:main', name: 'main', type: 'Function', filePath: 'src/index.ts', startLine: 1, endLine: 10 },
+      {
+        id: 'func:main',
+        name: 'main',
+        type: 'Function',
+        filePath: 'src/index.ts',
+        startLine: 1,
+        endLine: 10,
+      },
     ]);
     const result = await backend.callTool('explore', { name: 'main' });
     // explore calls context — which may return found or ambiguous depending on mock
@@ -327,15 +801,17 @@ describe('LocalBackend.resolveRepo', () => {
   it('throws when no repos are registered', async () => {
     setupNoRepos();
     await backend.init();
-    await expect(backend.callTool('query', { query: 'test' }))
-      .rejects.toThrow('No indexed repositories');
+    await expect(backend.callTool('query', { query: 'test' })).rejects.toThrow(
+      'No indexed repositories',
+    );
   });
 
   it('throws for ambiguous repos without param', async () => {
     setupMultipleRepos();
     await backend.init();
-    await expect(backend.callTool('query', { query: 'test' }))
-      .rejects.toThrow('Multiple repositories indexed');
+    await expect(backend.callTool('query', { query: 'test' })).rejects.toThrow(
+      'Multiple repositories indexed',
+    );
   });
 
   it('resolves repo by name parameter', async () => {
@@ -354,8 +830,9 @@ describe('LocalBackend.resolveRepo', () => {
   it('throws for unknown repo name', async () => {
     setupSingleRepo();
     await backend.init();
-    await expect(backend.callTool('query', { query: 'test', repo: 'nonexistent' }))
-      .rejects.toThrow('not found');
+    await expect(backend.callTool('query', { query: 'test', repo: 'nonexistent' })).rejects.toThrow(
+      'not found',
+    );
   });
 
   it('resolves repo case-insensitively', async () => {
@@ -388,6 +865,47 @@ describe('LocalBackend.resolveRepo', () => {
     expect(result).toHaveProperty('candidates');
     // listRegisteredRepos should have been called again
     expect(listRegisteredRepos).toHaveBeenCalledTimes(2); // once in init, once in refreshRepos
+  });
+
+  it('emits sibling-clone drift warning exactly once per (repo, cwd) pair', async () => {
+    // Regression guard for the one-shot stderr warning emitted when
+    // the caller's cwd is in a sibling clone of the resolved index.
+    // The cache must short-circuit BOTH `console.error` and the
+    // underlying `checkCwdMatch` git shellouts on subsequent calls.
+    const { checkCwdMatch } = await import('../../src/core/git-staleness.js');
+    (listRegisteredRepos as any).mockResolvedValue([
+      { ...MOCK_REPO_ENTRY, remoteUrl: 'https://example.com/foo/bar' },
+    ]);
+    (checkCwdMatch as any).mockResolvedValue({
+      match: 'sibling-by-remote',
+      entry: { ...MOCK_REPO_ENTRY, remoteUrl: 'https://example.com/foo/bar' },
+      cwdGitRoot: '/tmp/sibling-clone',
+      cwdHead: 'feedface',
+      hint: '⚠️ stale sibling clone',
+    });
+
+    const cap = _captureLogger();
+    try {
+      await backend.init();
+
+      // Three resolveRepo invocations from the same cwd:
+      await backend.callTool('list_repos', {}); // resolveRepo not called for list_repos
+      // Use a real resolveRepo path:
+      await backend.resolveRepo();
+      await backend.resolveRepo();
+      await backend.resolveRepo();
+
+      const drift = cap
+        .records()
+        .filter((r) => String(r.msg ?? '').includes('stale sibling clone'));
+      expect(drift).toHaveLength(1);
+      // checkCwdMatch should also only run once — the cache check
+      // happens BEFORE the shellout-heavy match call.
+      expect(checkCwdMatch).toHaveBeenCalledTimes(1);
+    } finally {
+      cap.restore();
+      (checkCwdMatch as any).mockResolvedValue({ match: 'none' });
+    }
   });
 });
 
@@ -460,8 +978,7 @@ describe('ensureInitialized', () => {
 
   it('handles initLbug failure gracefully', async () => {
     (initLbug as any).mockRejectedValueOnce(new Error('DB locked'));
-    await expect(backend.callTool('query', { query: 'test' }))
-      .rejects.toThrow('DB locked');
+    await expect(backend.callTool('query', { query: 'test' })).rejects.toThrow('DB locked');
   });
 });
 
@@ -529,12 +1046,14 @@ describe('LocalBackend.listRepos', () => {
     await backend.init();
     const repos = await backend.callTool('list_repos', {});
     expect(repos).toHaveLength(1);
-    expect(repos[0]).toEqual(expect.objectContaining({
-      name: 'test-project',
-      path: '/tmp/test-project',
-      indexedAt: expect.any(String),
-      lastCommit: expect.any(String),
-    }));
+    expect(repos[0]).toEqual(
+      expect.objectContaining({
+        name: 'test-project',
+        path: '/tmp/test-project',
+        indexedAt: expect.any(String),
+        lastCommit: expect.any(String),
+      }),
+    );
   });
 
   it('re-reads registry on each listRepos call', async () => {
@@ -565,7 +1084,7 @@ describe('cypher tool LadybugDB not ready', () => {
     // Actually ensureInitialized checks isLbugReady and re-inits — let's make that pass
     // then the cypher method checks isLbugReady again
     (isLbugReady as any)
-      .mockReturnValueOnce(false)  // ensureInitialized check
+      .mockReturnValueOnce(false) // ensureInitialized check
       .mockReturnValueOnce(false); // cypher's own check
 
     const result = await backend.callTool('cypher', {

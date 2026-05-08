@@ -6,13 +6,23 @@ name: CI Report
 
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ['CI']
     types: [completed]
 
 permissions:
-  actions: read        # needed to list/download workflow run artifacts
-  contents: read       # needed for sparse checkout of vitest.config.ts
+  actions: read # needed to list/download workflow run artifacts
+  contents: read # needed for sparse checkout of vitest.config.ts
   pull-requests: write # needed to post sticky PR comment
+
+# Concurrency convention: see CONTRIBUTING.md → "GitHub Actions — Concurrency Convention".
+# Serialize sticky-comment writes per PR so two rapid CI completions don't race.
+# Internal PRs surface in `pull_requests[0].number`. Fork PRs leave that array empty,
+# so we fall back to `<head-repo-full-name>/<head-branch>`, which is stable across
+# reruns and subsequent pushes for the same fork PR (unlike `workflow_run.id` which
+# is unique per run and therefore does not serialize anything).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.pull_requests[0].number || format('{0}/{1}', github.event.workflow_run.head_repository.full_name, github.event.workflow_run.head_branch) }}
+  cancel-in-progress: false
 
 jobs:
   pr-report:
@@ -26,7 +36,7 @@ jobs:
     steps:
       # ── Download artifacts from the CI run ────────────────────────
       - name: Download artifacts
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7
         with:
           script: |
             const fs = require('fs');
@@ -59,7 +69,6 @@ jobs:
             const temp = process.env.RUNNER_TEMP;
             await downloadArtifact('pr-meta', path.join(temp, 'dl'));
             await downloadArtifact('test-reports', path.join(temp, 'dl'));
-            await downloadArtifact('integration-reports', path.join(temp, 'dl'));
 
       - name: Extract artifacts
         shell: bash
@@ -109,12 +118,12 @@ jobs:
           }
 
           echo "quality=$(validate_result "$DIR/quality_result")"        >> "$GITHUB_OUTPUT"
-          echo "unit=$(validate_result "$DIR/unit_result")"              >> "$GITHUB_OUTPUT"
-          echo "integration=$(validate_result "$DIR/integration_result")" >> "$GITHUB_OUTPUT"
+          echo "tests=$(validate_result "$DIR/tests_result")"            >> "$GITHUB_OUTPUT"
+          echo "e2e=$(validate_result "$DIR/e2e_result")"                >> "$GITHUB_OUTPUT"
 
       - name: Checkout (for vitest config)
         if: steps.meta.outputs.skip != 'true'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: gitnexus/vitest.config.ts
           sparse-checkout-cone-mode: false
@@ -123,20 +132,21 @@ jobs:
       - name: Fetch base branch coverage
         if: steps.meta.outputs.skip != 'true'
         id: base-coverage
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7
         with:
           script: |
             const fs = require('fs');
             const path = require('path');
 
-            // Find the latest successful CI run on main
+            // Find recent successful CI runs on main (check several in case
+            // the most recent artifact has expired).
             const runs = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'ci.yml',
               branch: 'main',
               status: 'success',
-              per_page: 1,
+              per_page: 5,
             });
 
             if (runs.data.workflow_runs.length === 0) {
@@ -145,94 +155,55 @@ jobs:
               return;
             }
 
-            const mainRunId = runs.data.workflow_runs[0].id;
-            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: mainRunId,
-            });
+            // Try each run until we find a downloadable test-reports artifact
+            for (const run of runs.data.workflow_runs) {
+              const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id,
+              });
 
-            const testReports = artifacts.data.artifacts.find(a => a.name === 'test-reports');
-            if (!testReports) {
-              core.setOutput('found', 'false');
-              core.info('No test-reports artifact on main branch');
-              return;
+              const testReports = artifacts.data.artifacts.find(a => a.name === 'test-reports');
+              if (!testReports) {
+                core.info(`Run ${run.id}: no test-reports artifact, trying next`);
+                continue;
+              }
+
+              try {
+                const zip = await github.rest.actions.downloadArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: testReports.id,
+                  archive_format: 'zip',
+                });
+
+                const dest = path.join(process.env.RUNNER_TEMP, 'base-coverage');
+                fs.mkdirSync(dest, { recursive: true });
+                fs.writeFileSync(path.join(dest, 'base.zip'), Buffer.from(zip.data));
+                core.setOutput('found', 'true');
+                core.setOutput('dir', dest);
+                return;
+              } catch (err) {
+                // 410 Gone means the artifact expired; try the next run
+                if (err.status === 410 || err.response?.status === 410) {
+                  core.info(`Run ${run.id}: artifact expired, trying next`);
+                  continue;
+                }
+                throw err;
+              }
             }
 
-            const zip = await github.rest.actions.downloadArtifact({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              artifact_id: testReports.id,
-              archive_format: 'zip',
-            });
-
-            const dest = path.join(process.env.RUNNER_TEMP, 'base-coverage');
-            fs.mkdirSync(dest, { recursive: true });
-            fs.writeFileSync(path.join(dest, 'base.zip'), Buffer.from(zip.data));
-            core.setOutput('found', 'true');
-            core.setOutput('dir', dest);
+            // All attempts exhausted — no usable base coverage
+            core.setOutput('found', 'false');
+            core.info('No downloadable test-reports artifact found on main (all expired or missing)');
 
       - name: Extract base coverage
         if: steps.meta.outputs.skip != 'true' && steps.base-coverage.outputs.found == 'true'
         shell: bash
         run: |
           cd "${{ steps.base-coverage.outputs.dir }}"
+          mkdir -p base
           unzip -o base.zip -d base
-
-      # ── Merge coverage from unit + integration ─────────────────────
-      - name: Setup Node.js
-        if: steps.meta.outputs.skip != 'true'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 20
-
-      - name: Install coverage merge tools
-        if: steps.meta.outputs.skip != 'true'
-        run: npm install --no-save istanbul-lib-coverage istanbul-lib-report istanbul-reports
-
-      - name: Merge coverage reports
-        if: steps.meta.outputs.skip != 'true'
-        id: coverage
-        shell: bash
-        run: |
-          DIR="$RUNNER_TEMP/artifacts"
-          UNIT_COV=$(find "$DIR/test-reports" -name "coverage-final.json" -type f 2>/dev/null | head -1)
-          INTEG_COV=$(find "$DIR/integration-reports" -name "coverage-final.json" -type f 2>/dev/null | head -1)
-          MERGED_DIR="$RUNNER_TEMP/merged-coverage"
-          mkdir -p "$MERGED_DIR"
-
-          if [ -n "$UNIT_COV" ] && [ -n "$INTEG_COV" ]; then
-            echo "has_merged=true" >> "$GITHUB_OUTPUT"
-            # Merge using Node.js + istanbul-lib-coverage.
-            # Paths are passed via env vars to avoid shell interpolation
-            # inside the script string.
-            UNIT_COV_PATH="$UNIT_COV" \
-            INTEG_COV_PATH="$INTEG_COV" \
-            MERGED_OUT_DIR="$MERGED_DIR" \
-            node -e "
-              const libCoverage = require('istanbul-lib-coverage');
-              const libReport = require('istanbul-lib-report');
-              const reports = require('istanbul-reports');
-              const fs = require('fs');
-
-              const map = libCoverage.createCoverageMap({});
-              map.merge(JSON.parse(fs.readFileSync(process.env.UNIT_COV_PATH, 'utf8')));
-              map.merge(JSON.parse(fs.readFileSync(process.env.INTEG_COV_PATH, 'utf8')));
-
-              const context = libReport.createContext({
-                coverageMap: map,
-                dir: process.env.MERGED_OUT_DIR,
-              });
-              reports.create('json-summary').execute(context);
-              console.log('Merged coverage written to ' + process.env.MERGED_OUT_DIR + '/coverage-summary.json');
-            "
-          elif [ -n "$UNIT_COV" ]; then
-            echo "has_merged=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Integration coverage not found — using unit coverage only"
-          else
-            echo "has_merged=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::No coverage data found"
-          fi
 
       - name: Build report
         if: steps.meta.outputs.skip != 'true'
@@ -240,15 +211,13 @@ jobs:
         shell: bash
         env:
           QUALITY: ${{ steps.meta.outputs.quality }}
-          UNIT: ${{ steps.meta.outputs.unit }}
-          INTEG: ${{ steps.meta.outputs.integration }}
-          HAS_MERGED: ${{ steps.coverage.outputs.has_merged }}
+          TESTS: ${{ steps.meta.outputs.tests }}
+          E2E: ${{ steps.meta.outputs.e2e }}
           BASE_FOUND: ${{ steps.base-coverage.outputs.found }}
           BASE_DIR: ${{ steps.base-coverage.outputs.dir }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
         run: |
           DIR="$RUNNER_TEMP/artifacts"
-          MERGED_DIR="$RUNNER_TEMP/merged-coverage"
 
           # ── Helper: read coverage summary into prefixed vars ──
           read_cov() {
@@ -281,20 +250,14 @@ jobs:
               printf -v "${prefix}_BRANCH_COV" '%s' ""
               printf -v "${prefix}_FUNCS_COV" '%s' ""
               printf -v "${prefix}_LINES_COV" '%s' ""
-              return 1
+              return 0
             fi
           }
 
-          # ── Read all coverage reports ──
+          # ── Read coverage reports ──
           UNIT_SUMMARY=$(find "$DIR/test-reports" -name "coverage-summary.json" -type f 2>/dev/null | head -1)
-          INTEG_SUMMARY=$(find "$DIR/integration-reports" -name "coverage-summary.json" -type f 2>/dev/null | head -1)
-          MERGED_SUMMARY="$MERGED_DIR/coverage-summary.json"
 
           read_cov "U" "$UNIT_SUMMARY"
-          HAS_UNIT=$?
-          read_cov "I" "$INTEG_SUMMARY"
-          HAS_INTEG=$?
-          read_cov "M" "$MERGED_SUMMARY"
 
           # ── Read base branch coverage (main) ──
           BASE_SUMMARY=""
@@ -305,36 +268,26 @@ jobs:
 
           # ── Locate test results ──
           RESULTS_FILE=$(find "$DIR/test-reports" -name "test-results.json" -type f 2>/dev/null | head -1)
-          INTEG_RESULTS=$(find "$DIR/integration-reports" -name "integration-results.json" -type f 2>/dev/null | head -1)
+          WEB_RESULTS_FILE=$(find "$DIR/test-reports" -name "web-test-results.json" -type f 2>/dev/null | head -1)
 
-          if [ -n "$RESULTS_FILE" ]; then
-            U_TOTAL=$(jq -r '.numTotalTests' "$RESULTS_FILE" 2>/dev/null || echo 0)
-            U_PASSED=$(jq -r '.numPassedTests' "$RESULTS_FILE" 2>/dev/null || echo 0)
-            U_FAILED=$(jq -r '.numFailedTests' "$RESULTS_FILE" 2>/dev/null || echo 0)
-            U_SKIPPED=$(jq -r '.numPendingTests' "$RESULTS_FILE" 2>/dev/null || echo 0)
-            U_SUITES=$(jq -r '.numTotalTestSuites' "$RESULTS_FILE" 2>/dev/null || echo 0)
-            U_DURATION=$(jq -r '((.testResults | map(.endTime) | max) - (.startTime)) / 1000 | floor' "$RESULTS_FILE" 2>/dev/null || echo 0)
-          else
-            U_TOTAL=0; U_PASSED=0; U_FAILED=0; U_SKIPPED=0; U_SUITES=0; U_DURATION=0
-          fi
+          sum_results() {
+            local file=$1
+            if [ -n "$file" ] && [ -f "$file" ]; then
+              jq -r '"\(.numTotalTests) \(.numPassedTests) \(.numFailedTests) \(.numPendingTests) \(.numTotalTestSuites) \(((.testResults | map(.endTime) | max) - (.startTime)) / 1000 | floor)"' "$file" 2>/dev/null || echo "0 0 0 0 0 0"
+            else
+              echo "0 0 0 0 0 0"
+            fi
+          }
 
-          if [ -n "$INTEG_RESULTS" ]; then
-            I_TOTAL=$(jq -r '.numTotalTests' "$INTEG_RESULTS" 2>/dev/null || echo 0)
-            I_PASSED=$(jq -r '.numPassedTests' "$INTEG_RESULTS" 2>/dev/null || echo 0)
-            I_FAILED=$(jq -r '.numFailedTests' "$INTEG_RESULTS" 2>/dev/null || echo 0)
-            I_SKIPPED=$(jq -r '.numPendingTests' "$INTEG_RESULTS" 2>/dev/null || echo 0)
-            I_SUITES=$(jq -r '.numTotalTestSuites' "$INTEG_RESULTS" 2>/dev/null || echo 0)
-            I_DURATION=$(jq -r '((.testResults | map(.endTime) | max) - (.startTime)) / 1000 | floor' "$INTEG_RESULTS" 2>/dev/null || echo 0)
-          else
-            I_TOTAL=0; I_PASSED=0; I_FAILED=0; I_SKIPPED=0; I_SUITES=0; I_DURATION=0
-          fi
+          read CLI_T CLI_P CLI_F CLI_S CLI_SU CLI_D <<< "$(sum_results "$RESULTS_FILE")"
+          read WEB_T WEB_P WEB_F WEB_S WEB_SU WEB_D <<< "$(sum_results "$WEB_RESULTS_FILE")"
 
-          # ── Sum test results ──
-          TOTAL=$((U_TOTAL + I_TOTAL))
-          PASSED=$((U_PASSED + I_PASSED))
-          FAILED=$((U_FAILED + I_FAILED))
-          SKIPPED=$((U_SKIPPED + I_SKIPPED))
-          SUITES=$((U_SUITES + I_SUITES))
+          TOTAL=$((CLI_T + WEB_T))
+          PASSED=$((CLI_P + WEB_P))
+          FAILED=$((CLI_F + WEB_F))
+          SKIPPED=$((CLI_S + WEB_S))
+          SUITES=$((CLI_SU + WEB_SU))
+          DURATION=$((CLI_D > WEB_D ? CLI_D : WEB_D))
 
           # ── Status helpers ──
           status_icon() {
@@ -346,14 +299,20 @@ jobs:
             esac
           }
 
+          # Validate a value looks like a number (integer or decimal, optional
+          # leading minus).  Returns 1 for anything else — guards against awk
+          # injection when artifact values come from untrusted fork code.
+          is_numeric() { [[ "$1" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; }
+
           cov_delta() {
             local pct=$1 base=$2
             if [ "$pct" = "N/A" ] || [ "$base" = "N/A" ]; then echo "—"; return; fi
+            if ! is_numeric "$pct" || ! is_numeric "$base"; then echo "—"; return; fi
             local diff
-            diff=$(awk "BEGIN { printf \"%.1f\", $pct - $base }")
-            if [ "$(awk "BEGIN { print ($pct > $base) ? 1 : 0 }")" = "1" ]; then
+            diff=$(awk -v p="$pct" -v b="$base" 'BEGIN { printf "%.1f", p - b }')
+            if [ "$(awk -v p="$pct" -v b="$base" 'BEGIN { print (p > b) ? 1 : 0 }')" = "1" ]; then
               echo "📈 +${diff}"
-            elif [ "$(awk "BEGIN { print ($pct < $base) ? 1 : 0 }")" = "1" ]; then
+            elif [ "$(awk -v p="$pct" -v b="$base" 'BEGIN { print (p < b) ? 1 : 0 }')" = "1" ]; then
               echo "📉 ${diff}"
             else
               echo "＝ ${diff}"
@@ -362,9 +321,9 @@ jobs:
 
           cov_bar() {
             local pct=$1 base=$2
-            if [ "$pct" = "N/A" ]; then echo "—"; return; fi
+            if [ "$pct" = "N/A" ] || ! is_numeric "$pct"; then echo "—"; return; fi
             local filled
-            filled=$(awk "BEGIN { printf \"%d\", $pct / 5 }")
+            filled=$(awk -v p="$pct" 'BEGIN { printf "%d", p / 5 }')
             (( filled < 0 )) && filled=0
             (( filled > 20 )) && filled=20
             local empty=$((20 - filled))
@@ -372,7 +331,7 @@ jobs:
             for ((i=0; i<filled; i++)); do bar+="█"; done
             for ((i=0; i<empty; i++)); do bar+="░"; done
             # Green if >= base (or base unavailable), red if dropped
-            if [ "$base" = "N/A" ] || [ "$(awk "BEGIN { print ($pct >= $base) ? 1 : 0 }")" = "1" ]; then
+            if [ "$base" = "N/A" ] || ! is_numeric "$base" || [ "$(awk -v p="$pct" -v b="$base" 'BEGIN { print (p >= b) ? 1 : 0 }')" = "1" ]; then
               echo "🟢 ${bar}"
             else
               echo "🔴 ${bar}"
@@ -380,7 +339,7 @@ jobs:
           }
 
           # ── Overall status ──
-          if [[ "$QUALITY" == "success" && "$UNIT" == "success" && "$INTEG" == "success" ]]; then
+          if [[ "$QUALITY" == "success" && "$TESTS" == "success" && ("$E2E" == "success" || "$E2E" == "skipped") ]]; then
             OVERALL="✅ **All checks passed**"
           else
             OVERALL="❌ **Some checks failed**"
@@ -398,22 +357,16 @@ jobs:
             echo "| Stage | Status | Details |"
             echo "|-------|--------|---------|"
             echo "| $(status_icon "$QUALITY") Typecheck | \`${QUALITY}\` | tsc --noEmit |"
-            echo "| $(status_icon "$UNIT") Unit Tests | \`${UNIT}\` | 3 platforms |"
-            echo "| $(status_icon "$INTEG") Integration | \`${INTEG}\` | 3 OS x 4 groups = 12 jobs |"
+            echo "| $(status_icon "$TESTS") Tests | \`${TESTS}\` | unit tests, 3 platforms |"
+            echo "| $(status_icon "$E2E") E2E | \`${E2E}\` | gitnexus-web changes only |"
             echo ""
 
             if [ "$TOTAL" -gt 0 ] 2>/dev/null; then
               echo "### Test Results"
               echo ""
-              echo "| Suite | Tests | Passed | Failed | Skipped | Duration |"
-              echo "|-------|-------|--------|--------|---------|----------|"
-              if [ "$U_TOTAL" -gt 0 ] 2>/dev/null; then
-                echo "| Unit | ${U_TOTAL} | ${U_PASSED} | ${U_FAILED} | ${U_SKIPPED} | ${U_DURATION}s |"
-              fi
-              if [ "$I_TOTAL" -gt 0 ] 2>/dev/null; then
-                echo "| Integration | ${I_TOTAL} | ${I_PASSED} | ${I_FAILED} | ${I_SKIPPED} | ${I_DURATION}s |"
-              fi
-              echo "| **Total** | **${TOTAL}** | **${PASSED}** | **${FAILED}** | **${SKIPPED}** | **$((U_DURATION + I_DURATION))s** |"
+              echo "| Tests | Passed | Failed | Skipped | Duration |"
+              echo "|-------|--------|--------|---------|----------|"
+              echo "| ${TOTAL} | ${PASSED} | ${FAILED} | ${SKIPPED} | ${DURATION}s |"
               echo ""
 
               if [ "$FAILED" = "0" ]; then
@@ -426,27 +379,16 @@ jobs:
                 echo "<details>"
                 echo "<summary>${SKIPPED} test(s) skipped — expand for details</summary>"
                 echo ""
-                # Extract skipped test names from integration results
-                if [ -n "$INTEG_RESULTS" ] && [ "$I_SKIPPED" -gt 0 ] 2>/dev/null; then
-                  echo "**Integration:**"
-                  jq -r '
-                    .testResults[]
-                    | .assertionResults[]?
-                    | select(.status == "pending" or .status == "skipped")
-                    | "- \(.ancestorTitles | join(" > ")) > \(.title)"
-                  ' "$INTEG_RESULTS" 2>/dev/null || echo "- _(unable to parse skipped test details)_"
-                fi
-                # Extract skipped test names from unit results
-                if [ -n "$RESULTS_FILE" ] && [ "$U_SKIPPED" -gt 0 ] 2>/dev/null; then
-                  echo ""
-                  echo "**Unit:**"
-                  jq -r '
-                    .testResults[]
-                    | .assertionResults[]?
-                    | select(.status == "pending" or .status == "skipped")
-                    | "- \(.ancestorTitles | join(" > ")) > \(.title)"
-                  ' "$RESULTS_FILE" 2>/dev/null || echo "- _(unable to parse skipped test details)_"
-                fi
+                for rf in "$RESULTS_FILE" "$WEB_RESULTS_FILE"; do
+                  if [ -n "$rf" ] && [ -f "$rf" ]; then
+                    jq -r '
+                      .testResults[]
+                      | .assertionResults[]?
+                      | select(.status == "pending" or .status == "skipped")
+                      | "- \(.ancestorTitles | join(" > ")) > \(.title)"
+                    ' "$rf" 2>/dev/null || true
+                  fi
+                done
                 echo ""
                 echo "</details>"
               fi
@@ -469,35 +411,10 @@ jobs:
               echo ""
             }
 
-            if [ "$M_STMTS" != "N/A" ]; then
+            if [ "$U_STMTS" != "N/A" ]; then
               echo "### Code Coverage"
               echo ""
-              cov_table "Combined (Unit + Integration)" \
-                "$M_STMTS" "$M_BRANCH" "$M_FUNCS" "$M_LINES" \
-                "$M_STMTS_COV" "$M_BRANCH_COV" "$M_FUNCS_COV" "$M_LINES_COV" \
-                "$B_STMTS" "$B_BRANCH" "$B_FUNCS" "$B_LINES"
-
-              echo "<details>"
-              echo "<summary>Coverage breakdown by test suite</summary>"
-              echo ""
-              if [ "$U_STMTS" != "N/A" ]; then
-                cov_table "Unit Tests" \
-                  "$U_STMTS" "$U_BRANCH" "$U_FUNCS" "$U_LINES" \
-                  "$U_STMTS_COV" "$U_BRANCH_COV" "$U_FUNCS_COV" "$U_LINES_COV" \
-                  "$B_STMTS" "$B_BRANCH" "$B_FUNCS" "$B_LINES"
-              fi
-              if [ "$I_STMTS" != "N/A" ]; then
-                cov_table "Integration Tests" \
-                  "$I_STMTS" "$I_BRANCH" "$I_FUNCS" "$I_LINES" \
-                  "$I_STMTS_COV" "$I_BRANCH_COV" "$I_FUNCS_COV" "$I_LINES_COV" \
-                  "$B_STMTS" "$B_BRANCH" "$B_FUNCS" "$B_LINES"
-              fi
-              echo "</details>"
-              echo ""
-            elif [ "$U_STMTS" != "N/A" ]; then
-              echo "### Code Coverage (Unit only)"
-              echo ""
-              cov_table "Unit Tests" \
+              cov_table "Tests" \
                 "$U_STMTS" "$U_BRANCH" "$U_FUNCS" "$U_LINES" \
                 "$U_STMTS_COV" "$U_BRANCH_COV" "$U_FUNCS_COV" "$U_LINES_COV" \
                 "$B_STMTS" "$B_BRANCH" "$B_FUNCS" "$B_LINES"
@@ -515,7 +432,7 @@ jobs:
 
       - name: Comment on PR
         if: steps.meta.outputs.skip != 'true'
-        uses: marocchino/sticky-pull-request-comment@773744901bac0e8cbb5a0dc842800d45e9b2b405 # v2
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v2
         with:
           header: ci-report
           number: ${{ steps.meta.outputs.pr_number }}

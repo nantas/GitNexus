@@ -1,6 +1,10 @@
 import process from 'node:process';
-import type { Transport, TransportSendOptions } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type {
+  Transport,
+  TransportSendOptions,
+} from '@modelcontextprotocol/sdk/shared/transport.js';
 import { JSONRPCMessageSchema, type JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
+import { withMcpWrite } from './stdio-context.js';
 
 export type StdioFraming = 'content-length' | 'newline';
 
@@ -128,7 +132,9 @@ export class CompatibleStdioServerTransport implements Transport {
     }
     if (contentLength > MAX_BUFFER_SIZE) {
       this.discardBufferedInput();
-      throw new Error(`Content-Length ${contentLength} exceeds maximum allowed size (${MAX_BUFFER_SIZE} bytes)`);
+      throw new Error(
+        `Content-Length ${contentLength} exceeds maximum allowed size (${MAX_BUFFER_SIZE} bytes)`,
+      );
     }
     const bodyStart = header.index + header.separatorLength;
     const bodyEnd = bodyStart + contentLength;
@@ -215,9 +221,10 @@ export class CompatibleStdioServerTransport implements Transport {
         return;
       }
 
-      const payload = this._framing === 'newline'
-        ? serializeNewlineMessage(message)
-        : serializeContentLengthMessage(message);
+      const payload =
+        this._framing === 'newline'
+          ? serializeNewlineMessage(message)
+          : serializeContentLengthMessage(message);
 
       const onError = (error: Error) => {
         this._stdout.removeListener('error', onError);
@@ -226,7 +233,12 @@ export class CompatibleStdioServerTransport implements Transport {
 
       this._stdout.on('error', onError);
 
-      if (this._stdout.write(payload)) {
+      // Tag the write with the MCP transport context so the sentinel
+      // (server.ts createStdoutSentinel Proxy) recognizes it as a legitimate
+      // JSON-RPC frame and passes it through to the real stdout instead of
+      // redirecting to stderr.
+      const writeOk = withMcpWrite(() => this._stdout.write(payload));
+      if (writeOk) {
         this._stdout.removeListener('error', onError);
         resolve();
       } else {

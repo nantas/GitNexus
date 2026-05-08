@@ -1,23 +1,32 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-    paths-ignore: ['**.md', 'docs/**', 'LICENSE']
   pull_request:
     branches: [main]
     paths-ignore: ['**.md', 'docs/**', 'LICENSE']
   workflow_call:
 
+# Concurrency convention: see CONTRIBUTING.md → "GitHub Actions — Concurrency Convention".
+# Hardcoded `CI-` prefix (not `${{ github.workflow }}`) because this workflow is
+# invoked as a reusable workflow from publish.yml and release-candidate.yml. In
+# called-workflow context `github.workflow` evaluation is ambiguous across GitHub
+# Actions versions, and a prefix that could resolve to the caller's name would
+# share a concurrency group with the caller → deadlock. A literal prefix is
+# immune. Direct `pull_request` invocations use `CI-<ref>`; invocations from a
+# reusable-workflow caller fall into a per-run-unique group that never serializes
+# with the caller. `push` to main is handled by release-candidate.yml, which
+# calls this workflow once before publishing.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('CI-{0}', github.ref) || format('CI-nested-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # ── Reusable workflow orchestration ─────────────────────────────────
 # Each concern lives in its own workflow file for maintainability:
 #   ci-quality.yml       — typecheck (tsc --noEmit)
-#   ci-unit-tests.yml    — unit tests with coverage + cross-platform
-#   ci-integration.yml   — integration test matrix (3 OS x 4 groups)
+#   ci-tests.yml         — unit + integration tests with coverage + cross-platform
+#   ci-e2e.yml           — E2E tests (only when gitnexus-web/ changes)
+#   ci-scope-parity.yml  — RFC #909 Ring 3 parity gate: legacy DAG + registry-primary
+#                          both pass, per migrated language in the JSON registry
 #
 # Shared setup is DRY via .github/actions/setup-gitnexus composite action.
 
@@ -27,15 +36,18 @@ jobs:
     permissions:
       contents: read
 
-  unit-tests:
-    uses: ./.github/workflows/ci-unit-tests.yml
+  tests:
+    uses: ./.github/workflows/ci-tests.yml
     permissions:
       contents: read
 
-  integration:
-    uses: ./.github/workflows/ci-integration.yml
-    with:
-      collect-coverage: ${{ github.event_name == 'pull_request' }}
+  e2e:
+    uses: ./.github/workflows/ci-e2e.yml
+    permissions:
+      contents: read
+
+  scope-parity:
+    uses: ./.github/workflows/ci-scope-parity.yml
     permissions:
       contents: read
 
@@ -47,7 +59,7 @@ jobs:
   save-pr-meta:
     name: Save PR Metadata
     if: always() && github.event_name == 'pull_request'
-    needs: [quality, unit-tests, integration]
+    needs: [quality, tests, e2e, scope-parity]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -56,17 +68,29 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.number }}
           QUALITY: ${{ needs.quality.result }}
-          UNIT: ${{ needs.unit-tests.result }}
-          INTEG: ${{ needs.integration.result }}
+          TESTS: ${{ needs.tests.result }}
+          E2E: ${{ needs.e2e.result }}
+          SCOPE_PARITY: ${{ needs.scope-parity.result }}
         run: |
           mkdir -p pr-meta
-          echo "$PR_NUMBER"  > pr-meta/pr_number
-          echo "$QUALITY"    > pr-meta/quality_result
-          echo "$UNIT"       > pr-meta/unit_result
-          echo "$INTEG"      > pr-meta/integration_result
+          echo "$PR_NUMBER"      > pr-meta/pr_number
+          echo "$QUALITY"        > pr-meta/quality_result
+          echo "$TESTS"          > pr-meta/tests_result
+          echo "$E2E"            > pr-meta/e2e_result
+          echo "$SCOPE_PARITY"   > pr-meta/scope_parity_result
+          # TODO(post-merge): remove backward-compat copies once ci-report.yml
+          # on main reads underscore names.
+          # Backward-compat: ci-report.yml on main still reads hyphenated
+          # names.  workflow_run always executes from the default branch, so
+          # the main-branch reader won't find the underscore variants until
+          # this PR is merged.  Write both until then.
+          cp pr-meta/pr_number       pr-meta/pr-number
+          cp pr-meta/quality_result  pr-meta/quality-result
+          cp pr-meta/tests_result    pr-meta/tests-result
+          cp pr-meta/e2e_result      pr-meta/e2e-result
 
       - name: Upload PR metadata
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pr-meta
           path: pr-meta/
@@ -76,7 +100,7 @@ jobs:
   # Single required check for branch protection.
   ci-status:
     name: CI Gate
-    needs: [quality, unit-tests, integration]
+    needs: [quality, tests, e2e, scope-parity]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -85,15 +109,31 @@ jobs:
         shell: bash
         env:
           QUALITY: ${{ needs.quality.result }}
-          UNIT: ${{ needs.unit-tests.result }}
-          INTEG: ${{ needs.integration.result }}
+          TESTS: ${{ needs.tests.result }}
+          E2E: ${{ needs.e2e.result }}
+          SCOPE_PARITY: ${{ needs.scope-parity.result }}
         run: |
-          echo "Quality:     $QUALITY"
-          echo "Unit Tests:  $UNIT"
-          echo "Integration: $INTEG"
+          echo "Quality:        $QUALITY"
+          echo "Tests:          $TESTS"
+          echo "E2E:            $E2E"
+          echo "Scope parity:   $SCOPE_PARITY"
           if [[ "$QUALITY" != "success" ]] ||
-             [[ "$UNIT" != "success" ]] ||
-             [[ "$INTEG" != "success" ]]; then
-            echo "::error::One or more CI jobs failed"
+             [[ "$TESTS" != "success" ]]; then
+            echo "::error::Quality or test jobs failed"
+            exit 1
+          fi
+          if [[ "$E2E" != "success" && "$E2E" != "skipped" ]]; then
+            echo "::error::E2E job failed"
+            exit 1
+          fi
+          # scope-parity is a reusable workflow. With an empty migrated-
+          # languages list, its parity matrix is skipped and the outer
+          # workflow still reports `success`. If any entry's legacy-DAG or
+          # registry-primary run fails, the workflow reports `failure`.
+          # Accept only `success`; `skipped` would mean the entire
+          # discover job was skipped too (upstream failure), which should
+          # still block.
+          if [[ "$SCOPE_PARITY" != "success" ]]; then
+            echo "::error::Scope-resolution parity gate failed (RFC #909 Ring 3)"
             exit 1
           fi

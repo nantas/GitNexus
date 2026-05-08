@@ -24,29 +24,67 @@ import {
 describe('LadybugDB Schema', () => {
   describe('NODE_TABLES', () => {
     it('includes all core node types', () => {
-      const core = ['File', 'Folder', 'Function', 'Class', 'Interface', 'Method', 'CodeElement', 'Community', 'Process'];
+      const core = [
+        'File',
+        'Folder',
+        'Function',
+        'Class',
+        'Interface',
+        'Method',
+        'CodeElement',
+        'Community',
+        'Process',
+      ];
       for (const t of core) {
         expect(NODE_TABLES).toContain(t);
       }
     });
 
     it('includes multi-language node types', () => {
-      const multiLang = ['Struct', 'Enum', 'Macro', 'Typedef', 'Union', 'Namespace', 'Trait', 'Impl',
-        'TypeAlias', 'Const', 'Static', 'Property', 'Record', 'Delegate', 'Annotation', 'Constructor', 'Template', 'Module'];
+      const multiLang = [
+        'Struct',
+        'Enum',
+        'Macro',
+        'Typedef',
+        'Union',
+        'Namespace',
+        'Trait',
+        'Impl',
+        'TypeAlias',
+        'Const',
+        'Static',
+        'Variable',
+        'Property',
+        'Record',
+        'Delegate',
+        'Annotation',
+        'Constructor',
+        'Template',
+        'Module',
+      ];
       for (const t of multiLang) {
         expect(NODE_TABLES).toContain(t);
       }
     });
 
     it('has expected total count', () => {
-      // 9 core + 18 multi-language = 27
-      expect(NODE_TABLES).toHaveLength(27);
+      // 9 core + 19 multi-language + Route + Tool = 31
+      expect(NODE_TABLES).toHaveLength(31);
     });
   });
 
   describe('REL_TYPES', () => {
     it('includes all expected relationship types', () => {
-      const expected = ['CONTAINS', 'DEFINES', 'IMPORTS', 'CALLS', 'EXTENDS', 'IMPLEMENTS', 'MEMBER_OF', 'STEP_IN_PROCESS'];
+      const expected = [
+        'CONTAINS',
+        'DEFINES',
+        'IMPORTS',
+        'CALLS',
+        'EXTENDS',
+        'IMPLEMENTS',
+        'MEMBER_OF',
+        'STEP_IN_PROCESS',
+      ];
       for (const t of expected) {
         expect(REL_TYPES).toContain(t);
       }
@@ -126,11 +164,11 @@ describe('LadybugDB Schema', () => {
 
     it('has all FROM/TO pairs needed for HAS_METHOD edges', () => {
       // HAS_METHOD sources: Class, Interface, Struct, Trait, Impl, Record
-      // HAS_METHOD targets: Method, Constructor, Property
+      // HAS_METHOD targets: Method, Constructor (Property is now HAS_PROPERTY)
       const sources = ['Class', 'Interface'];
       const backtickSources = ['Struct', 'Trait', 'Impl', 'Record'];
       const targets = ['Method'];
-      const backtickTargets = ['Constructor', 'Property'];
+      const backtickTargets = ['Constructor'];
 
       // Non-backtick source → non-backtick target
       for (const src of sources) {
@@ -168,7 +206,7 @@ describe('LadybugDB Schema', () => {
 
   describe('schema query ordering', () => {
     it('NODE_SCHEMA_QUERIES has correct count', () => {
-      expect(NODE_SCHEMA_QUERIES).toHaveLength(27);
+      expect(NODE_SCHEMA_QUERIES).toHaveLength(31);
     });
 
     it('REL_SCHEMA_QUERIES has one relation table', () => {
@@ -176,13 +214,15 @@ describe('LadybugDB Schema', () => {
     });
 
     it('SCHEMA_QUERIES includes all node + rel + embedding schemas', () => {
-      // 27 node + 1 rel + 1 embedding = 29
-      expect(SCHEMA_QUERIES).toHaveLength(29);
+      // 31 node + 1 rel + 1 embedding = 33
+      expect(SCHEMA_QUERIES).toHaveLength(33);
     });
 
     it('node schemas come before relation schemas in SCHEMA_QUERIES', () => {
       const relIndex = SCHEMA_QUERIES.indexOf(RELATION_SCHEMA);
-      const lastNodeIndex = SCHEMA_QUERIES.indexOf(NODE_SCHEMA_QUERIES[NODE_SCHEMA_QUERIES.length - 1]);
+      const lastNodeIndex = SCHEMA_QUERIES.indexOf(
+        NODE_SCHEMA_QUERIES[NODE_SCHEMA_QUERIES.length - 1],
+      );
       expect(relIndex).toBeGreaterThan(lastNodeIndex);
     });
   });

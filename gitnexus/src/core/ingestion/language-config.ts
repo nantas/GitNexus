@@ -1,8 +1,10 @@
 import fs from 'fs/promises';
 import path from 'path';
+import type { ImportConfigs } from './import-resolvers/types.js';
 
-const isDev = process.env.NODE_ENV === 'development';
+import { isDev } from './utils/env.js';
 
+import { logger } from '../logger.js';
 // ============================================================================
 // LANGUAGE-SPECIFIC CONFIG TYPES
 // ============================================================================
@@ -25,6 +27,9 @@ export interface GoModuleConfig {
 export interface ComposerConfig {
   /** Map of namespace prefix -> directory (e.g., "App\\" -> "app/") */
   psr4: Map<string, string>;
+  /** PSR-4 entries sorted by namespace length descending (longest match wins).
+   *  Cached once at config load time to avoid re-sorting on every import. */
+  psr4Sorted?: readonly [string, string][];
 }
 
 /** C# project config parsed from .csproj files */
@@ -78,7 +83,7 @@ export async function loadTsconfigPaths(repoRoot: string): Promise<TsconfigPaths
 
       if (aliases.size > 0) {
         if (isDev) {
-          console.log(`📦 Loaded ${aliases.size} path aliases from ${filename}`);
+          logger.info(`📦 Loaded ${aliases.size} path aliases from ${filename}`);
         }
         return { aliases, baseUrl };
       }
@@ -100,7 +105,7 @@ export async function loadGoModulePath(repoRoot: string): Promise<GoModuleConfig
     const match = content.match(/^module\s+(\S+)/m);
     if (match) {
       if (isDev) {
-        console.log(`📦 Loaded Go module path: ${match[1]}`);
+        logger.info(`📦 Loaded Go module path: ${match[1]}`);
       }
       return { modulePath: match[1] };
     }
@@ -128,7 +133,7 @@ export async function loadComposerConfig(repoRoot: string): Promise<ComposerConf
     }
 
     if (isDev) {
-      console.log(`📦 Loaded ${psr4.size} PSR-4 mappings from composer.json`);
+      logger.info(`📦 Loaded ${psr4.size} PSR-4 mappings from composer.json`);
     }
     return { psr4 };
   } catch {
@@ -156,7 +161,13 @@ export async function loadCSharpProjectConfig(repoRoot: string): Promise<CSharpP
       for (const entry of entries) {
         if (entry.isDirectory() && depth < maxDepth) {
           // Skip common non-project directories
-          if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'bin' || entry.name === 'obj') continue;
+          if (
+            entry.name === 'node_modules' ||
+            entry.name === '.git' ||
+            entry.name === 'bin' ||
+            entry.name === 'obj'
+          )
+            continue;
           scanQueue.push({ dir: path.join(dir, entry.name), depth: depth + 1 });
         }
         if (entry.isFile() && entry.name.endsWith('.csproj')) {
@@ -164,13 +175,13 @@ export async function loadCSharpProjectConfig(repoRoot: string): Promise<CSharpP
             const csprojPath = path.join(dir, entry.name);
             const content = await fs.readFile(csprojPath, 'utf-8');
             const nsMatch = content.match(/<RootNamespace>\s*([^<]+)\s*<\/RootNamespace>/);
-            const rootNamespace = nsMatch
-              ? nsMatch[1].trim()
-              : entry.name.replace(/\.csproj$/, '');
+            const rootNamespace = nsMatch ? nsMatch[1].trim() : entry.name.replace(/\.csproj$/, '');
             const projectDir = path.relative(repoRoot, dir).replace(/\\/g, '/');
             configs.push({ rootNamespace, projectDir });
             if (isDev) {
-              console.log(`📦 Loaded C# project: ${entry.name} (namespace: ${rootNamespace}, dir: ${projectDir})`);
+              logger.info(
+                `📦 Loaded C# project: ${entry.name} (namespace: ${rootNamespace}, dir: ${projectDir})`,
+              );
             }
           } catch {
             // Can't read .csproj
@@ -207,9 +218,24 @@ export async function loadSwiftPackageConfig(repoRoot: string): Promise<SwiftPac
 
   if (targets.size > 0) {
     if (isDev) {
-      console.log(`📦 Loaded ${targets.size} Swift package targets`);
+      logger.info(`📦 Loaded ${targets.size} Swift package targets`);
     }
     return { targets };
   }
   return null;
+}
+
+// ============================================================================
+// BUNDLED CONFIG LOADER
+// ============================================================================
+
+/** Load all language-specific configs once for an ingestion run. */
+export async function loadImportConfigs(repoRoot: string): Promise<ImportConfigs> {
+  return {
+    tsconfigPaths: await loadTsconfigPaths(repoRoot),
+    goModule: await loadGoModulePath(repoRoot),
+    composerConfig: await loadComposerConfig(repoRoot),
+    swiftPackageConfig: await loadSwiftPackageConfig(repoRoot),
+    csharpConfigs: await loadCSharpProjectConfig(repoRoot),
+  };
 }

@@ -13,10 +13,7 @@ const pkg = _require('../../package.json');
 const program = new Command();
 const collectValues = (value: string, previous: string[]) => [...previous, value];
 
-program
-  .name('gitnexus')
-  .description('GitNexus local CLI and MCP server')
-  .version(pkg.version);
+program.name('gitnexus').description('GitNexus local CLI and MCP server').version(pkg.version);
 
 program
   .command('setup')
@@ -64,6 +61,11 @@ program
   .action(createLazyAction(() => import('./status.js'), 'statusCommand'));
 
 program
+  .command('doctor')
+  .description('Show runtime platform capabilities and embedding configuration')
+  .action(createLazyAction(() => import('./doctor.js'), 'doctorCommand'));
+
+program
   .command('clean')
   .description('Delete GitNexus index for current repo')
   .option('-f, --force', 'Skip confirmation prompt')
@@ -75,14 +77,38 @@ attachRuleLabCommands(program, (handlerName) =>
 );
 
 program
+  .command('remove <target>')
+  .description(
+    'Delete the GitNexus index for a registered repo (by alias, name, or absolute path). ' +
+      'Unlike `clean`, does not require being inside the repo. Idempotent on unknown targets.',
+  )
+  .option('-f, --force', 'Skip confirmation prompt')
+  .action(createLazyAction(() => import('./remove.js'), 'removeCommand'));
+
+program
   .command('wiki [path]')
   .description('Generate repository wiki from knowledge graph')
   .option('-f, --force', 'Force full regeneration even if up to date')
-  .option('--model <model>', 'LLM model name (default: minimax/minimax-m2.5)')
-  .option('--base-url <url>', 'LLM API base URL (default: OpenAI)')
-  .option('--api-key <key>', 'LLM API key (saved to ~/.gitnexus/config.json)')
+  .option('--provider <provider>', 'LLM provider: openai or cursor (default: openai)')
+  .option('--model <model>', 'LLM model or Azure deployment name (default: minimax/minimax-m2.5)')
+  .option(
+    '--base-url <url>',
+    'LLM API base URL. Azure v1: https://{resource}.openai.azure.com/openai/v1',
+  )
+  .option('--api-key <key>', 'LLM API key or Azure api-key (saved to ~/.gitnexus/config.json)')
+  .option(
+    '--api-version <version>',
+    'Azure api-version query param, e.g. 2024-10-21 (legacy Azure API only)',
+  )
+  .option(
+    '--reasoning-model',
+    'Mark deployment as reasoning model (o1/o3/o4-mini) — strips temperature, uses max_completion_tokens',
+  )
+  .option('--no-reasoning-model', 'Disable reasoning model mode (overrides saved config)')
   .option('--concurrency <n>', 'Parallel LLM calls (default: 3)', '3')
   .option('--gist', 'Publish wiki as a public GitHub Gist after generation')
+  .option('-v, --verbose', 'Enable verbose output (show LLM commands and responses)')
+  .option('--review', 'Stop after grouping to review module structure before generating pages')
   .action(createLazyAction(() => import('./wiki.js'), 'wikiCommand'));
 
 program
@@ -159,6 +185,15 @@ program
   .description('Execute raw Cypher query against the knowledge graph')
   .option('-r, --repo <name>', 'Target repository')
   .action(createLazyAction(() => import('./tool.js'), 'cypherCommand'));
+
+program
+  .command('detect-changes')
+  .alias('detect_changes')
+  .description('Map git diff hunks to indexed symbols and affected execution flows')
+  .option('-s, --scope <scope>', 'What to analyze: unstaged, staged, all, or compare', 'unstaged')
+  .option('-b, --base-ref <ref>', 'Branch/commit for compare scope (e.g. main)')
+  .option('-r, --repo <name>', 'Target repository')
+  .action(createLazyAction(() => import('./tool.js'), 'detectChangesCommand'));
 
 // ─── Eval Server (persistent daemon for SWE-bench) ─────────────────
 
