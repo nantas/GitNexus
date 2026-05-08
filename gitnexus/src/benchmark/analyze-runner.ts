@@ -35,30 +35,22 @@ export function buildAnalyzeArgs(repoPath: string, options: AnalyzeRunOptions): 
 }
 
 export async function runAnalyze(repoPath: string, options: AnalyzeRunOptions): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      'node',
-      buildAnalyzeArgs(repoPath, options),
-      { cwd: process.cwd() },
-    );
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (d) => {
-      stdout += d.toString();
+  const { analyzeCommand } = await import('../cli/analyze.js');
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  let stdout = '';
+  let stderr = '';
+  console.log = (...args: unknown[]) => { stdout += args.join(' ') + '\n'; };
+  console.warn = (...args: unknown[]) => { stderr += args.join(' ') + '\n'; };
+  try {
+    await analyzeCommand(repoPath, {
+      force: true,
+      extensions: options.extensions,
+      name: options.repoAlias,
     });
-    child.stderr.on('data', (d) => {
-      stderr += d.toString();
-    });
-
-    child.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`analyze failed: ${code}`));
-        return;
-      }
-      resolve({ stdout, stderr });
-    });
-    child.on('error', reject);
-  });
+    return { stdout, stderr };
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+  }
 }

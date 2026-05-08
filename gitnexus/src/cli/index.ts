@@ -11,7 +11,7 @@ import { attachRuleLabCommands } from './rule-lab.js';
 const _require = createRequire(import.meta.url);
 const pkg = _require('../../package.json');
 const program = new Command();
-const collectValues = (value: string, previous: string[]) => [...previous, value];
+const collectValues = (value: string, previous: string[] = []) => [...previous, value];
 
 program
   .name('gitnexus')
