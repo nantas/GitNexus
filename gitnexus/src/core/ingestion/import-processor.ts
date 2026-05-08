@@ -1,8 +1,9 @@
 import { KnowledgeGraph } from '../graph/types.js';
 import { ASTCache } from './ast-cache.js';
 import Parser from 'tree-sitter';
-import { isLanguageAvailable, loadParser, loadLanguage, parseContent } from '../tree-sitter/parser-loader.js';
-import { LANGUAGE_QUERIES } from './tree-sitter-queries.js';
+import { isLanguageAvailable, loadParser, loadLanguage } from '../tree-sitter/parser-loader.js';
+import { getProvider, getProviderForFile, providersWithImplicitWiring } from './languages/index.js';
+import type { LanguageProvider } from './language-provider.js';
 import { generateId } from '../../lib/utils.js';
 import { getLanguageFromFilename } from 'gitnexus-shared';
 import { isVerboseIngestionEnabled } from './utils/verbose.js';
@@ -236,13 +237,12 @@ function applyImportResult(
 
 export const processImports = async (
   graph: KnowledgeGraph,
-  files: { path: string; content: string; rawContent?: string }[],
+  files: { path: string; content: string }[],
   astCache: ASTCache,
   ctx: ResolutionContext,
   onProgress?: (current: number, total: number) => void,
   repoRoot?: string,
   allPaths?: string[],
-  onRawFallbackParse?: (count: number) => void,
 ) => {
   const importMap = ctx.importMap;
   const packageMap = ctx.packageMap;
@@ -306,29 +306,11 @@ export const processImports = async (
 
     if (!tree) {
       try {
-        tree = parseContent(file.content);
-      } catch {
-        if (file.rawContent && file.rawContent !== file.content) {
-          try {
-            tree = parseContent(file.rawContent);
-            onRawFallbackParse?.(1);
-          } catch {
-            continue;
-          }
-        } else {
-          continue;
-        }
-      }
-      if (file.rawContent && file.rawContent !== file.content && tree.rootNode?.hasError) {
-        try {
-          const rawTree = parseContent(file.rawContent);
-          if (!rawTree.rootNode?.hasError) {
-            tree = rawTree;
-            onRawFallbackParse?.(1);
-          }
-        } catch {
-          // Keep normalized parse result when raw fallback fails
-        }
+        tree = parser.parse(file.content, undefined, {
+          bufferSize: getTreeSitterBufferSize(file.content),
+        });
+      } catch (parseError) {
+        continue;
       }
       wasReparsed = true;
       // Cache re-parsed tree so call/heritage phases get hits

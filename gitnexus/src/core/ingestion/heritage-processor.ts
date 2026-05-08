@@ -17,8 +17,7 @@
 import { KnowledgeGraph } from '../graph/types.js';
 import { ASTCache } from './ast-cache.js';
 import Parser from 'tree-sitter';
-import { isLanguageAvailable, loadParser, loadLanguage, parseContent } from '../tree-sitter/parser-loader.js';
-import { LANGUAGE_QUERIES } from './tree-sitter-queries.js';
+import { isLanguageAvailable, loadParser, loadLanguage } from '../tree-sitter/parser-loader.js';
 import { generateId } from '../../lib/utils.js';
 import { getLanguageFromFilename, type NodeLabel, type SupportedLanguages } from 'gitnexus-shared';
 import { isVerboseIngestionEnabled } from './utils/verbose.js';
@@ -185,11 +184,10 @@ const resolveAndAddHeritageEdge = (
 
 export const processHeritage = async (
   graph: KnowledgeGraph,
-  files: { path: string; content: string; rawContent?: string }[],
+  files: { path: string; content: string }[],
   astCache: ASTCache,
   ctx: ResolutionContext,
   onProgress?: (current: number, total: number) => void,
-  onRawFallbackParse?: (count: number) => void,
 ) => {
   const parser = await loadParser();
   const logSkipped = isVerboseIngestionEnabled();
@@ -222,31 +220,12 @@ export const processHeritage = async (
     if (!tree) {
       // Use larger bufferSize for files > 32KB
       try {
-        tree = parseContent(file.content);
-      } catch {
-        if (file.rawContent && file.rawContent !== file.content) {
-          try {
-            tree = parseContent(file.rawContent);
-            onRawFallbackParse?.(1);
-          } catch {
-            // Skip files that can't be parsed
-            continue;
-          }
-        } else {
-          // Skip files that can't be parsed
-          continue;
-        }
-      }
-      if (file.rawContent && file.rawContent !== file.content && tree.rootNode?.hasError) {
-        try {
-          const rawTree = parseContent(file.rawContent);
-          if (!rawTree.rootNode?.hasError) {
-            tree = rawTree;
-            onRawFallbackParse?.(1);
-          }
-        } catch {
-          // Keep normalized parse result when raw fallback fails
-        }
+        tree = parser.parse(file.content, undefined, {
+          bufferSize: getTreeSitterBufferSize(file.content),
+        });
+      } catch (parseError) {
+        // Skip files that can't be parsed
+        continue;
       }
       // Cache re-parsed tree for potential future use
       astCache.set(file.path, tree);
