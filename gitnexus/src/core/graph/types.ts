@@ -1,112 +1,12 @@
-export type NodeLabel =
-  | 'Project'
-  | 'Package'
-  | 'Module'
-  | 'Folder'
-  | 'File'
-  | 'Class'
-  | 'Function'
-  | 'Method'
-  | 'Variable'
-  | 'Interface'
-  | 'Enum'
-  | 'Decorator'
-  | 'Import'
-  | 'Type'
-  | 'CodeElement'
-  | 'Community'
-  | 'Process'
-  // Multi-language node types
-  | 'Struct'
-  | 'Macro'
-  | 'Typedef'
-  | 'Union'
-  | 'Namespace'
-  | 'Trait'
-  | 'Impl'
-  | 'TypeAlias'
-  | 'Const'
-  | 'Static'
-  | 'Property'
-  | 'Record'
-  | 'Delegate'
-  | 'Annotation'
-  | 'Constructor'
-  | 'Template';
-
-
-import { SupportedLanguages } from '../../config/supported-languages.js';
-
-export type NodeProperties = {
-  name: string,
-  filePath: string,
-  startLine?: number,
-  endLine?: number,
-  language?: SupportedLanguages,
-  isExported?: boolean,
-  // Optional AST-derived framework hint (e.g. @Controller, @GetMapping)
-  astFrameworkMultiplier?: number,
-  astFrameworkReason?: string,
-  // Community-specific properties
-  heuristicLabel?: string,
-  cohesion?: number,
-  symbolCount?: number,
-  keywords?: string[],
-  description?: string,
-  enrichedBy?: 'heuristic' | 'llm',
-  // Process-specific properties
-  processType?: 'intra_community' | 'cross_community',
-  stepCount?: number,
-  communities?: string[],
-  entryPointId?: string,
-  terminalId?: string,
-  // Entry point scoring (computed by process detection)
-  entryPointScore?: number,
-  entryPointReason?: string,
-  // Method signature (for MRO disambiguation)
-  parameterCount?: number,
-  returnType?: string,
-}
-
-export type RelationshipType =
-  | 'CONTAINS'
-  | 'CALLS'
-  | 'INHERITS'
-  | 'OVERRIDES'
-  | 'IMPORTS'
-  | 'USES'
-  | 'DEFINES'
-  | 'DECORATES'
-  | 'IMPLEMENTS'
-  | 'EXTENDS'
-  | 'HAS_METHOD'
-  | 'MEMBER_OF'
-  | 'STEP_IN_PROCESS'
-  | 'UNITY_COMPONENT_IN'
-  | 'UNITY_COMPONENT_INSTANCE'
-  | 'UNITY_RESOURCE_SUMMARY'
-  | 'UNITY_SERIALIZED_TYPE_IN'
-  | 'UNITY_ASSET_GUID_REF'
-  | 'UNITY_GRAPH_NODE_SCRIPT_REF'
-
-export interface GraphNode {
-  id:  string,
-  label: NodeLabel,
-  properties: NodeProperties,  
-}
-
-export interface GraphRelationship {
-  id: string,
-  sourceId: string,
-  targetId: string,
-  type: RelationshipType,
-  /** Confidence score 0-1 (1.0 = certain, lower = uncertain resolution) */
-  confidence: number,
-  /** Resolution reason: 'import-resolved', 'same-file', 'fuzzy-global', or empty for non-CALLS */
-  reason: string,
-  /** Step number for STEP_IN_PROCESS relationships (1-indexed) */
-  step?: number,
-}
+/**
+ * CLI-specific graph types.
+ *
+ * Shared types (NodeLabel, GraphNode, etc.) should be imported
+ * directly from 'gitnexus-shared' at call sites.
+ *
+ * This file only defines the CLI's KnowledgeGraph with mutation methods.
+ */
+import type { GraphNode, GraphRelationship, RelationshipType } from 'gitnexus-shared';
 
 // CLI-specific: full KnowledgeGraph with mutation methods for incremental updates
 export interface KnowledgeGraph {

@@ -244,36 +244,5 @@ export const swiftExportChecker: ExportChecker = (node, _name) => {
 /** Ruby: all top-level definitions are public (no export syntax). */
 export const rubyExportChecker: ExportChecker = (_node, _name) => true;
 
-const exportCheckers = {
-  [SupportedLanguages.JavaScript]: tsExportChecker,
-  [SupportedLanguages.TypeScript]: tsExportChecker,
-  [SupportedLanguages.Python]: pythonExportChecker,
-  [SupportedLanguages.Java]: javaExportChecker,
-  [SupportedLanguages.CSharp]: csharpExportChecker,
-  [SupportedLanguages.Go]: goExportChecker,
-  [SupportedLanguages.Rust]: rustExportChecker,
-  [SupportedLanguages.Kotlin]: kotlinExportChecker,
-  [SupportedLanguages.C]: cCppExportChecker,
-  [SupportedLanguages.CPlusPlus]: cCppExportChecker,
-  [SupportedLanguages.PHP]: phpExportChecker,
-  [SupportedLanguages.Swift]: swiftExportChecker,
-  [SupportedLanguages.Ruby]: (_node, _name) => true,
-  [SupportedLanguages.GDScript]: (_node, name) => !name.startsWith('_'),
-} satisfies Record<SupportedLanguages, ExportChecker>;
-
-// ============================================================================
-// Public API
-// ============================================================================
-
-/**
- * Check if a tree-sitter node is exported/public in its language.
- * @param node - The tree-sitter AST node
- * @param name - The symbol name
- * @param language - The programming language
- * @returns true if the symbol is exported/public
- */
-export const isNodeExported = (node: SyntaxNode, name: string, language: SupportedLanguages): boolean => {
-  const checker = exportCheckers[language];
-  if (!checker) return false;
-  return checker(node, name);
-};
+/** Dart: public if no leading underscore (convention, same as Python). */
+export const dartExportChecker: ExportChecker = (_node, name) => !name.startsWith('_');

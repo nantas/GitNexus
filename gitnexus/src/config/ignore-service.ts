@@ -103,57 +103,135 @@ const DEFAULT_IGNORE_LIST = new Set([
 ]);
 
 const IGNORED_EXTENSIONS = new Set([
-    // Images
-    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.bmp', '.tiff', '.tif',
-    '.psd', '.ai', '.sketch', '.fig', '.xd',
-    
-    // Archives
-    '.zip', '.tar', '.gz', '.rar', '.7z', '.bz2', '.xz', '.tgz',
-    
-    // Binary/Compiled
-    '.exe', '.dll', '.so', '.dylib', '.a', '.lib', '.o', '.obj',
-    '.class', '.jar', '.war', '.ear',
-    '.pyc', '.pyo', '.pyd',
-    '.beam',            // Erlang
-    '.wasm',            // WebAssembly - important!
-    '.node',            // Native Node addons
-    
-    // Documents
-    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-    '.odt', '.ods', '.odp',
-    
-    // Media
-    '.mp4', '.mp3', '.wav', '.mov', '.avi', '.mkv', '.flv', '.wmv',
-    '.ogg', '.webm', '.flac', '.aac', '.m4a',
-    
-    // Fonts
-    '.woff', '.woff2', '.ttf', '.eot', '.otf',
-    
-    // Databases
-    '.db', '.sqlite', '.sqlite3', '.mdb', '.accdb',
-    
-    // Minified/Bundled files
-    '.min.js', '.min.css', '.bundle.js', '.chunk.js',
-    
-    // Source maps (debug files, not source)
-    '.map',
-    
-    // Lock files (handled separately, but also here)
-    '.lock',
-    
-    // Certificates & Keys (security - don't index!)
-    '.pem', '.key', '.crt', '.cer', '.p12', '.pfx',
-    
-    // Data files (often large/binary)
-    '.csv', '.tsv', '.parquet', '.avro', '.feather',
-    '.npy', '.npz', '.pkl', '.pickle', '.h5', '.hdf5',
-    
-    // Misc binary
-    '.bin', '.dat', '.data', '.raw',
-    '.iso', '.img', '.dmg',
+  // Images
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.svg',
+  '.ico',
+  '.webp',
+  '.bmp',
+  '.tiff',
+  '.tif',
+  '.psd',
+  '.ai',
+  '.sketch',
+  '.fig',
+  '.xd',
 
-    // Unity metadata assets
-    '.meta',
+  // Archives
+  '.zip',
+  '.tar',
+  '.gz',
+  '.rar',
+  '.7z',
+  '.bz2',
+  '.xz',
+  '.tgz',
+
+  // Binary/Compiled
+  '.exe',
+  '.dll',
+  '.so',
+  '.dylib',
+  '.a',
+  '.lib',
+  '.o',
+  '.obj',
+  '.class',
+  '.jar',
+  '.war',
+  '.ear',
+  '.pyc',
+  '.pyo',
+  '.pyd',
+  '.beam', // Erlang
+  '.wasm', // WebAssembly - important!
+  '.node', // Native Node addons
+
+  // Documents
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+  '.ppt',
+  '.pptx',
+  '.odt',
+  '.ods',
+  '.odp',
+
+  // Media
+  '.mp4',
+  '.mp3',
+  '.wav',
+  '.mov',
+  '.avi',
+  '.mkv',
+  '.flv',
+  '.wmv',
+  '.ogg',
+  '.webm',
+  '.flac',
+  '.aac',
+  '.m4a',
+
+  // Fonts
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.eot',
+  '.otf',
+
+  // Databases
+  '.db',
+  '.sqlite',
+  '.sqlite3',
+  '.mdb',
+  '.accdb',
+
+  // Minified/Bundled files
+  '.min.js',
+  '.min.css',
+  '.bundle.js',
+  '.chunk.js',
+
+  // Source maps (debug files, not source)
+  '.map',
+
+  // Lock files (handled separately, but also here)
+  '.lock',
+
+  // Certificates & Keys (security - don't index!)
+  '.pem',
+  '.key',
+  '.crt',
+  '.cer',
+  '.p12',
+  '.pfx',
+
+  // Data files (often large/binary)
+  '.csv',
+  '.tsv',
+  '.parquet',
+  '.avro',
+  '.feather',
+  '.npy',
+  '.npz',
+  '.pkl',
+  '.pickle',
+  '.h5',
+  '.hdf5',
+
+  // Misc binary
+  '.bin',
+  '.dat',
+  '.data',
+  '.raw',
+  '.iso',
+  '.img',
+  '.dmg',
 ]);
 
 // Files to ignore by exact name
@@ -253,7 +331,8 @@ export const shouldIgnorePath = (filePath: string): boolean => {
   }
 
   return false;
-}
+};
+
 /** Check if a directory name is in the hardcoded ignore list */
 export const isHardcodedIgnoredDirectory = (name: string): boolean => {
   return DEFAULT_IGNORE_LIST.has(name);

@@ -161,23 +161,7 @@ const scanConstructorBinding: ConstructorBindingScanner = (node) => {
   if (!func) return undefined;
   const calleeName = extractSimpleTypeName(func);
   if (!calleeName) return undefined;
-
-  // Safe generic-invocation receiver hint:
-  //   var user = GetComponentInParent<User>()
-  //   var user = svc.GetComponentInParent<User>()
-  // infer user -> User directly from the single type argument.
-  let inferredTypeName: string | undefined;
-  const genericCallee = func.type === 'generic_name'
-    ? func
-    : func.type === 'member_access_expression'
-      ? func.childForFieldName('name')
-      : null;
-  if (genericCallee?.type === 'generic_name') {
-    const typeArgs = extractGenericTypeArgs(genericCallee);
-    if (typeArgs.length === 1) inferredTypeName = typeArgs[0];
-  }
-
-  return { varName: nameNode.text, calleeName, inferredTypeName };
+  return { varName: nameNode.text, calleeName };
 };
 
 const FOR_LOOP_NODE_TYPES: ReadonlySet<string> = new Set(['foreach_statement']);

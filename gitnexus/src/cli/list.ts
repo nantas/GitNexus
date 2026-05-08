@@ -35,9 +35,6 @@ export const listCommand = async () => {
 
     console.log(`  ${header}`);
     console.log(`    Path:    ${entry.path}`);
-    if (entry.alias) {
-      console.log(`    Alias:   ${entry.alias} (source: ${entry.sourceName || 'unknown'})`);
-    }
     console.log(`    Indexed: ${indexedDate}`);
     console.log(`    Commit:  ${commitShort}`);
     console.log(

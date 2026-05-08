@@ -115,7 +115,14 @@ export type RelationshipType =
   | 'HANDLES_TOOL'
   | 'ENTRY_POINT_OF'
   | 'WRAPS'
-  | 'QUERIES';
+  | 'QUERIES'
+  // Unity runtime process (fork)
+  | 'UNITY_COMPONENT_IN'
+  | 'UNITY_COMPONENT_INSTANCE'
+  | 'UNITY_RESOURCE_SUMMARY'
+  | 'UNITY_SERIALIZED_TYPE_IN'
+  | 'UNITY_ASSET_GUID_REF'
+  | 'UNITY_GRAPH_NODE_SCRIPT_REF';
 
 export interface GraphNode {
   id: string;

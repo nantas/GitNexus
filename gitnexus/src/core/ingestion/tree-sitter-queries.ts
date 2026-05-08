@@ -1200,68 +1200,6 @@ export const KOTLIN_QUERIES = `
 `;
 
 // Swift queries - works with tree-sitter-swift
-export const GDSCRIPT_QUERIES = `
-; ── Class Name (file-level class) ───────────────────────────────────────────
-(class_name_statement
-  (name) @name) @definition.class
-
-; ── Inner Class Definition ──────────────────────────────────────────────────
-(class_definition
-  name: (name) @name) @definition.class
-
-; ── Functions & Methods ─────────────────────────────────────────────────────
-(function_definition
-  name: (name) @name) @definition.function
-
-; ── Constructor (_init) ─────────────────────────────────────────────────────
-(constructor_definition) @definition.constructor
-
-; ── Constructor with name capture for symbol extraction ────────────────────
-(constructor_definition
-  parameters: (parameters)) @definition.constructor
-
-; ── Signals ─────────────────────────────────────────────────────────────────
-(signal_statement
-  name: (name) @name) @definition.signal
-
-; ── Enums ───────────────────────────────────────────────────────────────────
-(enum_definition
-  name: (name) @name) @definition.enum
-
-; ── Constants ───────────────────────────────────────────────────────────────
-(const_statement
-  (name) @name) @definition.const
-
-; ── Extends (inheritance) ───────────────────────────────────────────────────
-(extends_statement
-  (type (identifier) @heritage.extends)) @heritage
-
-; ── Class with extends ──────────────────────────────────────────────────────
-(class_definition
-  name: (name) @heritage.class
-  extends: (extends_statement
-    (type (identifier) @heritage.extends))) @heritage
-
-; ── Preload/Load (imports) ──────────────────────────────────────────────────
-; Only preload("res://...") and load("res://...") are real imports.
-; Generic call expressions must NOT be tagged @import to avoid double-classifying
-; call sites as imports (which corrupts import resolution and call routing).
-(call
-  function: (identifier) @_preload
-  arguments: (arguments (string) @import.source)) @import
-(#eq? @_preload "preload")
-
-(call
-  function: (identifier) @_load
-  arguments: (arguments (string) @import.source)) @import
-(#eq? @_load "load")
-
-; ── Function Calls ──────────────────────────────────────────────────────────
-(call
-  function: (identifier) @call.name) @call
-
-`;
-
 export const SWIFT_QUERIES = `
 ; Classes
 (class_declaration "class" name: (type_identifier) @name) @definition.class
@@ -1559,6 +1497,7 @@ export const LANGUAGE_QUERIES: Record<SupportedLanguages, string> = {
   [SupportedLanguages.Kotlin]: KOTLIN_QUERIES,
   [SupportedLanguages.Ruby]: RUBY_QUERIES,
   [SupportedLanguages.Swift]: SWIFT_QUERIES,
-  [SupportedLanguages.GDScript]: GDSCRIPT_QUERIES,
+  [SupportedLanguages.Dart]: DART_QUERIES,
+  [SupportedLanguages.Vue]: TYPESCRIPT_QUERIES, // Vue <script> blocks are parsed as TypeScript
+  [SupportedLanguages.Cobol]: '', // Standalone regex processor — no tree-sitter queries
 };
- 
