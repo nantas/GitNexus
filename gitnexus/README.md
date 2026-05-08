@@ -146,6 +146,10 @@ gitnexus setup                   # Configure MCP for your editors (one-time)
 gitnexus analyze [path]          # Index a repository (or update stale index)
 gitnexus analyze --force         # Force full re-index
 gitnexus analyze --embeddings    # Enable embedding generation (slower, better search)
+gitnexus analyze --name my-lib   # Register repo under a custom alias (persisted)
+gitnexus analyze --scope src/core # Restrict analysis to a subdirectory (repeatable)
+gitnexus analyze --csharp-define-csproj Assembly-CSharp.csproj  # Load C# conditional-compilation defines from .csproj
+gitnexus analyze --no-reuse-options  # Ignore stored options from previous run
 gitnexus analyze --skip-agents-md  # Preserve custom AGENTS.md/CLAUDE.md gitnexus section edits
 gitnexus analyze --verbose       # Log skipped files when parsers are unavailable
 gitnexus analyze --max-file-size 1024  # Skip files larger than N KB (default: 512, cap: 32768)

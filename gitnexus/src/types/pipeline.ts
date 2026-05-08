@@ -1,6 +1,7 @@
 import type { KnowledgeGraph } from '../core/graph/types.js';
 import { CommunityDetectionResult } from '../core/ingestion/community-processor.js';
 import { ProcessDetectionResult } from '../core/ingestion/process-processor.js';
+import type { UnityRuntimeBindingResult } from '../core/ingestion/unity-runtime-binding-rules.js';
 
 // ── Fork pipeline options ───────────────────────────────────────────────
 
@@ -50,7 +51,7 @@ export interface PipelineResult {
   usedWorkerPool: boolean;
   // Fork additions
   unityResult?: UnityRuntimeProcessResult;
-  unityRuleBindingResult?: { ruleCount: number; bindingCount: number; edgesInjected?: number };
+  unityRuleBindingResult?: UnityRuntimeBindingResult;
   csharpPreprocDiagnostics?: CSharpPreprocDiagnostics;
   scopeDiagnostics?: {
     scopeRuleCount: number;

@@ -70,6 +70,15 @@
 | call-processor 策略偏差 | tasks.md 2.3.6 执行后注释 | `call-processor` Modified Capability |
 | local-backend 融合提交 | `git diff HEAD~1 -- gitnexus/src/mcp/local/local-backend.ts` | `mcp-local-backend` spec 全部 requirements |
 
+## restore-analyze-fork-features 偏差记录
+
+> 以下偏差在 `restore-analyze-fork-features` change 的执行过程中发现并已处理：
+
+- **`types/pipeline.ts` 类型定义偏差**：`unityRuleBindingResult` 的声明类型与实际运行时值不匹配（声明为简单对象，实际为 `UnityRuntimeBindingResult`）。已在恢复 change 中修正类型定义。
+- **`DiagnosticsContext.fallbackStats` 暂不可填充**：`loadGraphToLbug` 当前返回 `Promise<void>`，不暴露 fallback insert stats，因此 `DiagnosticsContext.fallbackWarnings` / `fallbackStats` 未在 `runFullAnalysis` 中填充。接口已预留，待后续 pipeline 扩展。
+- **废弃测试文件删除**：`test/unit/analyze-pipeline-options.test.ts` 依赖的 `buildPipelineRunOptionsForAnalyze` 函数在 upstream 中已移除，该测试文件已在恢复过程中删除。
+- **单元测试 mock 补充**：`analyze.ts` 新增 `loadMeta` 导入以支持 `--reuse-options`，导致 `test/unit/analyze-embeddings-limit.test.ts` 与 `test/unit/analyze-worker-timeout.test.ts` 需要补充 `loadMeta` mock，已在恢复过程中修复。
+
 ## 缺口与阻塞项
 
 - 验证结论将在**实际合并执行后**填入

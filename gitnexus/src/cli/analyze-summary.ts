@@ -62,6 +62,9 @@ export function formatUnityRuleBindingSummary(
 ): string[] {
   if (!result) return [];
   const diagnostics = result.diagnostics;
+  if (diagnostics.summary.length === 0 && diagnostics.anomalies.length === 0) {
+    return [];
+  }
   const lines = ['Unity Rule Binding Diagnostics:'];
   for (const message of diagnostics.summary) {
     if (!message.startsWith('rule_binding.anomaly:')) {

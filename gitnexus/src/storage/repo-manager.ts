@@ -72,6 +72,11 @@ export interface RepoMeta {
     processes?: number;
     embeddings?: number;
   };
+  /**
+   * Fork: persisted analyze options for --reuse-options across runs.
+   * Stored by runFullAnalysis and consumed by the CLI option resolver.
+   */
+  analyzeOptions?: Record<string, unknown>;
 }
 
 export interface IndexedRepo {

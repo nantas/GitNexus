@@ -14,6 +14,7 @@ export interface StoredAnalyzeOptions {
 
 export interface ResolveAnalyzeOptionsInput {
   extensions?: string;
+  scopeRules?: string[];
   repoAlias?: string;
   embeddings?: boolean;
   reuseOptions?: boolean;
@@ -129,7 +130,9 @@ export async function resolveEffectiveAnalyzeOptions(
     ? parseExtensionList(options.extensions)
     : (canReuse ? (stored?.includeExtensions || []) : []);
 
-  const scopeRules = canReuse ? (stored?.scopeRules || []) : [];
+  const scopeRules = options?.scopeRules !== undefined
+    ? [...options.scopeRules]
+    : (canReuse ? (stored?.scopeRules || []) : []);
 
   const repoAlias = options?.repoAlias !== undefined
     ? normalizeRepoAlias(options.repoAlias)

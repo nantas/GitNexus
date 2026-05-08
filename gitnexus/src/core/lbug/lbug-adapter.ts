@@ -415,6 +415,7 @@ export const loadGraphToLbug = async (
 
   const insertedRels = totalValidRels;
   const warnings: string[] = [];
+  let fallbackInsertStats: { attempted: number; succeeded: number; failed: number } | undefined;
   if (insertedRels > 0) {
     log(`Loading edges: ${insertedRels.toLocaleString()} across ${relsByPairMeta.size} types`);
 
@@ -474,7 +475,8 @@ export const loadGraphToLbug = async (
         } catch {}
       }
       if (allLines.length > 1) {
-        await fallbackRelationshipInserts(allLines, validTables, getNodeLabel);
+        const { succeeded, failed } = await fallbackRelationshipInserts(allLines, validTables, getNodeLabel);
+        fallbackInsertStats = { attempted: failedPairEdges, succeeded, failed };
       }
     }
   }
@@ -500,7 +502,7 @@ export const loadGraphToLbug = async (
     await fs.rmdir(csvDir);
   } catch {}
 
-  return { success: true, insertedRels, skippedRels, warnings };
+  return { success: true, insertedRels, skippedRels, warnings, fallbackInsertStats };
 };
 
 // LadybugDB default ESCAPE is '\' (backslash), but our CSV uses RFC 4180 escaping ("" for literal quotes).
@@ -541,12 +543,14 @@ const fallbackRelationshipInserts = async (
   validRelLines: string[],
   validTables: Set<string>,
   getNodeLabel: (id: string) => string,
-) => {
-  if (!conn) return;
+): Promise<{ succeeded: number; failed: number }> => {
+  if (!conn) return { succeeded: 0, failed: 0 };
   const escapeLabel = (label: string): string => {
     return BACKTICK_TABLES.has(label) ? `\`${label}\`` : label;
   };
 
+  let succeeded = 0;
+  let failed = 0;
   for (let i = 1; i < validRelLines.length; i++) {
     const line = validRelLines[i];
     try {
@@ -567,10 +571,12 @@ const fallbackRelationshipInserts = async (
               (b:${escapeLabel(toLabel)} {id: '${esc(toId)}' })
         CREATE (a)-[:${REL_TABLE_NAME} {type: '${esc(relType)}', confidence: ${confidence}, reason: '${esc(reason)}', step: ${step}}]->(b)
       `);
+      succeeded++;
     } catch {
-      // skip
+      failed++;
     }
   }
+  return { succeeded, failed };
 };
 
 /** Tables with isExported column (TypeScript/JS-native types) */

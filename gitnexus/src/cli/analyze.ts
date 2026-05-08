@@ -28,6 +28,12 @@ import { glob } from 'glob';
 import fs from 'fs/promises';
 import { cliError } from './cli-message.js';
 import { isHfDownloadFailure } from '../core/embeddings/hf-env.js';
+import {
+  resolveEffectiveAnalyzeOptions,
+  validateStoredOptions,
+} from './analyze-options.js';
+import { formatDiagnosticsSummary } from './analyze-diagnostics.js';
+import { loadMeta } from '../storage/repo-manager.js';
 
 // Capture stderr.write at module load BEFORE anything (LadybugDB native
 // init, progress bar, console redirection) can monkey-patch it. The
@@ -129,6 +135,10 @@ export interface AnalyzeOptions {
    */
   name?: string;
   /**
+   * Deprecated: use `--name`. Kept for backward compatibility.
+   */
+  repoAlias?: string;
+  /**
    * Allow registration even when another path already uses the same
    * `--name` alias (#829). Intentionally a distinct flag from `--force`
    * because the user may want to coexist under the same name WITHOUT
@@ -136,6 +146,14 @@ export interface AnalyzeOptions {
    * `allowDuplicateName` option end-to-end.
    */
   allowDuplicateName?: boolean;
+  /** Fork: restrict analysis to specific file paths or directories */
+  scope?: string[];
+  /** Comma-separated file extensions to include */
+  extensions?: string;
+  /** Fork: path to C# .csproj for conditional compilation defines */
+  csharpDefineCsproj?: string;
+  /** Fork: reuse stored analyze options from meta.json */
+  reuseOptions?: boolean;
   /**
    * Override the walker's large-file skip threshold (#991). Value in KB;
    * clamped downstream to the tree-sitter 32 MB ceiling. Sets
@@ -315,6 +333,46 @@ export const analyzeCommand = async (inputPath?: string, options?: AnalyzeOption
     console.log(`${maxFileSizeBanner}\n`);
   }
 
+  // ── Resolve effective analyze options (CLI flags + stored meta.json) ─
+  const { storagePath } = getStoragePaths(repoPath);
+  const existingMeta = await loadMeta(storagePath);
+  const stored = await validateStoredOptions(existingMeta?.analyzeOptions, repoPath);
+  let effective: import('./analyze-options.js').EffectiveAnalyzeOptions;
+  try {
+    effective = await resolveEffectiveAnalyzeOptions(
+      {
+        extensions: options?.embeddings !== undefined ? undefined : options?.extensions,
+        scopeRules: options?.scope,
+        repoAlias: options?.name ?? options?.repoAlias,
+        embeddings: embeddingsEnabled,
+        reuseOptions: options?.reuseOptions,
+        csharpDefineCsproj: options?.csharpDefineCsproj,
+      },
+      stored,
+    );
+  } catch (err: any) {
+    if (err.message?.includes('Invalid repo alias')) {
+      cliError(`  ${err.message}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
+  }
+
+  // Validate CLI-provided csproj path before running analysis
+  if (effective.csharpDefineCsproj) {
+    const resolvedCsproj = path.isAbsolute(effective.csharpDefineCsproj)
+      ? effective.csharpDefineCsproj
+      : path.resolve(repoPath, effective.csharpDefineCsproj);
+    try {
+      await fs.stat(resolvedCsproj);
+    } catch {
+      cliError(`  Failed to read C# csproj: ${resolvedCsproj}\n`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
   // ── CLI progress bar setup ─────────────────────────────────────────
   const bar = new cliProgress.SingleBar(
     {
@@ -412,12 +470,14 @@ export const analyzeCommand = async (inputPath?: string, options?: AnalyzeOption
         skipGit: options?.skipGit,
         skipAgentsMd: options?.skipAgentsMd,
         noStats: options?.noStats,
-        registryName: options?.name,
+        registryName: effective.repoAlias ?? options?.name ?? options?.repoAlias,
         // Registry-collision bypass — its own CLI flag, intentionally NOT
         // overloading --force. A user who hits the collision guard should
         // be able to accept the duplicate name without also paying the
         // cost of a full pipeline re-index. See #829 review round 2.
         allowDuplicateName: options?.allowDuplicateName,
+        scopeRules: effective.scopeRules,
+        csharpDefineCsproj: effective.csharpDefineCsproj,
       },
       {
         onProgress: (_phase, percent, message) => {
@@ -519,6 +579,12 @@ export const analyzeCommand = async (inputPath?: string, options?: AnalyzeOption
     bar.update(100, { phase: 'Done' });
     bar.stop();
 
+    // Scope with no matching files
+    if (effective.scopeRules.length > 0 && (result.stats.files ?? 0) === 0) {
+      console.log('  No files found in scope\n');
+      return;
+    }
+
     // ── Summary ────────────────────────────────────────────────────
     const s = result.stats;
     console.log(`\n  Repository indexed successfully (${totalTime}s)\n`);
@@ -526,6 +592,15 @@ export const analyzeCommand = async (inputPath?: string, options?: AnalyzeOption
       `  ${(s.nodes ?? 0).toLocaleString()} nodes | ${(s.edges ?? 0).toLocaleString()} edges | ${s.communities ?? 0} clusters | ${s.processes ?? 0} flows`,
     );
     console.log(`  ${repoPath}`);
+
+    // Fork: unified diagnostics output
+    const diagnosticLines = formatDiagnosticsSummary(result.diagnostics);
+    if (diagnosticLines.length > 0) {
+      console.log('');
+      for (const line of diagnosticLines) {
+        console.log(`  ${line}`);
+      }
+    }
 
     try {
       await fs.access(getGlobalRegistryPath());

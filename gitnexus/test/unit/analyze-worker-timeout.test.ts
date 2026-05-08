@@ -13,6 +13,7 @@ vi.mock('../../src/core/lbug/lbug-adapter.js', () => ({
 vi.mock('../../src/storage/repo-manager.js', () => ({
   getStoragePaths: vi.fn(() => ({ storagePath: '.gitnexus', lbugPath: '.gitnexus/lbug' })),
   getGlobalRegistryPath: vi.fn(() => 'registry.json'),
+  loadMeta: vi.fn(async () => null),
   RegistryNameCollisionError: class RegistryNameCollisionError extends Error {},
   AnalysisNotFinalizedError: class AnalysisNotFinalizedError extends Error {},
   assertAnalysisFinalized: vi.fn(async () => undefined),

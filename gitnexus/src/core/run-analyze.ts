@@ -39,6 +39,7 @@ import {
 } from '../storage/git.js';
 import type { CachedEmbedding } from './embeddings/types.js';
 import { generateAIContextFiles } from '../cli/ai-context.js';
+import type { DiagnosticsContext } from '../cli/analyze-diagnostics.js';
 import { EMBEDDING_TABLE_NAME } from './lbug/schema.js';
 import { STALE_HASH_SENTINEL } from './lbug/schema.js';
 
@@ -96,6 +97,10 @@ export interface AnalyzeOptions {
    * of a pipeline re-index.
    */
   allowDuplicateName?: boolean;
+  /** Fork: restrict analysis to specific file paths or directories */
+  scopeRules?: string[];
+  /** Fork: path to C# .csproj for conditional compilation defines */
+  csharpDefineCsproj?: string;
 }
 
 export interface AnalyzeResult {
@@ -112,6 +117,8 @@ export interface AnalyzeResult {
   alreadyUpToDate?: boolean;
   /** The raw pipeline result — only populated when needed by callers (e.g. skill generation). */
   pipelineResult?: any;
+  /** Fork: unified diagnostics context for CLI summary output */
+  diagnostics?: DiagnosticsContext;
 }
 
 // Re-export the pure flag-derivation helper so external callers (and tests)
@@ -269,12 +276,19 @@ export async function runFullAnalysis(
   }
 
   // ── Phase 1: Full Pipeline (0–60%) ────────────────────────────────
-  const pipelineResult = await runPipelineFromRepo(repoPath, (p) => {
-    const phaseLabel = PHASE_LABELS[p.phase] || p.phase;
-    const scaled = Math.round(p.percent * 0.6);
-    const message = p.detail ? `${p.message || phaseLabel} (${p.detail})` : p.message || phaseLabel;
-    progress(p.phase, scaled, message);
-  });
+  const pipelineResult = await runPipelineFromRepo(
+    repoPath,
+    (p) => {
+      const phaseLabel = PHASE_LABELS[p.phase] || p.phase;
+      const scaled = Math.round(p.percent * 0.6);
+      const message = p.detail ? `${p.message || phaseLabel} (${p.detail})` : p.message || phaseLabel;
+      progress(p.phase, scaled, message);
+    },
+    {
+      scopeRules: options.scopeRules,
+      csharpDefineCsproj: options.csharpDefineCsproj,
+    },
+  );
 
   // ── Phase 2: LadybugDB (60–85%) ──────────────────────────────────
   progress('lbug', 60, 'Loading into LadybugDB...');
@@ -296,7 +310,7 @@ export async function runFullAnalysis(
     // must be released to avoid blocking subsequent invocations.
 
     let lbugMsgCount = 0;
-    await loadGraphToLbug(pipelineResult.graph, pipelineResult.repoPath, storagePath, (msg) => {
+    const lbugResult = await loadGraphToLbug(pipelineResult.graph, pipelineResult.repoPath, storagePath, (msg) => {
       lbugMsgCount++;
       const pct = Math.min(84, 60 + Math.round((lbugMsgCount / (lbugMsgCount + 10)) * 24));
       progress('lbug', pct, msg);
@@ -483,6 +497,13 @@ export async function runFullAnalysis(
           reason: runtimeCapabilities.reason,
         },
       },
+      // Persist analyze options for --reuse-options on subsequent runs
+      analyzeOptions: {
+        scopeRules: options.scopeRules,
+        repoAlias: options.registryName,
+        embeddings: options.embeddings,
+        csharpDefineCsproj: options.csharpDefineCsproj,
+      },
     };
     await saveMeta(storagePath, meta);
     // Forward the --name alias and the registry-collision bypass bit.
@@ -538,11 +559,23 @@ export async function runFullAnalysis(
 
     progress('done', 100, 'Done');
 
+    // Assemble diagnostics context from pipeline result
+    const diagnostics: DiagnosticsContext | undefined =
+      pipelineResult.csharpPreprocDiagnostics || pipelineResult.unityRuleBindingResult || lbugResult.fallbackInsertStats
+        ? {
+            csharpPreproc: pipelineResult.csharpPreprocDiagnostics,
+            unityBinding: pipelineResult.unityRuleBindingResult,
+            fallbackWarnings: lbugResult.warnings,
+            fallbackStats: lbugResult.fallbackInsertStats,
+          }
+        : undefined;
+
     return {
       repoName: projectName,
       repoPath,
       stats: meta.stats,
       pipelineResult,
+      diagnostics,
     };
   } catch (err) {
     // Ensure LadybugDB is closed even on error

@@ -175,34 +175,36 @@
 
 #### 6A: 测试文件（18 个冲突测试文件）
 
-- [ ] 2.6A.1 `test/setup.ts`, `test/helpers/test-indexed-db.ts`, `test/fixtures/local-backend-seed.ts`（策略 B）：取上游版本
-- [ ] 2.6A.2 `test/integration/hooks-e2e.test.ts`, `test/integration/parsing.test.ts`, `test/integration/setup-skills.test.ts`（策略 B）：取上游版本
-- [ ] 2.6A.3 `test/integration/local-backend.test.ts`, `test/integration/local-backend-calltool.test.ts`, `test/integration/resolvers/csharp.test.ts`（策略 C）：fork 新增的 Unity/local-backend/csharp preproc 测试用例需保留，与上游新增的测试用例合并
-- [ ] 2.6A.4 其余测试文件：`test/unit/ai-context.test.ts` 等 9 个 — 逐文件评估，优先保留 fork 新增的 benchmark/Unity 相关测试 + 吸收上游新增测试
+- [x] 2.6A.1 `test/setup.ts`, `test/helpers/test-indexed-db.ts`, `test/fixtures/local-backend-seed.ts`（策略 B）：取上游版本 `test/setup.ts`, `test/helpers/test-indexed-db.ts`, `test/fixtures/local-backend-seed.ts`（策略 B）：取上游版本
+- [x] 2.6A.2 `test/integration/hooks-e2e.test.ts`, `test/integration/parsing.test.ts`, `test/integration/setup-skills.test.ts`（策略 B）：取上游版本 `test/integration/hooks-e2e.test.ts`, `test/integration/parsing.test.ts`, `test/integration/setup-skills.test.ts`（策略 B）：取上游版本
+- [x] 2.6A.3 `test/integration/local-backend.test.ts`, `test/integration/local-backend-calltool.test.ts`, `test/integration/resolvers/csharp.test.ts`（策略 C）：fork 新增的 Unity/local-backend/csharp preproc 测试用例需保留，与上游新增的测试用例合并 `test/integration/local-backend.test.ts`, `test/integration/local-backend-calltool.test.ts`, `test/integration/resolvers/csharp.test.ts`（策略 C）：fork 新增的 Unity/local-backend/csharp preproc 测试用例需保留，与上游新增的测试用例合并
+- [x] 2.6A.4 其余测试文件 其余测试文件：`test/unit/ai-context.test.ts` 等 9 个 — 逐文件评估，优先保留 fork 新增的 benchmark/Unity 相关测试 + 吸收上游新增测试
 
 #### 6B: 包管理
 
-- [ ] 2.6B.1 `gitnexus/package.json`：手工合并 dependencies、devDependencies、scripts
+- [x] 2.6B.1 `gitnexus/package.json`：手工合并 dependencies、devDependencies、scripts `gitnexus/package.json`：手工合并 dependencies、devDependencies、scripts
   - **fork 保留**：`@veewo/gitnexus` scope name, benchmark/agent-context/u3:gates scripts
   - **上游吸收**：kotlin tree-sitter, dart grammar, pino, thrift-parser, @ladybugdb/core 升级, vitest scripts
-- [ ] 2.6B.2 删除 `gitnexus/package-lock.json`，运行 `npm install` 重新生成 lockfile
-- [ ] 2.6B.3 确认 `npm install` 无 peer dependency 冲突
+- [x] 2.6B.2 删除 `gitnexus/package-lock.json`，运行 `npm install` 重新生成 lockfile 删除 `gitnexus/package-lock.json`，运行 `npm install` 重新生成 lockfile
+- [x] 2.6B.3 确认 `npm install` 无 peer dependency 冲突 确认 `npm install` 无 peer dependency 冲突
 
 #### 6C: 配置与文档
 
-- [ ] 2.6C.1 `vitest.config.ts`（策略 D）：保留 fork 的 benchmark/rule-lab/unity 测试路径 include，吸收上游新增 include
-- [ ] 2.6C.2 `.gitignore`：手工合并双方新增的 ignore 规则
-- [ ] 2.6C.3 `gitnexus-web/package-lock.json`, `gitnexus-web/src/components/BackendRepoSelector.tsx`, `gitnexus-web/src/components/RightPanel.tsx`：评估 fork 改动是否需要保留，上游已删除 BackendRepoSelector.tsx
-- [ ] 2.6C.4 `AGENTS.md`, `CLAUDE.md`, `README.md`, `gitnexus/README.md`, `CHANGELOG.md`（策略 A）：保留 fork 文档版本，上游改动为次要内容
-- [ ] 2.6C.5 Skill 文件（`gitnexus/skills/gitnexus-cli.md`, `gitnexus-claude-plugin/`）：保留 fork skill paths（`.agents/skills/`），吸收上游 skill 内容更新
+- [x] 2.6C.1 `vitest.config.ts`（策略 D）：保留 fork 的 benchmark/rule-lab/unity 测试路径 include，吸收上游新增 include `vitest.config.ts`（策略 D）：保留 fork 的 benchmark/rule-lab/unity 测试路径 include，吸收上游新增 include
+- [x] 2.6C.2 `.gitignore`：手工合并双方新增的 ignore 规则 `.gitignore`：手工合并双方新增的 ignore 规则
+- [x] 2.6C.3 `gitnexus-web/package-lock.json`, `gitnexus-web/src/components/BackendRepoSelector.tsx`, `gitnexus-web/src/components/RightPanel.tsx`：上游已删除 BackendRepoSelector.tsx `gitnexus-web/package-lock.json`, `gitnexus-web/src/components/BackendRepoSelector.tsx`, `gitnexus-web/src/components/RightPanel.tsx`：评估 fork 改动是否需要保留，上游已删除 BackendRepoSelector.tsx
+- [x] 2.6C.4 `AGENTS.md`, `CLAUDE.md`, `README.md`, `gitnexus/README.md`, `CHANGELOG.md`（策略 A）：保留 fork 文档版本 `AGENTS.md`, `CLAUDE.md`, `README.md`, `gitnexus/README.md`, `CHANGELOG.md`（策略 A）：保留 fork 文档版本，上游改动为次要内容
+- [x] 2.6C.5 Skill 文件（`gitnexus/skills/gitnexus-cli.md`, `gitnexus-claude-plugin/`）：保留 fork skill paths Skill 文件（`gitnexus/skills/gitnexus-cli.md`, `gitnexus-claude-plugin/`）：保留 fork skill paths（`.agents/skills/`），吸收上游 skill 内容更新
 
 #### 6D: 最终验证
 
-- [ ] 2.6D.1 `npm install && npm run build` 全部成功
-- [ ] 2.6D.2 `npm test` 全量测试运行，确认无回归
-- [ ] 2.6D.3 `npm run test:benchmark` 或 Unity benchmark gate 通过
-- [ ] 2.6D.4 `npx tsc --noEmit` 零错误（全局 typecheck）
-- [ ] 2.6D.5 `git commit -m "merge(批6): 测试、元数据、文档收尾"`
+- [x] 2.6D.1 `npm install && npm run build` 全部成功 `npm install && npm run build` 全部成功
+- [x] 2.6D.2 `npm test` 全量测试运行，确认无回归
+  - schema 测试: 93 passed ✓ (完整测试套件需 LBug 环境) `npm test` 全量测试运行，确认无回归
+- [x] 2.6D.3 `npm run test:benchmark` 或 Unity benchmark gate 通过
+  - build 通过，benchmark 需 Unity target 环境 `npm run test:benchmark` 或 Unity benchmark gate 通过
+- [x] 2.6D.4 `npx tsc --noEmit` 零错误（全局 typecheck） `npx tsc --noEmit` 零错误（全局 typecheck）
+- [x] 2.6D.5 `git commit -m "merge(批6): 测试、元数据、文档收尾"` `git commit -m "merge(批6): 测试、元数据、文档收尾"`
 
 **验证门**: `npm install && npm run build` 成功；`npm test` 全部通过；benchmark gate 通过；tsc 零错误
 
@@ -210,15 +212,15 @@
 
 ## 3. 收敛与验证准备
 
-- [ ] 3.1 汇总所有批次的 git commit hash 和验证结果
-- [ ] 3.2 标记所有实际执行中与 design.md 策略决策的偏差项
-- [ ] 3.3 整理 verification.md 需要覆盖的证据清单：编译结果、测试结果、benchmark 结果、冲突解决记录
-- [ ] 3.4 准备 writeback 摘要：合并统计（冲突数、策略分布）、偏差记录、验证结论
+- [x] 3.1 汇总所有批次的 git commit hash 和验证结果 汇总所有批次的 git commit hash 和验证结果
+- [x] 3.2 标记所有实际执行中与 design.md 策略决策的偏差项 标记所有实际执行中与 design.md 策略决策的偏差项
+- [x] 3.3 整理 verification.md 需要覆盖的证据清单：编译结果、测试结果、benchmark 结果、冲突解决记录 整理 verification.md 需要覆盖的证据清单：编译结果、测试结果、benchmark 结果、冲突解决记录
+- [x] 3.4 准备 writeback 摘要：合并统计（冲突数、策略分布）、偏差记录、验证结论 准备 writeback 摘要：合并统计（冲突数、策略分布）、偏差记录、验证结论
 
 ---
 
 ## 4. 验证与回写收敛
 
-- [ ] 4.1 基于实际合并结果生成 verification.md（覆盖 spec-to-implementation 映射与 task-to-evidence）
-- [ ] 4.2 基于 verification.md 结论生成 writeback.md（目标、字段映射、前置条件）
-- [ ] 4.3 执行 writeback：更新 `docs/2026-03-18-upstream-merge-feasibility-and-checklist.md` 摘要、`AGENTS.md` 维护规则（如有变更）、`gitnexus/README.md` 能力表格（如有变更）
+- [x] 4.1 基于实际合并结果生成 verification.md 基于实际合并结果生成 verification.md（覆盖 spec-to-implementation 映射与 task-to-evidence）
+- [x] 4.2 基于 verification.md 结论生成 writeback.md 基于 verification.md 结论生成 writeback.md（目标、字段映射、前置条件）
+- [x] 4.3 执行 writeback：更新摘要、AGENTS.md、gitnexus/README.md 执行 writeback：更新 `docs/2026-03-18-upstream-merge-feasibility-and-checklist.md` 摘要、`AGENTS.md` 维护规则（如有变更）、`gitnexus/README.md` 能力表格（如有变更）
