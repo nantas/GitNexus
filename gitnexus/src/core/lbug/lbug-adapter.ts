@@ -15,7 +15,139 @@ import {
   NodeTableName,
 } from './schema.js';
 import { streamAllCSVsToDisk } from './csv-generator.js';
-import { replayFallbackRelationships } from './fallback-relationship-replay.js';
+import type { CachedEmbedding } from '../embeddings/types.js';
+import { extensionManager, type ExtensionEnsureOptions } from './extension-loader.js';
+import {
+  closeLbugConnection,
+  isDbBusyError,
+  isOpenRetryExhausted,
+  openLbugConnection,
+  waitForWindowsHandleRelease,
+  type LbugConnectionHandle,
+} from './lbug-config.js';
+import { isVectorExtensionSupportedByPlatform } from '../platform/capabilities.js';
+
+import { logger } from '../logger.js';
+// ---------------------------------------------------------------------------
+// Relationship CSV splitting — extracted for testability (PR #818)
+// ---------------------------------------------------------------------------
+
+/** Factory for creating WriteStreams — injectable for testing. */
+export type WriteStreamFactory = (filePath: string) => import('fs').WriteStream;
+
+/** Result of splitting the relationship CSV into per-label-pair files. */
+export interface RelCsvSplitResult {
+  relHeader: string;
+  relsByPairMeta: Map<string, { csvPath: string; rows: number }>;
+  pairWriteStreams: Map<string, import('fs').WriteStream>;
+  skippedRels: number;
+  totalValidRels: number;
+}
+
+/**
+ * Split a relationship CSV into per-label-pair files on disk.
+ *
+ * Streams the CSV line-by-line, routing each relationship to a file named
+ * `rel_{fromLabel}_{toLabel}.csv`. Handles backpressure correctly: only one
+ * drain listener per stream at a time, and readline resumes only when ALL
+ * backpressured streams have drained.
+ *
+ * @param csvPath       Path to the combined relationship CSV
+ * @param csvDir        Directory to write per-pair CSV files
+ * @param validTables   Set of valid node table names
+ * @param getNodeLabel  Function to extract the label from a node ID
+ * @param wsFactory     Optional WriteStream factory (defaults to fs.createWriteStream)
+ */
+export const splitRelCsvByLabelPair = async (
+  csvPath: string,
+  csvDir: string,
+  validTables: Set<string>,
+  getNodeLabel: (id: string) => string,
+  wsFactory: WriteStreamFactory = (p) => createWriteStream(p, 'utf-8'),
+): Promise<RelCsvSplitResult> => {
+  let relHeader = '';
+  const relsByPairMeta = new Map<string, { csvPath: string; rows: number }>();
+  const pairWriteStreams = new Map<string, import('fs').WriteStream>();
+  let skippedRels = 0;
+  let totalValidRels = 0;
+
+  const inputStream = createReadStream(csvPath, 'utf-8');
+  const rl = createInterface({ input: inputStream, crlfDelay: Infinity });
+
+  // If any pair WriteStream errors (disk full, EMFILE, etc.) or the input
+  // stream fails, we need to abort the pending `once(ws, 'drain')` await.
+  // An AbortController gives us one signal to cancel all pending waits
+  // without a custom state machine.
+  const abortOnError = new AbortController();
+  let streamError: Error | null = null;
+  const markStreamError = (err: Error): void => {
+    streamError ??= err;
+    abortOnError.abort(err);
+  };
+
+  try {
+    // `for await (const line of rl)` replaces the old manual
+    // on('line')/pause()/resume()/waitingForDrain state machine: readline's
+    // async iterator naturally serializes line delivery with our awaits, so
+    // at most one ws can be in backpressure at a time and we just await its
+    // 'drain' event.
+    let isFirst = true;
+    for await (const line of rl) {
+      if (streamError) throw streamError;
+      if (isFirst) {
+        relHeader = line;
+        isFirst = false;
+        continue;
+      }
+      if (!line.trim()) continue;
+      const match = line.match(/"([^"]*)","([^"]*)"/);
+      if (!match) {
+        skippedRels++;
+        continue;
+      }
+      const fromLabel = getNodeLabel(match[1]);
+      const toLabel = getNodeLabel(match[2]);
+      if (!validTables.has(fromLabel) || !validTables.has(toLabel)) {
+        skippedRels++;
+        continue;
+      }
+
+      const pairKey = `${fromLabel}|${toLabel}`;
+      let ws = pairWriteStreams.get(pairKey);
+      if (!ws) {
+        const pairCsvPath = path.join(csvDir, `rel_${fromLabel}_${toLabel}.csv`);
+        ws = wsFactory(pairCsvPath);
+        ws.on('error', markStreamError);
+        pairWriteStreams.set(pairKey, ws);
+        relsByPairMeta.set(pairKey, { csvPath: pairCsvPath, rows: 0 });
+        if (!ws.write(relHeader + '\n')) {
+          await once(ws, 'drain', { signal: abortOnError.signal });
+        }
+      }
+
+      if (!ws.write(line + '\n')) {
+        await once(ws, 'drain', { signal: abortOnError.signal });
+      }
+      relsByPairMeta.get(pairKey)!.rows++;
+      totalValidRels++;
+    }
+    if (streamError) throw streamError;
+  } catch (err) {
+    // Tear down everything so no fd is left dangling. If the abort was caused
+    // by a stream error, rethrow that error (more actionable than AbortError).
+    for (const ws of pairWriteStreams.values()) ws.destroy();
+    inputStream.destroy();
+    throw streamError ?? err;
+  } finally {
+    // Readline 'close' fires before the underlying fs.ReadStream releases its
+    // fd — on Windows that race caused ENOTEMPTY on the parent dir.
+    // stream/promises.finished is the stdlib "wait until this stream is fully
+    // closed" primitive and handles both success and error paths.
+    await finished(inputStream).catch(() => {});
+  }
+
+  return { relHeader, relsByPairMeta, pairWriteStreams, skippedRels, totalValidRels };
+};
 
 let db: lbug.Database | null = null;
 let conn: lbug.Connection | null = null;
@@ -46,13 +178,6 @@ const isMissingColumnOrTableError = (msg: string): boolean =>
 
 /** Expose the current Database for pool adapter reuse in tests. */
 export const getDatabase = (): lbug.Database | null => db;
-
-export const getOpenLbugDatabase = (dbPath: string): lbug.Database | null => {
-  if (currentDbPath !== dbPath || !db) {
-    return null;
-  }
-  return db;
-};
 
 // Global session lock for operations that touch module-level lbug globals.
 // This guarantees no DB switch can happen while an operation is running.
@@ -290,11 +415,6 @@ export const loadGraphToLbug = async (
 
   const insertedRels = totalValidRels;
   const warnings: string[] = [];
-  let fallbackInsertStats = {
-    attempted: 0,
-    succeeded: 0,
-    failed: 0,
-  };
   if (insertedRels > 0) {
     log(`Loading edges: ${insertedRels.toLocaleString()} across ${relsByPairMeta.size} types`);
 
@@ -338,7 +458,24 @@ export const loadGraphToLbug = async (
 
     if (failedPairCsvPaths.size > 0) {
       log(`Inserting ${failedPairEdges} edges individually (missing schema pairs)`);
-      fallbackInsertStats = await fallbackRelationshipInserts([relHeader, ...failedPairLines], validTables, getNodeLabel);
+      // Read failed pair files and merge for fallback inserts
+      const allLines: string[] = [relHeader];
+      for (const failedPath of failedPairCsvPaths) {
+        try {
+          const content = await fs.readFile(failedPath, 'utf-8');
+          const lines = content.split('\n');
+          // Skip header line (first) and empty lines
+          for (let i = 1; i < lines.length; i++) {
+            if (lines[i].trim()) allLines.push(lines[i]);
+          }
+        } catch {}
+        try {
+          await fs.unlink(failedPath);
+        } catch {}
+      }
+      if (allLines.length > 1) {
+        await fallbackRelationshipInserts(allLines, validTables, getNodeLabel);
+      }
     }
   }
 
@@ -363,7 +500,7 @@ export const loadGraphToLbug = async (
     await fs.rmdir(csvDir);
   } catch {}
 
-  return { success: true, insertedRels, skippedRels, warnings, fallbackInsertStats };
+  return { success: true, insertedRels, skippedRels, warnings };
 };
 
 // LadybugDB default ESCAPE is '\' (backslash), but our CSV uses RFC 4180 escaping ("" for literal quotes).
@@ -405,29 +542,35 @@ const fallbackRelationshipInserts = async (
   validTables: Set<string>,
   getNodeLabel: (id: string) => string,
 ) => {
-  if (!conn) {
-    return {
-      attempted: 0,
-      succeeded: 0,
-      failed: 0,
-    };
-  }
+  if (!conn) return;
   const escapeLabel = (label: string): string => {
     return BACKTICK_TABLES.has(label) ? `\`${label}\`` : label;
   };
 
-  return replayFallbackRelationships(validRelLines, {
-    validTables,
-    getNodeLabel,
-    insertRelationship: async ({ fromId, toId, fromLabel, toLabel, relType, confidence, reason, step }) => {
-      const esc = (s: string) => s.replace(/'/g, "''").replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+  for (let i = 1; i < validRelLines.length; i++) {
+    const line = validRelLines[i];
+    try {
+      const match = line.match(/"([^"]*)","([^"]*)","([^"]*)",([0-9.]+),"([^"]*)",([0-9-]+)/);
+      if (!match) continue;
+      const [, fromId, toId, relType, confidenceStr, reason, stepStr] = match;
+      const fromLabel = getNodeLabel(fromId);
+      const toLabel = getNodeLabel(toId);
+      if (!validTables.has(fromLabel) || !validTables.has(toLabel)) continue;
+
+      const confidence = parseFloat(confidenceStr) || 1.0;
+      const step = parseInt(stepStr) || 0;
+
+      const esc = (s: string) =>
+        s.replace(/'/g, "''").replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
       await conn.query(`
         MATCH (a:${escapeLabel(fromLabel)} {id: '${esc(fromId)}' }),
               (b:${escapeLabel(toLabel)} {id: '${esc(toId)}' })
         CREATE (a)-[:${REL_TABLE_NAME} {type: '${esc(relType)}', confidence: ${confidence}, reason: '${esc(reason)}', step: ${step}}]->(b)
       `);
-    },
-  });
+    } catch {
+      // skip
+    }
+  }
 };
 
 /** Tables with isExported column (TypeScript/JS-native types) */
@@ -451,7 +594,7 @@ const getCopyQuery = (table: NodeTableName, filePath: string): string => {
     return `COPY ${t}(id, label, heuristicLabel, keywords, description, enrichedBy, cohesion, symbolCount) FROM "${filePath}" ${COPY_CSV_OPTS}`;
   }
   if (table === 'Process') {
-    return `COPY ${t}(id, label, heuristicLabel, processType, processSubtype, runtimeChainConfidence, sourceReasons, sourceConfidences, stepCount, communities, entryPointId, terminalId) FROM "${filePath}" ${COPY_CSV_OPTS}`;
+    return `COPY ${t}(id, label, heuristicLabel, processType, stepCount, communities, entryPointId, terminalId) FROM "${filePath}" ${COPY_CSV_OPTS}`;
   }
   if (table === 'Section') {
     return `COPY ${t}(id, name, filePath, startLine, endLine, level, content, description) FROM "${filePath}" ${COPY_CSV_OPTS}`;
