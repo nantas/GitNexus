@@ -74,13 +74,22 @@ The system SHALL support `response_profile=slim` (default) and `response_profile
 - **THEN** `hydrationMeta` SHALL be omitted from the response
 - **AND** `resourceBindings` and `serializedFields` SHALL still be populated
 
-### Requirement: Cypher Workflow Execution for Runtime Chains
-The system SHALL support pre-defined Cypher workflow execution for Unity runtime process queries via `query/context` with cypher-based evidence collection.
+### Requirement: Runtime Chain Verification via Graph-Only Closure
+The system SHALL support runtime chain verification for Unity runtime process queries via `query/context` using a V2 graph-only closure architecture driven by structured anchors (symbol name, resource seed path, mapped seed targets, and resource bindings).
 
-#### Scenario: runtime chain cypher workflow
-- **WHEN** `query/context` matches a known Unity runtime process (e.g., Reload, GunGraph)
-- **THEN** the corresponding Cypher workflow SHALL execute to collect evidence edges
-- **AND** next-hops and gaps SHALL be synthesized into `workflows.debugging` / `workflows.exploring` in the response
+> **Note**: This requirement replaces the earlier "pre-defined Cypher workflow" terminology. Query-time verification no longer relies on per-process Cypher templates or hardcoded workflows. Instead, closure is computed dynamically from the graph using structured anchors produced during ingestion.
+
+#### Scenario: runtime chain graph-only closure
+- **WHEN** `query/context` matches a known Unity runtime process (e.g., Reload, GunGraph) and `runtime_chain_verify=on-demand` is requested
+- **THEN** the system SHALL execute `verifyRuntimeChainOnDemand()` to perform graph-only closure from structured anchors
+- **AND** the closure outcome SHALL be classified as `verifier-core` (binary) and `policy-adjusted` (external) confidence
+- **AND** next-hops, gaps, and closure segments SHALL be synthesized into `workflows.debugging` / `workflows.exploring` in the response
+
+#### Scenario: hydration policy compliance in closure
+- **WHEN** `hydration_policy=strict` and graph-only closure cannot complete all segments
+- **THEN** `policy-adjusted` MAY be downgraded to `verified_partial` or `verified_segment`
+- **AND** `hydrationMeta.fallbackToCompact` SHALL be set to `true` when compact mode is used as fallback
+- **AND** parity rerun SHALL be required before claiming closure completeness
 
 ### Requirement: Seed-Loader Parity Warmup
 The system SHALL support loading Unity parity seeds from benchmark data for warmup, enabling cache pre-population before interactive queries.

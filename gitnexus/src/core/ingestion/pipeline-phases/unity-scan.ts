@@ -13,8 +13,8 @@
  */
 
 import type { PipelinePhase, PipelineContext, PhaseResult } from './types.js';
-import type { ScanOutput } from './scan.js';
-import { generateId } from '../../../lib/utils.js';
+import type { ParseOutput } from './parse.js';
+import { processUnityResources } from '../unity-resource-processor.js';
 
 const UNITY_EXTENSIONS = new Set(['.prefab', '.unity', '.asset', '.uxml', '.uss', '.meta']);
 
@@ -26,16 +26,16 @@ export interface UnityScanOutput {
 
 export const unityScanPhase: PipelinePhase<UnityScanOutput> = {
   name: 'unity-scan',
-  deps: ['scan'],
+  deps: ['parse'],
 
   async execute(
     ctx: PipelineContext,
     deps: ReadonlyMap<string, PhaseResult<unknown>>,
   ): Promise<UnityScanOutput> {
-    // Access scan output from deps
-    const scanResult = deps.get('scan');
-    const scanOutput = scanResult?.output as ScanOutput | undefined;
-    const allPaths = scanOutput?.allPaths ?? [];
+    // Access parse output for file list (Class nodes are already in graph after parse)
+    const parseResult = deps.get('parse');
+    const parseOutput = parseResult?.output as ParseOutput | undefined;
+    const allPaths = parseOutput?.allPaths ?? [];
 
     if (allPaths.length === 0) {
       ctx.onProgress({
@@ -69,114 +69,27 @@ export const unityScanPhase: PipelinePhase<UnityScanOutput> = {
       message: `Unity scan: ${unityFiles.length} Unity files detected`,
     });
 
-    // Categorize Unity files by type
-    const prefabFiles = unityFiles.filter((p) => p.toLowerCase().endsWith('.prefab'));
-    const sceneFiles = unityFiles.filter((p) => p.toLowerCase().endsWith('.unity'));
-    const assetFiles = unityFiles.filter((p) => p.toLowerCase().endsWith('.asset'));
-
-    let edgesProduced = 0;
-
-    // Process prefab files for component references
-    // Spec (ingestion-pipeline): prefab resource scan — produce UNITY_COMPONENT_INSTANCE edges
-    ctx.onProgress({
-      phase: 'unity-scan' as any,
-      percent: 30,
-      message: `Unity scan: processing ${prefabFiles.length} prefab files`,
-    });
-
-    for (const prefabPath of prefabFiles) {
-      try {
-        const prefabNodeId = generateId('File', prefabPath);
-        ctx.graph.addRelationship({
-          id: generateId('UNITY_COMPONENT_INSTANCE', `prefab:${prefabPath}`),
-          sourceId: prefabNodeId,
-          targetId: prefabNodeId,
-          type: 'UNITY_COMPONENT_INSTANCE',
-          confidence: 0.9,
-          reason: `prefab:${prefabPath}`,
-        });
-        edgesProduced++;
-      } catch {
-        // Skip files that can't be processed individually
-      }
+    // Delegate to the full Unity resource processor instead of creating placeholder self-loop edges.
+    // processUnityResources reads Class nodes from the graph (produced by parse), builds a
+    // Unity scan context, resolves bindings, and writes UNITY_COMPONENT_INSTANCE,
+    // UNITY_SERIALIZED_TYPE_IN, UNITY_ASSET_GUID_REF, and UNITY_RESOURCE_SUMMARY edges.
+    let processorResult: Awaited<ReturnType<typeof processUnityResources>> | undefined;
+    try {
+      ctx.onProgress({
+        phase: 'unity-scan' as any,
+        percent: 30,
+        message: 'Unity scan: running processUnityResources...',
+      });
+      processorResult = await processUnityResources(ctx.graph, { repoPath: ctx.repoPath });
+    } catch (err) {
+      ctx.onProgress({
+        phase: 'unity-scan' as any,
+        percent: 50,
+        message: `Unity scan: processor error — ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
 
-    // Process scene files for GameObjects and component references
-    // Spec (ingestion-pipeline): scene file resource scan — produce UNITY_COMPONENT_INSTANCE + UNITY_SERIALIZED_TYPE_IN
-    ctx.onProgress({
-      phase: 'unity-scan' as any,
-      percent: 50,
-      message: `Unity scan: processing ${sceneFiles.length} scene files`,
-    });
-
-    for (const scenePath of sceneFiles) {
-      try {
-        const sceneNodeId = generateId('File', scenePath);
-        ctx.graph.addRelationship({
-          id: generateId('UNITY_COMPONENT_INSTANCE', `scene:${scenePath}`),
-          sourceId: sceneNodeId,
-          targetId: sceneNodeId,
-          type: 'UNITY_COMPONENT_INSTANCE',
-          confidence: 0.85,
-          reason: `scene:${scenePath}`,
-        });
-        edgesProduced++;
-
-        ctx.graph.addRelationship({
-          id: generateId('UNITY_SERIALIZED_TYPE_IN', `scene:${scenePath}`),
-          sourceId: sceneNodeId,
-          targetId: sceneNodeId,
-          type: 'UNITY_SERIALIZED_TYPE_IN',
-          confidence: 0.8,
-          reason: `scene:${scenePath}`,
-        });
-        edgesProduced++;
-      } catch {
-        // Skip individual file errors
-      }
-    }
-
-    // Process asset files for serialized field references
-    // Spec (ingestion-pipeline): asset file resource scan — produce UNITY_SERIALIZED_TYPE_IN
-    ctx.onProgress({
-      phase: 'unity-scan' as any,
-      percent: 70,
-      message: `Unity scan: processing ${assetFiles.length} asset files`,
-    });
-
-    for (const assetPath of assetFiles) {
-      try {
-        const assetNodeId = generateId('File', assetPath);
-        ctx.graph.addRelationship({
-          id: generateId('UNITY_SERIALIZED_TYPE_IN', `asset:${assetPath}`),
-          sourceId: assetNodeId,
-          targetId: assetNodeId,
-          type: 'UNITY_SERIALIZED_TYPE_IN',
-          confidence: 0.85,
-          reason: `asset:${assetPath}`,
-        });
-        edgesProduced++;
-      } catch {
-        // Skip individual file errors
-      }
-    }
-
-    // Produce resource summary edges for projects with many Unity files
-    if (unityFiles.length > 10) {
-      try {
-        ctx.graph.addRelationship({
-          id: generateId('UNITY_RESOURCE_SUMMARY', `summary:${ctx.repoPath}`),
-          sourceId: generateId('File', ctx.repoPath),
-          targetId: generateId('File', ctx.repoPath),
-          type: 'UNITY_RESOURCE_SUMMARY',
-          confidence: 1.0,
-          reason: `summary:${unityFiles.length} unity files`,
-        });
-        edgesProduced++;
-      } catch {
-        // Skip summary edge if it fails
-      }
-    }
+    const edgesProduced = processorResult?.bindingCount ?? 0;
 
     ctx.onProgress({
       phase: 'unity-scan' as any,

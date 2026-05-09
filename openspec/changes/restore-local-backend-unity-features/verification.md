@@ -99,19 +99,28 @@
 
 #### 🟡 WARNING（新增，Verification 发现）
 
-**W3: `unity-scan.ts` 实现为轻量占位，未调用 spec 指定的解析器**
+**W3: `unity-scan.ts` 实现为轻量占位，未调用 spec 指定的解析器** → ✅ FIXED
 
-- **File**: `gitnexus/src/core/ingestion/pipeline-phases/unity-scan.ts:80-175`
-- **Status**: ⏳ **开放**
-- **Problem**: Spec（ingestion-pipeline）要求 "scans `.prefab` files for component references using `prefabSourceScan()`" 和 "scan asset files for serialized field references using `serialized-type-index`"，但 `unity-scan.ts` 创建的是自环占位边（`sourceId === targetId`），并未真正调用 `prefabSourceScan()`、`ui-asset-ref-scanner.ts`、`serialized-type-index.ts`。完整的资源处理实现位于 `unity-resource-processor.ts`，但新 DAG phase 未接入。
-- **Recommendation**: 将 `unity-resource-processor.ts` 的调用逻辑接入 `unity-scan.ts`，或更新 spec 文档说明 `unity-scan.ts` 为轻量占位 phase、完整解析由其他路径提供。
+- **File**: `gitnexus/src/core/ingestion/pipeline-phases/unity-scan.ts`
+- **Status**: ✅ **已修复**（2026-05-09）
+- **修复内容**:
+  - `unity-scan.ts` 的 `execute()` 不再创建自环占位边，改为调用 `processUnityResources(ctx.graph, { repoPath: ctx.repoPath })`
+  - `unity-scan.ts` 的 `deps` 从 `['scan']` 改为 `['parse']`（需要 Class 节点）
+  - `pipeline.ts` 的 `buildPhaseList()` 调整 phase 顺序：`communities` → `unityScan` → `processes` → `unityEnrich`，确保 `processUnityResources` 在 `applyUnityLifecycleSyntheticCalls` 之前运行
+  - `doc-contract.test.ts` 同步更新以匹配新的 phase-based 架构（检查 `unity-scan.ts` 源码中的 `processUnityResources(` 和 `pipeline.ts` 中的 `phases.push(unityScanPhase)` < `phases.push(processesPhase)`）
+- **验证**: `npx tsc --noEmit` 零错误，`node --test dist/core/unity/doc-contract.test.js` pass
 
-**W4: Cypher workflow spec 描述与实际实现（V2 graph-only closure）不匹配**
+**W4: Cypher workflow spec 描述与实际实现（V2 graph-only closure）不匹配** → ✅ FIXED
 
-- **File**: `specs/mcp-local-backend/spec.md`（Cypher Workflow Execution requirement）
-- **Status**: ⏳ **开放**
-- **Problem**: Spec 使用 "pre-defined Cypher workflows" 术语描述运行时链验证，实际实现（`buildWorkflowResponse()` → `verifyRuntimeChainOnDemand()`）采用的是 V2 graph-only closure 架构。spec 中的 Cypher 模板概念未在代码中显式体现。
-- **Recommendation**: 更新 `specs/mcp-local-backend/spec.md` 中的 Cypher Workflow Execution requirement 描述，与 `docs/unity-runtime-process-source-of-truth.md` 的 V2 graph-only closure 架构对齐。
+- **File**: `openspec/changes/restore-local-backend-unity-features/specs/mcp-local-backend/spec.md`
+- **Status**: ✅ **已修复**（2026-05-09）
+- **修复内容**:
+  - 将 "Requirement: Cypher Workflow Execution for Runtime Chains" 重命名为 "Requirement: Runtime Chain Verification via Graph-Only Closure"
+  - 删除 "pre-defined Cypher workflow execution" 和 "cypher-based evidence collection" 等不准确的术语
+  - 新增说明：query-time verification 不再依赖 per-process Cypher 模板，而是使用结构化锚点（symbol name, resource seed path, mapped seed targets, resource bindings）驱动的 graph-only closure
+  - 新增 scenario：描述 `runtime_chain_verify=on-demand` 时 `verifyRuntimeChainOnDemand()` 的执行行为和 `verifier-core`/`policy-adjusted` 两层语义
+  - 新增 scenario：描述 `hydration_policy=strict` 下 closure 不完整时的降级行为和 parity rerun 要求
+- **验证**:  spec 描述与 `docs/unity-runtime-process-source-of-truth.md` § Verifier 收口 及 `local-backend.ts` `buildWorkflowResponse()` 实现一致
 
 #### 🔵 SUGGESTION (3)
 
@@ -136,13 +145,14 @@
 
 ### Final Assessment
 
-> ✅ **No CRITICAL issues. 2 WARNINGs + 3 SUGGESTIONs remain. Ready for archive with noted improvements.**
+> ✅ **No CRITICAL issues. All WARNINGs fixed. 3 SUGGESTIONs remain. Ready for archive.**
 
 - C1 已修复：`findUnityMatchingSymbol()` Cypher 查询现在语法正确，Unity evidence 路径可用
 - S1 已修复：`responseProfile`/`hydration` 参数已有类型安全
 - W1 已修复：`buildWorkflowResponse()` 真正调用 `verifyRuntimeChainOnDemand()`
 - W2 已修复：E2E 验证已通过 mini-unity fixture + 集成测试执行，57 tests passed
-- W3（`unity-scan.ts` 占位实现）和 W4（spec 与实际架构不一致）为开放问题，建议归档前或归档后处理
+- W3 已修复：`unity-scan.ts` 接入 `processUnityResources()`，pipeline phase 顺序调整为 communities → unityScan → processes → unityEnrich
+- W4 已修复：`specs/mcp-local-backend/spec.md` Cypher Workflow 要求重命名为 Runtime Chain Verification via Graph-Only Closure，描述与 V2 实现一致
 - S2（Unity 测试文件使用 node:test）为历史遗留问题，非本次变更引入
 - S3（真实 Unity 项目验证）建议获得访问权限后补充
 
@@ -150,6 +160,6 @@
 
 - [x] E2E verification on mini-unity fixture (completed 2026-05-09, 57 tests passed)
 - [ ] E2E verification on neonspark Unity project (requires project access — optional)
-- [ ] Wire `unity-resource-processor.ts` into `unity-scan.ts` DAG phase (W3)
-- [ ] Update `specs/mcp-local-backend/spec.md` Cypher Workflow description to V2 graph-only closure (W4)
+- [x] Wire `unity-resource-processor.ts` into `unity-scan.ts` DAG phase (W3) — completed 2026-05-09
+- [x] Update `specs/mcp-local-backend/spec.md` Cypher Workflow description to V2 graph-only closure (W4) — completed 2026-05-09
 - [ ] LBUG integration test run (needs LadybugDB native addon — separate environment)

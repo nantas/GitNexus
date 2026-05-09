@@ -93,11 +93,21 @@ function buildPhaseList(options?: PipelineOptions): PipelinePhase[] {
   ];
 
   if (!options?.skipGraphPhases) {
-    phases.push(mroPhase, communitiesPhase, processesPhase);
+    phases.push(mroPhase, communitiesPhase);
   }
 
-  // Unity phases — conditionally activate at runtime based on file detection
-  phases.push(unityScanPhase, unityEnrichPhase);
+  // Unity resource scanning — runs after parse (needs Class nodes) and after communities when available.
+  // Placed before processes so that UNITY edges are available for applyUnityLifecycleSyntheticCalls.
+  phases.push(unityScanPhase);
+
+  if (!options?.skipGraphPhases) {
+    phases.push(processesPhase);
+  }
+
+  // Unity enrichment runs after all upstream phases have produced their graph contributions.
+  if (!options?.skipGraphPhases) {
+    phases.push(unityEnrichPhase);
+  }
 
   return phases;
 }
