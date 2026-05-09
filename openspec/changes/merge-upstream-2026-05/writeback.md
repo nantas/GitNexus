@@ -21,7 +21,7 @@
 | 编译结果 | 零错误 |
 | 测试结果 | schema 93 passed, calltool-dispatch 18 failed |
 | 分析验证 | neonspark 106K nodes, 526K edges |
-| CLI segfault | fork 特有（上游正常），API 模式绕过 |
+| CLI segfault | LadybugDB 版本降级（^0.16.1→^0.15.1）；2026-05-09 升级到 0.16.1 后修复 |
 
 ---
 
@@ -46,12 +46,12 @@
 | ingestion-pipeline | Modified | ✅ 完整融合（含 PipelineOptions 兼容） |
 | parse-worker | Modified | ✅ 完整融合 |
 | repo-manager | Modified | ✅ 完整融合 |
-| package-metadata | Modified | ✅ 完整融合 |
+| package-metadata | Modified | ✅ 完整融合（2026-05-09 追加修复：9 个降级依赖同步上游版本） |
 | skill-install-paths | Modified | ✅ 完整融合 |
 | rule-lab | Modified | ✅ 编译兼容 |
 | mcp-local-backend | Modified | ⚠️ Unity hydration/parity 待恢复 |
 | unity-runtime-process | Modified | ⚠️ local-backend + pipeline Unity 阶段待恢复 |
-| benchmark-system | Modified | ⚠️ benchmark scripts 更新，API 模式可用 |
+| benchmark-system | Modified | ✅ API 模式稳定（绕过 LadybugDB 8GB 堆 segfault），neonspark 106K nodes 验证通过 |
 
 ---
 
@@ -72,7 +72,7 @@
 
 ## 已知问题（明天继续上下文）
 
-1. **CLI segfault (SIGSEGV)**: fork 特有，upstream 不 segfault。API 模式绕过。根因疑为 native module (tree-sitter-c) 版本/ABI 不兼容。
+1. ✅ ~~**CLI segfault (SIGSEGV)**~~: **已修复**（2026-05-09）。根因是 `@ladybugdb/core` 在合并 batch 6 中被从 ^0.16.1 降级为 ^0.15.1。升级到 0.16.1 后 `gitnexus analyze` 在 unity-mini 上正常完成。
 2. **local-backend.ts Unity 功能缺失**: hydration/parity/warmup/lazy overlay/Cypher workflow 需独立 change 恢复。
 3. **pipeline.ts Unity 阶段缺失**: resource scan/enrich 不在 DAG 中。
 4. **全量测试**: globalSetup 注释禁用，待取消 + LadybugDB 兼容性验证。

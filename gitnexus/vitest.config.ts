@@ -10,6 +10,7 @@ export default defineConfig({
       'src/mcp/local/process-confidence.test.ts',
       'src/mcp/local/runtime-chain-*.test.ts',
       'src/mcp/local/runtime-claim*.test.ts',
+      'src/mcp/local/unity-*.test.ts',
     ],
     testTimeout: 30000,
     hookTimeout: 120000,

@@ -156,20 +156,26 @@
 
 ## 5. 剩余待解决问题
 
-### 5.1 CLI segfault（根因已定位）
+### 5.1 CLI segfault（✅ 已修复 — LadybugDB 版本降级为根因）
 
-**现象**: `node dist/cli/index.js analyze <path>` 在 fork 版本中 segfault (SIGSEGV, exit 139)
-**根因**: 不是 `ensureHeap()` re-exec 本身，而是 re-exec 后的 Node 进程在加载 native 模块时崩溃。可能与 tree-sitter-c@0.21.4 的 prebuilt binary 与当前系统 Node v24.13.0 / macOS arm64 不兼容有关。
-**上游验证**: ✅ **upstream 不 segfault**（subagent scout 独立验证，upstream CLI 成功分析 unity-mini: 24 nodes, 34 edges, 3.8s）
-**当前绕过**: `analyze-runner.ts` 改为 API 模式调用 `analyzeCommand()` 直接分析，绕过 CLI re-exec 路径。API 模式已验证可用于 neonspark 完整分析（106,412 nodes, 526,327 edges, 8,076 files）。
-**待调查**: fork 与 upstream 在 package.json 依赖版本、Node 版本、tree-sitter native binary 上的差异。建议对比 `npm ls tree-sitter tree-sitter-c tree-sitter-c-sharp` 输出。
+**现象**: `node --max-old-space-size=8192 dist/cli/index.js analyze <path>` 在 SIGSEGV (exit 139)。仅 8GB 堆触发，2GB 堆正常。
+**根因（2026-05-09 更新）**: 合并 batch 6 在 `package.json` 冲突中保留了 fork 的 `@ladybugdb/core: ^0.15.1`，覆盖了上游的 `^0.16.1`。**LadybugDB 0.15.x native addon 与 Node v24/v26 + macOS arm64 在数据导入阶段不兼容**，而 0.16.x 已修复此问题。
+  - 上游 main 分支当前使用 `^0.16.1`
+  - 合并降级：`^0.16.1` → `^0.15.1`
+  - 受此影响的还有 `commander`（^14.0.3→^12.0.0）、`glob`（^13.0.6→^11.0.0）等共 9 个依赖被意外降级
+**修复（2026-05-09）**: 将 `@ladybugdb/core` 恢复为 `^0.16.1`，同时同步了所有 9 个降级依赖、4 个缺失依赖、`overrides` 和 `engines.node` 到上游版本。
+**验证**: `node dist/cli/index.js analyze ../benchmarks/fixtures/unity-mini --force` ✅ 成功（24 nodes, 34 edges, 7.3s），无 SIGSEGV。
+**修复方向**: 已完成 — `package.json` 依赖版本恢复。lockfile 已通过 `npm install` 重建。
 
 ### 5.2 全量测试套件（globalSetup 待恢复）
 
 **现象**: `npx vitest run` 因 `test/global-setup.ts` 缺失而失败
 **根因**: batch 0 merge 时 upstream 删除了 fork 的 `test/setup.ts`（modify/delete conflict）。vitest.config.ts 中的 `globalSetup: ['test/global-setup.ts']` 已恢复文件但被注释禁用。
+**前置条件检查 (2026-05-09)**:
+- ✅ `@ladybugdb/core` native 模块（0.16.1）可加载
+- ⬜ `test/helpers/test-db.ts` 可创建临时目录（待验证）
 **恢复步骤**:
-1. 验证 `@ladybugdb/core` native 模块可加载: `node -e "require('@ladybugdb/core')"`
+1. ✅ LadybugDB 0.16.1 已安装，native 模块兼容
 2. 验证 `test/helpers/test-db.ts` 可创建临时目录
 3. 取消 `vitest.config.ts` 中的 globalSetup 注释
 4. 运行 `npx vitest run` 并修复失败的测试
@@ -188,8 +194,8 @@
 
 ### 5.5 ensureHeap() 在 fork 中的 segfault
 
-**根因**: 上述 5.1
-**修复**: 调查 native module 版本差异，或永久切换到 API 模式
+**根因**: 同 §5.1 — LadybugDB 0.15.x native addon 与 macOS arm64 不兼容
+**状态**: ✅ 已修复。`@ladybugdb/core` 升级到 0.16.1 后，8GB 堆下的 CLI analyze 正常完成。API 模式绕过不再需要。
 
 ### 5.6 其他已知问题
 
@@ -198,15 +204,15 @@
 | pipeline.ts 缺少 fork 的 Unity 阶段 | `src/core/ingestion/pipeline.ts` | Unity resource scan/enrich 不在 DAG 中 |
 | csv-generator.test.ts 引用不存在的导出 | `src/core/lbug/csv-generator.test.ts` | fork test 引用 fork csv-generator 的 FileContentCache，已 @ts-nocheck |
 | pino logger 导入但未在 fork 文件使用 | `src/core/logger.ts` | 编译通过，运行时需 pino 可用 |
-| graphology-types 依赖缺失 | `src/core/ingestion/community-processor.ts` | 已添加为 devDependency |
+| graphology-types 依赖缺失 | `src/core/ingestion/community-processor.ts` | ✅ 已添加为 devDependency，依赖修复后该包已包含在 lockfile 中 |
 
 ---
 
 ## 6. 下一步建议
 
-1. **优先级 P0**: 修复 5.1 CLI segfault（对比 fork/upstream native module 差异）
-2. **优先级 P0**: 恢复 5.4 local-backend.ts Unity 功能（独立 openspec change）
-3. **优先级 P1**: 恢复 5.2 全量测试套件（取消 globalSetup 注释 + 修复失败测试）
-4. **优先级 P1**: 修复 5.3 calltool-dispatch 测试
-5. **优先级 P2**: 恢复 pipeline.ts Unity 阶段
-6. **优先级 P2**: 执行 4.3 writeback（更新前次 merge 文档、AGENTS.md、README.md）
+1. **优先级 P0**: 恢复 5.4 local-backend.ts Unity 功能（独立 openspec change）
+2. **优先级 P1**: 恢复 5.2 全量测试套件（取消 globalSetup 注释 + 修复失败测试）
+3. **优先级 P1**: 修复 5.3 calltool-dispatch 测试
+4. **优先级 P2**: 恢复 pipeline.ts Unity 阶段
+5. **优先级 P2**: 执行 4.3 writeback（更新前次 merge 文档、AGENTS.md、README.md）
+6. ✅ **优先级 P3 → 已解决**: LadybugDB + 8GB 堆兼容性（2026-05-09: `@ladybugdb/core` 升级到 ^0.16.1 后修复，详见 §5.1）

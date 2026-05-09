@@ -34,6 +34,8 @@ import {
   mroPhase,
   communitiesPhase,
   processesPhase,
+  unityScanPhase,
+  unityEnrichPhase,
   type PipelinePhase,
   type CommunitiesOutput,
   type ProcessesOutput,
@@ -93,6 +95,9 @@ function buildPhaseList(options?: PipelineOptions): PipelinePhase[] {
   if (!options?.skipGraphPhases) {
     phases.push(mroPhase, communitiesPhase, processesPhase);
   }
+
+  // Unity phases — conditionally activate at runtime based on file detection
+  phases.push(unityScanPhase, unityEnrichPhase);
 
   return phases;
 }

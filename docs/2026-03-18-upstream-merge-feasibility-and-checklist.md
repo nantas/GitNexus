@@ -373,3 +373,38 @@ The merge should not be considered complete unless all of the following are true
 ## Notes
 
 This document reflects the state of investigation on 2026-03-18 before index rebuild. Any follow-up graph-based impact analysis should be done only after a fresh `npx -y @veewo/gitnexus@latest analyze`.
+
+---
+
+## Update (2026-05-09): Local-Backend Unity Features Restored
+
+### Resolution
+
+Instead of performing the risky full upstream re-merge (which would reintroduce the 6482-line conflict in `local-backend.ts`), the Unity hydration/evidence/context features were restored via the **adapter pattern**:
+
+- `attachUnityContext()` — adapter for `context()` handler Unity hydration injection
+- `enrichWithUnityEvidence()` — adapter for `query()` handler Unity evidence + workflow injection
+- `buildWorkflowResponse()` — executes real `verifyRuntimeChainOnDemand()` for matched runtime processes
+
+### What Changed
+
+| Concern | Resolution |
+|---|---|
+| Unity context query with hydration | Restored via `attachUnityContext()` calling `unity-runtime-hydration.ts` |
+| Lazy/parity hydration + overlay cache | Delegated to existing hydration modules; no re-merge needed |
+| Agent-safe response envelope | Restored via `enrichWithUnityEvidence()` with `confidence` + `evidence` fields |
+| Cypher workflow execution | Restored: `buildWorkflowResponse()` calls `verifyRuntimeChainOnDemand()` instead of placeholder |
+| `runtime_chain_verify=on-demand` | Added to `query()` params; integrates with existing `runtime-chain-verify.ts` |
+| Parameterized query hardening | Preserved (upstream security fix unchanged) |
+| Pipeline Unity phases | `unity-scan.ts` + `unity-enrich.ts` already registered in `pipeline.ts` |
+
+### Remaining Limitations
+
+- E2E verification on neonspark Unity project is pending project access
+- Full Cypher workflow templates for specific processes (Reload, GunGraph, etc.) rely on `verifyRuntimeChainOnDemand` graph-only closure; no hardcoded per-process templates needed in V2
+
+### Impact on Merge Strategy
+
+- **No longer required**: Re-merge `upstream/main` solely to recover Unity features
+- **Still recommended**: Eventually merge upstream for language support (Kotlin/Swift/C#/Rust) and security improvements, but Unity features are now independent of that merge
+- The adapter approach decouples Unity feature maintenance from upstream merge cadence

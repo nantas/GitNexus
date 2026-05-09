@@ -11,7 +11,7 @@
 | Neonspark 完整分析 | ✅ 通过 | 106,412 nodes, 526,327 edges, 8,076 files |
 | Benchmark 框架 | ✅ 通过 | unity-mini + neonspark API 模式运行正常 |
 | 全量测试（`npm test`） | ⚠️ 部分 | globalSetup 禁用，部分测试文件 @ts-nocheck |
-| CLI 入口分析 | ⚠️ 问题 | fork CLI segfault（SIGSEGV），上游不 segfault；API 模式可绕过 |
+| CLI 入口分析 | ✅ 已修复 | fork CLI 在 8GB 堆下 segfault（根因：`@ladybugdb/core` 被降级为 ^0.15.1）；2026-05-09 升级到 ^0.16.1 后 unity-mini 分析正常 |
 | Unity benchmark gate | ⚠️ 未运行 | 需 Unity target + 完整 benchmark dataset |
 | fork analyze CLI 功能 | ✅ 已恢复 | `restore-analyze-fork-features` change 已归档 |
 
@@ -60,7 +60,7 @@
 | parse-worker | 编译通过 | ✅ |
 | mcp-local-backend | ⚠️ Unity 功能丢失，编译通过 | ⚠️ |
 | repo-manager | remoteUrl/repoId/CLIConfig 字段存在，编译通过 | ✅ |
-| package-metadata | npm install 成功，lockfile 重建 | ✅ |
+| package-metadata | npm install 成功，lockfile 重建；2026-05-09 发现 9 个依赖被意外降级，已同步上游版本 | ✅ → 追加修复 |
 | skill-install-paths | setup.ts 保留 fork .agents/skills/ 路径 | ✅ |
 | unity-runtime-process | ⚠️ local-backend + pipeline Unity 阶段待恢复 | ⚠️ |
 | rule-lab | 编译通过 | ✅ |
@@ -98,5 +98,5 @@
 1. **local-backend.ts Unity 功能**: 需独立 change 恢复（hydration/parity/warmup/lazy overlay）
 2. **pipeline.ts Unity 阶段**: 需独立 change 添加到 DAG（resource scan/enrich）
 3. **全量测试恢复**: globalSetup 待取消注释 + 验证 LadybugDB 兼容性
-4. **CLI segfault 根因修复**: 对比 fork/upstream native module 版本差异
+4. ✅ **CLI segfault 根因修复**: 2026-05-09 确认为 `@ladybugdb/core` 版本降级（^0.16.1 → ^0.15.1），升级到 0.16.1 后验证通过
 5. **writeback**: 待执行（更新前次 merge 文档摘要）

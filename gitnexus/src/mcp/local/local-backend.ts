@@ -41,6 +41,8 @@ import {
   isVectorExtensionSupportedByPlatform,
 } from '../../core/platform/capabilities.js';
 import { PhaseTimer } from '../../core/search/phase-timer.js';
+import type { UnityContextPayload } from './unity-enrichment.js';
+import type { UnityEvidenceViewResult } from './unity-evidence-view.js';
 import { checkStalenessAsync, checkCwdMatch } from '../../core/git-staleness.js';
 import { logger } from '../../core/logger.js';
 // AI context generation is CLI-only (gitnexus analyze)
@@ -724,6 +726,7 @@ export class LocalBackend {
       limit?: number;
       max_symbols?: number;
       include_content?: boolean;
+      runtime_chain_verify?: string;
     },
   ): Promise<any> {
     if (!params.query?.trim()) {
@@ -736,6 +739,7 @@ export class LocalBackend {
     const maxSymbolsPerProcess = params.max_symbols || 10;
     const includeContent = params.include_content ?? false;
     const searchQuery = params.query.trim();
+    const runtimeChainVerifyMode = String(params.runtime_chain_verify || 'off').trim().toLowerCase() as import('./runtime-chain-verify.js').RuntimeChainVerifyMode;
 
     // Per-phase timing instrumentation (#553). Records wall time for each
     // observable sub-step of the search pipeline so production latency can
@@ -972,7 +976,7 @@ export class LocalBackend {
     const timing = timer.summary();
     logQueryTiming(searchQuery, timing);
 
-    return {
+    const baseQueryResponse: Record<string, unknown> = {
       processes,
       process_symbols: dedupedSymbols,
       definitions: definitions.slice(0, 20), // cap standalone definitions
@@ -982,6 +986,27 @@ export class LocalBackend {
           'FTS extension unavailable - keyword search degraded. Run: gitnexus analyze --force to rebuild indexes.',
       }),
     };
+
+    // Unity evidence enrichment (spec: agent-safe response envelope + Cypher workflow)
+    const unityEvidence = await this.enrichWithUnityEvidence(repo, searchQuery, baseQueryResponse);
+    if (unityEvidence) {
+      Object.assign(baseQueryResponse, unityEvidence);
+    }
+
+    if (runtimeChainVerifyMode === 'on-demand') {
+      const resourceBindings = dedupedSymbols
+        .flatMap((symbol: any) => (Array.isArray(symbol.resourceBindings) ? symbol.resourceBindings : []))
+        .concat(definitions.flatMap((symbol: any) => (Array.isArray(symbol.resourceBindings) ? symbol.resourceBindings : [])));
+      const { verifyRuntimeChainOnDemand } = await import('./runtime-chain-verify.js');
+      baseQueryResponse.runtime_chain = await verifyRuntimeChainOnDemand({
+        repoPath: repo.repoPath,
+        executeParameterized: (query, queryParams) => executeParameterized(repo.id, query, queryParams || {}),
+        queryText: searchQuery,
+        resourceBindings,
+      });
+    }
+
+    return baseQueryResponse;
   }
 
   /**
@@ -1686,6 +1711,8 @@ export class LocalBackend {
       file_path?: string;
       kind?: string;
       include_content?: boolean;
+      responseProfile?: string;
+      hydration?: string;
     },
   ): Promise<any> {
     try {
@@ -1710,6 +1737,8 @@ export class LocalBackend {
       file_path?: string;
       kind?: string;
       include_content?: boolean;
+      responseProfile?: string;
+      hydration?: string;
     },
   ): Promise<any> {
     await this.ensureInitialized(repo.id);
@@ -1920,7 +1949,8 @@ export class LocalBackend {
       }
     }
 
-    return {
+    // Build base context response
+    const baseResponse: Record<string, unknown> = {
       status: 'found',
       symbol: {
         uid: sym.id || sym[0],
@@ -1940,6 +1970,271 @@ export class LocalBackend {
         step_index: r.step || r[2],
         step_count: r.stepCount || r[3],
       })),
+    };
+
+    // Unity hydration injection (spec: Unity Context Query with Hydration)
+    const unityPayload = await this.attachUnityContext(repo, {
+      uid: sym.id || sym[0],
+      name: sym.name || sym[1],
+      filePath: sym.filePath || sym[3],
+    }, symKind, {
+      responseProfile: params.responseProfile,
+      hydration: params.hydration,
+    });
+
+    if (unityPayload) {
+      return { ...baseResponse, ...unityPayload };
+    }
+    return baseResponse;
+  }
+
+  /**
+   * Attach Unity context data to a context response.
+   *
+   * Adapter pattern (D1): calls unity-enrichment.ts and unity-runtime-hydration.ts
+   * as dependencies rather than inlining Unity logic.
+   *
+   * Loads UNITY edges from the graph, applies lazy/parity hydration
+   * based on the `hydration` parameter, and respects response profiles.
+   *
+   * Returns null if no Unity edges are found (non-Unity symbol).
+   */
+  private async attachUnityContext(
+    repo: RepoHandle,
+    symbol: { uid: string; name: string; filePath: string },
+    _kind: string,
+    opts: { responseProfile?: string; hydration?: string },
+  ): Promise<Record<string, unknown> | null> {
+    const { loadUnityContext } = await import('./unity-enrichment.js');
+    const { hydrateUnityForSymbol } = await import('./unity-runtime-hydration.js');
+
+    try {
+      // Adapter: wrap executeParameterized in the ExecuteQuery signature
+      // that loadUnityContext expects (single-query string, no params object)
+      const executeSimple = async (query: string): Promise<any[]> =>
+        executeParameterized(repo.id, query, {});
+
+      // Step 1: Load UNITY edges from graph (spec: Unity Context Query with Hydration)
+      const unityPayload = await loadUnityContext(repo.id, symbol.uid, executeSimple);
+
+      // Return null for non-Unity symbols — no impact on other repo types
+      if (unityPayload.resourceBindings.length === 0 && (!unityPayload.unityDiagnostics || unityPayload.unityDiagnostics.length === 0)) {
+        return null;
+      }
+
+      // Step 2: Apply hydration based on mode (spec: lazy/parity hydration scenarios)
+      let hydratedPayload: UnityContextPayload;
+      const hydrationMode = opts.hydration || 'compact';
+
+      if (hydrationMode === 'strict' || hydrationMode === 'parity') {
+        // Execute full hydration (spec: lazy hydration expansion with budget + parity verification)
+        const queryFn = async (q: string, p?: Record<string, unknown>) =>
+          executeParameterized(repo.id, q, p ?? {});
+
+        hydratedPayload = await hydrateUnityForSymbol({
+          mode: hydrationMode === 'parity' ? 'parity' : 'compact',
+          basePayload: unityPayload,
+          deps: {
+            executeQuery: queryFn,
+            repoPath: repo.repoPath,
+            storagePath: repo.storagePath,
+            indexedCommit: repo.lastCommit,
+          },
+          symbol,
+        });
+      } else {
+        hydratedPayload = unityPayload;
+      }
+
+      // Step 3: Apply response profile (spec: Response Profile Support)
+      const profile = opts.responseProfile || 'slim';
+      if (profile === 'slim' && hydratedPayload.hydrationMeta) {
+        // Slim: omit hydrationMeta, keep resourceBindings and serializedFields
+        const { hydrationMeta: _, ...rest } = hydratedPayload;
+        return {
+          resourceBindings: rest.resourceBindings,
+          serializedFields: rest.serializedFields,
+          unityDiagnostics: rest.unityDiagnostics,
+        };
+      }
+
+      // Full profile: include everything including hydrationMeta
+      return {
+        resourceBindings: hydratedPayload.resourceBindings,
+        serializedFields: hydratedPayload.serializedFields,
+        unityDiagnostics: hydratedPayload.unityDiagnostics,
+        hydrationMeta: hydratedPayload.hydrationMeta,
+      };
+    } catch (err) {
+      logQueryError('context:unity-hydration', err);
+      return null;
+    }
+  }
+
+  /**
+   * Enrich a query response with Unity runtime chain evidence.
+   *
+   * Adapter pattern (D1): calls unity-evidence-view.ts as a dependency.
+   * Adds evidence, confidence scores, and workflow fields to query responses
+   * when the query matches known Unity runtime process patterns.
+   *
+   * Returns enriched response extensions, or null if no Unity evidence.
+   */
+  private async enrichWithUnityEvidence(
+    repo: RepoHandle,
+    query: string,
+    baseResponse: Record<string, unknown>,
+  ): Promise<Record<string, unknown> | null> {
+    const { loadUnityContext } = await import('./unity-enrichment.js');
+    const { buildUnityEvidenceView } = await import('./unity-evidence-view.js');
+    const { hydrateUnityForSymbol } = await import('./unity-runtime-hydration.js');
+
+    try {
+      // Step 1: Search for Unity symbols matching the query
+      // Spec (unity-runtime-process): end-to-end chain query
+      const executeSimple = async (q: string): Promise<any[]> =>
+        executeParameterized(repo.id, q, {});
+
+      // Try to find a symbol that has UNITY edges
+      const matchingSymbol = await this.findUnityMatchingSymbol(repo, query);
+      if (!matchingSymbol) {
+        return null;
+      }
+
+      // Step 2: Load Unity context for the matching symbol
+      const unityPayload = await loadUnityContext(repo.id, matchingSymbol.uid, executeSimple);
+      if (unityPayload.resourceBindings.length === 0) {
+        return null;
+      }
+
+      // Step 3: Hydrate (spec: hydration policy compliance)
+      const queryFn = async (q: string, p?: Record<string, unknown>) =>
+        executeParameterized(repo.id, q, p ?? {});
+
+      const hydratedPayload = await hydrateUnityForSymbol({
+        mode: 'compact',
+        basePayload: unityPayload,
+        deps: {
+          executeQuery: queryFn,
+          repoPath: repo.repoPath,
+          storagePath: repo.storagePath,
+          indexedCommit: repo.lastCommit,
+        },
+        symbol: matchingSymbol,
+      });
+
+      // Step 4: Build evidence view (spec: agent-safe response envelope)
+      // Spec: response with confidence fields
+      const evidenceView = buildUnityEvidenceView({
+        resourceBindings: hydratedPayload.resourceBindings,
+        mode: 'focused',
+        maxBindings: 20,
+        maxReferenceFields: 10,
+      });
+
+      // Step 5: Build confidence envelope
+      // verifier-core (binary) + policy-adjusted (external)
+      const needsParityRetry = hydratedPayload.hydrationMeta?.needsParityRetry ?? false;
+      const isComplete = hydratedPayload.hydrationMeta?.isComplete ?? true;
+      const policyAdjusted = needsParityRetry ? 'verified_segment' : (isComplete ? 'verified_full' : 'verified_partial');
+
+      return {
+        evidence: {
+          resourceBindings: evidenceView.resourceBindings,
+          serializedFields: evidenceView.serializedFields,
+          evidence_meta: evidenceView.evidence_meta,
+          filter_diagnostics: evidenceView.filter_diagnostics,
+        },
+        confidence: {
+          'verifier-core': needsParityRetry ? false : isComplete,
+          'policy-adjusted': policyAdjusted,
+        },
+        hydrationMeta: hydratedPayload.hydrationMeta,
+        // Placeholder for Cypher workflow execution (spec: Cypher Workflow Execution)
+        // Full Cypher workflow templates will be restored in a follow-up task
+        ...(this.matchUnityProcess(query, matchingSymbol.name)
+          ? { workflows: await this.buildWorkflowResponse(repo, query, matchingSymbol, hydratedPayload.resourceBindings) }
+          : {}),
+      };
+    } catch (err) {
+      logQueryError('query:unity-evidence', err);
+      return null;
+    }
+  }
+
+  /**
+   * Find a symbol in the indexed repo whose name matches the query
+   * AND that has UNITY graph edges.
+   */
+  private async findUnityMatchingSymbol(
+    repo: RepoHandle,
+    query: string,
+  ): Promise<{ uid: string; name: string; filePath: string } | null> {
+    try {
+      // Search for symbols whose name matches the query via FTS
+      const namePattern = `%${query.replace(/[%_]/g, '\\$&')}%`;
+      const rows = await executeParameterized(
+        repo.id,
+        `
+        MATCH (n)-[r:CodeRelation]->()
+        WHERE n.name LIKE $pattern
+          AND (n:Class OR n:Method OR n:File)
+          AND r.type IN ['UNITY_COMPONENT_INSTANCE', 'UNITY_SERIALIZED_TYPE_IN', 'UNITY_RESOURCE_SUMMARY']
+        RETURN DISTINCT n.id AS uid, n.name AS name, n.filePath AS filePath
+        LIMIT 5
+      `,
+        { pattern: namePattern },
+      );
+      if (rows.length > 0) {
+        const row = rows[0];
+        return {
+          uid: row.uid || row[0],
+          name: row.name || row[1],
+          filePath: row.filePath || row[2],
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Determine if a query matches a known Unity runtime process.
+   * Placeholder for full Cypher workflow matching (spec: Cypher Workflow Execution).
+   */
+  private matchUnityProcess(query: string, symbolName: string): boolean {
+    const knownProcesses = ['reload', 'restart', 'init', 'start', 'update', 'fixedupdate', 'awake', 'onenable', 'ondisable', 'destroy'];
+    const q = query.toLowerCase();
+    const s = symbolName.toLowerCase();
+    return knownProcesses.some(p => q.includes(p) || s.includes(p));
+  }
+
+  /**
+   * Build a workflow response for Cypher-based runtime chain queries.
+   * Executes verifyRuntimeChainOnDemand to produce real chain evidence.
+   */
+  private async buildWorkflowResponse(
+    repo: RepoHandle,
+    query: string,
+    matchingSymbol: { name: string; filePath: string },
+    resourceBindings: Array<{ resourcePath?: string }>,
+  ): Promise<{ debugging: string; exploring: string } | undefined> {
+    const { verifyRuntimeChainOnDemand } = await import('./runtime-chain-verify.js');
+    const chainResult = await verifyRuntimeChainOnDemand({
+      repoPath: repo.repoPath,
+      executeParameterized: (q, p) => executeParameterized(repo.id, q, p ?? {}),
+      queryText: query,
+      symbolName: matchingSymbol.name,
+      symbolFilePath: matchingSymbol.filePath,
+      resourceBindings,
+    });
+    if (!chainResult) return undefined;
+    return {
+      debugging: `Runtime chain: ${chainResult.status} (${chainResult.evidence_level}). Hops: ${chainResult.hops.length}, Gaps: ${chainResult.gaps.length}`,
+      exploring: chainResult.gaps.length > 0
+        ? chainResult.gaps.map((g) => g.next_command).join('; ')
+        : `Chain verified: ${chainResult.hops.map((h) => `${h.hop_type}(${h.anchor})`).join(' → ')}`,
     };
   }
 

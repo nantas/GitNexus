@@ -1,7 +1,7 @@
-<!-- version: 1.7.0 -->
-<!-- Last updated: 2026-04-23 -->
+<!-- version: 1.8.0 -->
+<!-- Last updated: 2026-05-09 -->
 
-Last reviewed: 2026-04-23
+Last reviewed: 2026-05-09
 
 **Project:** GitNexus · **Environment:** dev · **Maintainer:** repository maintainers (see GitHub)
 
@@ -48,6 +48,7 @@ Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-05-09 | 1.8.0 | Added Unity benchmark & E2E test guidance; added upstream merge guide with dependency conflict resolution rules; restored `@ladybugdb/core` to ^0.16.1 (was downgraded to 0.15.x during upstream merge, causing SIGSEGV). |
 | 2026-04-23 | 1.7.0 | TypeScript added to `MIGRATED_LANGUAGES` (registry-primary call resolution by default). |
 | 2026-04-20 | 1.6.0 | Added scope-resolution pipeline pointer (RFC #909 Ring 3); Python migrated to registry-primary. |
 | 2026-04-19 | 1.5.0 | Cross-repo impact (#794): `impact`/`query`/`context` accept `repo: "@<group>"` + `service`. Removed `group_query`/`group_contracts`/`group_status` MCP tools; added `gitnexus://group/{name}/contracts` and `gitnexus://group/{name}/status` resources. |
@@ -160,6 +161,48 @@ Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.
 
 ---
 
+## Upstream 合并指南
+
+> 基于 `chore/merge-upstream-2026-05` 的实践经验总结。
+
+### 核心原则
+
+1. **Package 依赖以 upstream 为准**：`package.json` 冲突时优先使用上游版本号（fork 的依赖范围可能已过时，且 fork 侧的改动通常不依赖特定小版本）
+2. **核心管线文件优先 fork**：`local-backend.ts`、`pipeline.ts`、`parse-worker.ts` 等深度修改的文件，优先保留 fork 版本再手工移植上游改动
+3. **逐批验证**：按依赖顺序分批合并（基础设施 → 管线底座 → DB/进程 → CLI → MCP/存储 → 测试元数据），每批独立编译验证
+4. **用户确认**：以下场景**必须暂停**并请用户决策：
+   - 功能等价不可达成（上游架构变更导致 fork 功能无法通过纯接口适配保留）
+   - 行为语义冲突（同一函数在 fork/upstream 有互斥实现）
+   - 依赖版本分歧（同一依赖在 fork/upstream 有不同 major 版本）
+
+### 依赖冲突处理流程
+
+当 `package.json` 或 `package-lock.json` 发生冲突时：
+
+```
+1. 列出 fork vs upstream 版本差异（使用 `npm view <pkg> versions --json` 确认可用版本）
+2. 优先采纳 upstream 版本号
+3. 如有以下情况，暂停请用户确认：
+   - Fork 显式新增了上游没有的依赖（如 tree-sitter-gdscript）
+   - Fork 显式固定了某个旧版本（如 `graphology-types: "^0.24.8"` 用于类型补丁）
+   - 依赖版本相差 2+ 个 major（如 fork ^1.x vs upstream ^3.x）
+4. 记录最终决策到 merge commit message 和 verification.md
+```
+
+### 镜像文件列表与策略
+
+批次 5 中的高冲突文件（`local-backend.ts`、`pipeline.ts`、`parse-worker.ts`、`tools.ts`、`resources.ts`）因双方改动量巨大，不适合手工融合。建议策略：
+- 取上游完整版本（策略 B）
+- 在后续独立 change 中将 fork 功能作为 adapter 重新注入
+- 不要在同一个 merge change 中试图解决所有语义冲突
+
+### 历史参考
+
+- `openspec/changes/merge-upstream-2026-05/` — 完整的 merge change 工件
+- `docs/2026-03-18-upstream-merge-feasibility-and-checklist.md` — 前次可行性分析
+
+---
+
 ## 测试开发与验证强制流程
 
 ### 背景
@@ -190,6 +233,70 @@ Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.
 - [ ] `npm test` 输出中，测试总数增加了新写入的用例数
 - [ ] `npx tsc --noEmit` 无编译错误
 - [ ] 旧测试无回归失败
+
+---
+
+## Unity Benchmark 与 E2E 测试指南
+
+### 前提条件
+
+- `@ladybugdb/core` >= 0.16.1（2026-05-09 修复：之前因合并降级到 0.15.x 导致 CLI 在 8GB 堆下 SIGSEGV，已升级到 0.16.1）
+- `npm run build` 必须运行在测试执行前
+- 测试目标仓库必须 `git init`（GitNexus 要求 git 仓库）
+
+### Unity Mini 快速基准测试
+
+```bash
+cd gitnexus
+
+# 创建独立的测试仓库（避免 stale .gitnexus 干扰）
+TEST_DIR=$(mktemp -d /tmp/unity-mini-XXXX)
+rsync -a --exclude='.git' --exclude='.gitnexus' ../benchmarks/fixtures/unity-mini/ "$TEST_DIR/"
+cd "$TEST_DIR" && git init --quiet && git add -A && git commit -m "init" --quiet
+cd -
+
+# 运行 analyze（排除 Unity 资源文件，仅 C#）
+npm run build && node dist/cli/index.js analyze "$TEST_DIR" --force --extensions .cs
+
+# 运行完整 benchmark（含 query/context/impact 测试）
+npm run build && node dist/cli/index.js benchmark-unity ../benchmarks/unity-baseline/v1 \
+  --profile quick --target-path "$TEST_DIR"
+```
+
+### 完整 Benchmark 命令
+
+| 命令 | 范围 | 目标数据集 |
+|------|------|-----------|
+| `npm run benchmark:quick` | quick (10 symbols, 5 tasks) | `benchmarks/fixtures/unity-mini` |
+| `npm run benchmark:full` | full | `benchmarks/fixtures/unity-mini` |
+| `npm run benchmark:neonspark:quick` | quick | neonspark (需 `GITNEXUS_NEONSPARK_TARGET_PATH`) |
+| `npm run benchmark:neonspark:full` | full | neonspark (需 `GITNEXUS_NEONSPARK_TARGET_PATH`) |
+
+> 注意：`benchmark:quick` 和 `benchmark:full` 自带 `npm run build`，但如果在 gitnexus/ 子目录外执行，需先 build。
+
+### Unity Runtime Process E2E 测试
+
+```bash
+cd gitnexus
+
+# 完整的 u3 gates（Unity runtime process 验证门）
+npm run build && node --test dist/benchmark/u2-e2e/*.test.js \
+  dist/mcp/local/unity-enrichment.test.js \
+  dist/core/ingestion/unity-resource-processor.test.js
+
+# 单独运行 Unity enrichment 测试
+npx vitest run src/mcp/local/unity-enrichment.test.ts
+
+# UI trace 验收测试
+npm run build && node --test dist/core/unity/ui-trace.acceptance.test.js
+```
+
+### 测试环境注意事项
+
+1. **使用独立目录**：每次 `analyze` 前使用 `mktemp -d` + `rsync` 创建干净的 git 仓库，避免 `.gitnexus/` 缓存干扰
+2. **资源文件处理**：Unity `.prefab`/`.unity`/`.asset` 文件目前被排除在标准 C# analyze 之外（`--extensions .cs`），Unity 资源扫描阶段（`ingestion-pipeline`）恢复后会自动处理
+3. **Segfault 已修复**：LadybugDB 0.16.1 在 8GB 堆下不再崩溃；如果遇到 SIGSEGV，先检查 `@ladybugdb/core` 版本
+4. **Timeout**：neonspark 完整 benchmark 可能需要 10-30 分钟，设置足够长的 timeout
 
 ---
 

@@ -468,6 +468,9 @@ relationships:
   - METHOD_IMPLEMENTS: ConcreteMethod implements InterfaceMethod (matched by name + parameterTypes)
   - MEMBER_OF: Symbol belongs to community
   - STEP_IN_PROCESS: Symbol is step N in process
+  - UNITY_COMPONENT_INSTANCE: Unity prefab/scene component reference (resource binding)
+  - UNITY_SERIALIZED_TYPE_IN: Unity serialized field links asset to C# type
+  - UNITY_RESOURCE_SUMMARY: Aggregated summary for Unity resources with many bindings
 
 relationship_table: "All relationships use a single CodeRelation table with a 'type' property. Properties: type (STRING), confidence (DOUBLE), reason (STRING), step (INT32)"
 
@@ -486,6 +489,16 @@ example_queries:
     WHERE p.heuristicLabel = "LoginFlow"
     RETURN s.name, r.step
     ORDER BY r.step
+
+  find_unity_resource_bindings: |
+    MATCH (symbol)-[:CodeRelation {type: 'UNITY_COMPONENT_INSTANCE'}]->(resource)
+    WHERE symbol.name = "MyBehaviour"
+    RETURN resource.filePath, resource.description
+
+  find_unity_serialized_types: |
+    MATCH (symbol)-[:CodeRelation {type: 'UNITY_SERIALIZED_TYPE_IN'}]->(resource)
+    WHERE symbol.name = "MyBehaviour"
+    RETURN symbol.name, resource.filePath, resource.description
 `;
 }
 

@@ -84,6 +84,19 @@ Phase 6:     processProcesses (沿所有 CALLS 边追踪，生成 Process)
 4. 扩展字段始终输出（不再需要 flag）：
    - `runtime_chain_confidence`、`runtime_chain_evidence_level`、`verification_hint`
    - `process-confidence.ts`；`local-backend.ts`
+5. **Local-Backend Unity Adapter（D1 Adapter Pattern）**（2026-05-09 新增）：
+   - `attachUnityContext(repo, symbol, symKind, opts)`：`local-backend.ts:1985-2050`
+     - 在 `context()` handler 的 symbol 解析成功后调用
+     - 通过 `loadUnityContext()` 读取 graph 中 UNITY 边
+     - 根据 `opts.hydration`（`compact`/`strict`/`parity`）调用 `hydrateUnityForSymbol()`
+     - 根据 `opts.responseProfile`（`slim`/`full`）裁剪 `hydrationMeta`
+     - 返回的 payload 与 base response 合并
+   - `enrichWithUnityEvidence(repo, query, baseResponse)`：`local-backend.ts:2068-2155`
+     - 在 `query()` handler 的搜索结果后调用
+     - 通过 `findUnityMatchingSymbol()` 匹配带有 UNITY 边的符号
+     - 调用 `hydrateUnityForSymbol()` 与 `buildUnityEvidenceView()` 构建 evidence
+     - 当查询匹配已知 runtime process（Reload/Update/Awake 等）时，通过 `buildWorkflowResponse()` 执行 `verifyRuntimeChainOnDemand()` 返回实时 chain evidence
+     - 返回 `evidence`、`confidence`（`verifier-core` + `policy-adjusted`）、`hydrationMeta`、`workflows`
 
 ### 2.3 On-Demand 强验证（Graph-Only Closure）
 

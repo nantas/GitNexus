@@ -181,7 +181,8 @@ TIPS:
 - All relationships use single CodeRelation table — filter with {type: 'CALLS'} etc.
 - Community = auto-detected functional area (Leiden algorithm). Properties: heuristicLabel, cohesion, symbolCount, keywords, description, enrichedBy
 - Process = execution flow trace from entry point to terminal. Properties: heuristicLabel, processType, stepCount, communities, entryPointId, terminalId
-- Use heuristicLabel (not label) for human-readable community/process names`,
+- Use heuristicLabel (not label) for human-readable community/process names
+- Unity edge types: UNITY_COMPONENT_INSTANCE (component prefab/scene reference), UNITY_SERIALIZED_TYPE_IN (serialized field to C# type), UNITY_RESOURCE_SUMMARY (aggregate summary for resources with many bindings)`,
     annotations: READ_ONLY_TOOL_ANNOTATIONS,
     inputSchema: {
       type: 'object',
