@@ -207,15 +207,18 @@ Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.
 
 ### 背景
 
-`gitnexus/vitest.config.ts` 的 `include` 只匹配以下路径：
+`gitnexus/vitest.config.ts` 的 `include` 现已覆盖 `src/` 下的所有测试目录：
 - `test/**/*.test.ts`
 - `src/cli/rule-lab.test.ts`
 - `src/rule-lab/**/*.test.ts`
-- `src/mcp/local/process-confidence.test.ts`
-- `src/mcp/local/runtime-chain-*.test.ts`
-- `src/mcp/local/runtime-claim*.test.ts`
+- `src/benchmark/**/*.test.ts`
+- `src/cli/**/*.test.ts`
+- `src/core/**/*.test.ts`
+- `src/mcp/local/**/*.test.ts`
 
-**`src/cli/` 下除 `rule-lab.test.ts` 外的所有 `*.test.ts` 均不在测试范围内。** 过去多次出现将测试文件写在 `src/cli/` 下，导致 `npm test` 从未执行这些测试，但实施者误以为测试已覆盖。
+**所有 `src/**/*.test.ts` 文件现已统一纳入 vitest 管理。**`test:src:node` 脚本已移除，不再支持 `node:test` + `node:assert/strict` 双框架并存模式。
+
+> 迁移记录：`openspec/changes/archive/2026-05-09-migrate-node-test-to-vitest`
 
 ### 编写新测试时必须遵守
 
