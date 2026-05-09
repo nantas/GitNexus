@@ -310,6 +310,11 @@ export async function generateAIContextFiles(
   );
   const createdFiles: string[] = [];
 
+  // Skip AGENTS.md/CLAUDE.md and skill installation when --skip-agents-md is set
+  if (options?.skipAgentsMd) {
+    return { files: createdFiles };
+  }
+
   // Create AGENTS.md (standard for Cursor, Windsurf, OpenCode, Codex, Cline, etc.)
   const agentsPath = path.join(repoPath, 'AGENTS.md');
   const agentsResult = await upsertGitNexusSection(agentsPath, content);

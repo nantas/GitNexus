@@ -40,6 +40,8 @@ program
   .option('--scope <path>', 'Restrict analysis to specific subdirectory (can be used multiple times)', collectValues)
   .option('--csharp-define-csproj <path>', 'Load C# DefineConstants from the specified .csproj and normalize conditional-compilation blocks before parsing')
   .option('--skills', 'Generate repo-specific skill files from detected communities')
+  .option('--skip-git', 'Index the folder even when no .git directory is present')
+  .option('--skip-agents-md', 'Skip AGENTS.md and CLAUDE.md gitnexus block updates')
   .option('-v, --verbose', 'Enable verbose ingestion warnings (default: false)')
   .addHelpText('after', '\nEnvironment variables:\n  GITNEXUS_NO_GITIGNORE=1  Skip .gitignore parsing (still reads .gitnexusignore)')
   .action(createLazyAction(() => import('./analyze.js'), 'analyzeCommand'));
@@ -86,6 +88,9 @@ program
   .option('--base-url <url>', 'LLM API base URL (default: OpenAI)')
   .option('--api-key <key>', 'LLM API key (saved to ~/.gitnexus/config.json)')
   .option('--concurrency <n>', 'Parallel LLM calls (default: 3)', '3')
+  .option('--provider <provider>', 'LLM provider (openai, openrouter, azure, cursor, custom)')
+  .option('--review', 'Review module structure before full generation')
+  .option('-v, --verbose', 'Enable verbose logging')
   .option('--gist', 'Publish wiki as a public GitHub Gist after generation')
   .action(createLazyAction(() => import('./wiki.js'), 'wikiCommand'));
 
@@ -163,6 +168,15 @@ program
   .description('Execute raw Cypher query against the knowledge graph')
   .option('-r, --repo <name>', 'Target repository')
   .action(createLazyAction(() => import('./tool.js'), 'cypherCommand'));
+
+program
+  .command('detect-changes')
+  .alias('detect_changes')
+  .description('Compare two versions of a codebase and detect changes')
+  .option('--scope <scope>', 'Comparison scope: compare, identify, or discover')
+  .option('--base-ref <ref>', 'Base git ref for comparison')
+  .option('-r, --repo <name>', 'Target repository')
+  .action(createLazyAction(() => import('./tool.js'), 'detectChangesCommand'));
 
 // ─── Eval Server (persistent daemon for SWE-bench) ─────────────────
 
