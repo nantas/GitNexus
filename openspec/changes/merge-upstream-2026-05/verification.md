@@ -100,5 +100,5 @@
 3. ✅ **pipeline.ts Unity 阶段**: pipeline-phases/unity-scan.ts + unity-enrich.ts 已创建并注册到 DAG
 4. ✅ **tools.ts + resources.ts**: 补齐 fork 工具（rule_lab_*、unity_ui_trace）和资源（derived-process）
 5. ✅ **calltool-dispatch 18 failures**: 全部修复（69/69 passed）
-6. ⚠️ **剩余 11 个测试文件，34 个回归**: fork 被删函数的测试引用（local-backend next-hops、CLI direct dispatch 等）
-7. ⚠️ **writeback**: 待执行（更新前次 merge 文档摘要、AGENTS.md、README.md）
+6. ✅ **剩余测试回归修复**: `fix-merge-upstream-regressions` change（2026-05-09）已修复全部 5 个测试文件的 14 个回归（skip-git-cli 4→15 ✅, tool-direct-cli 4→15 ✅, cli-index-help 2→15 ✅, eval-formatters 1→90 ✅, scoped-cli-commands 2→6 ✅），共 141/141 通过，零新增编译错误
+7. ✅ **writeback**: 已完成（README.md + AGENTS.md + parent change 文档同步）

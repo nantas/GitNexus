@@ -87,7 +87,7 @@
 |--------|---------|------|
 | `docs/2026-03-18-upstream-merge-feasibility-and-checklist.md` | 文末新增 § 2026-05-08/09 执行结果（commit hash、策略偏差、验证结论） | ✅ 已执行（含 Unity 功能恢复记录） |
 | `AGENTS.md` | CLI Setup 安装内容索引（已有变更） | ✅ 已更新（v1.8.0 — 依赖冲突指南 + Unity 指南） |
-| `gitnexus/README.md` | 能力表格（语言支持、CLI 命令） | ⬜ 待评估 |
+| `gitnexus/README.md` | 能力表格（语言支持、CLI 命令） | ✅ 已更新（见 fix-merge-upstream-regressions change） |
 
 ---
 
@@ -95,7 +95,7 @@
 
 - [x] 已读取 `spec_standard_ref`（`repo://gitnexus-upstream`）
 - [x] `verification.md` 已更新为实际结果
-- [ ] 回写目标页已确认存在且可编辑
+- [x] 回写目标页已确认存在且可编辑
 - [x] capability/spec 增量摘要已核对 proposal 与 specs 一致
 
 ## 不回写的内容

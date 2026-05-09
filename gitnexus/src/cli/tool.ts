@@ -256,3 +256,101 @@ export async function unityUiTraceCommand(target: string, options?: {
   });
   (deps?.output || output)(result);
 }
+
+interface DetectChangesOptions {
+  scope?: string;
+  baseRef?: string;
+  repo?: string;
+}
+
+function renderChangesList(symbols: Array<{
+  type?: string;
+  name: string;
+  change_type?: string;
+  filePath?: string;
+}>): string {
+  return symbols
+    .map((s) => {
+      const typeLabel = s.type ? `${s.type} ` : "";
+      return `  ${typeLabel}${s.name} → ${s.filePath || ""}`;
+    })
+    .join('\n');
+}
+
+function renderProcesses(processes: Array<{
+  name: string;
+  step_count?: number;
+  changed_steps?: Array<{ symbol?: string }>;
+}>): string {
+  const lines: string[] = [];
+  for (const proc of processes.slice(0, 10)) {
+    const stepInfo = proc.step_count && proc.step_count > 0 ? ` (${proc.step_count} steps)` : '';
+    const stepList = proc.changed_steps?.slice(0, 5).map((s) => s.symbol).filter(Boolean).join(', ') || '';
+    lines.push(`  ● ${proc.name}${stepInfo}`);
+    if (stepList) lines.push(`    Changed: ${stepList}`);
+  }
+  if (processes.length > 10) {
+    lines.push(`  ... and ${processes.length - 10} more affected processes`);
+  }
+  return lines.join('\n');
+}
+
+export async function detectChangesCommand(options?: DetectChangesOptions): Promise<void> {
+  const backend = await getBackend();
+  const repo = await resolveRepoOption(options?.repo);
+  const result = await backend.callTool('detect_changes', {
+    scope: options?.scope,
+    base_ref: options?.baseRef,
+    repo,
+  });
+
+  if (result.error) {
+    output(`Error: ${result.error}`);
+    return;
+  }
+
+  const summary = result.summary as {
+    changed_files?: number;
+    changed_count?: number;
+    affected_count?: number;
+    risk_level?: string;
+  } | undefined;
+
+  if (!summary || summary.changed_count === 0) {
+    output('No changes detected.');
+    return;
+  }
+
+  const lines: string[] = [
+    `Change summary:`,
+    `  Files changed: ${summary.changed_files ?? 0}`,
+    `  Symbols changed: ${summary.changed_count ?? 0}`,
+    `  Affected processes: ${summary.affected_count ?? 0}`,
+    `  Risk level: ${summary.risk_level ?? 'unknown'}`,
+  ];
+
+  const symbols = result.changed_symbols as Array<{
+    type?: string;
+    name: string;
+    change_type?: string;
+    filePath?: string;
+  }> | undefined;
+  if (symbols && symbols.length > 0) {
+    const displaySymbols = symbols.slice(0, 15);
+    lines.push('', 'Changed symbols:', renderChangesList(displaySymbols));
+    if (symbols.length > 15) {
+      lines.push(`  ... and ${symbols.length - 15} more`);
+    }
+  }
+
+  const processes = result.affected_processes as Array<{
+    name: string;
+    step_count?: number;
+    changed_steps?: Array<{ symbol?: string }>;
+  }> | undefined;
+  if (processes && processes.length > 0) {
+    lines.push('', 'Affected processes:', renderProcesses(processes));
+  }
+
+  output(lines.join('\n'));
+}

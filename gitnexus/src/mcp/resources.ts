@@ -356,6 +356,8 @@ async function getContextResource(backend: LocalBackend, repoName?: string): Pro
   lines.push('  - cypher: Raw graph queries');
   lines.push('  - list_repos: Discover all indexed repositories');
   lines.push('');
+  // Dynamic npx resolution — resolveAnalyzeNpxCommand handles version pinning
+  // from ~/.gitnexus/config.json (cliPackageSpec first, then cliVersion)
   lines.push('re_index: Run `npx gitnexus analyze` in terminal if data is stale');
   lines.push('');
   lines.push('resources_available:');

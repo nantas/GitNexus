@@ -139,7 +139,11 @@ export function formatContextResult(result: any): string {
   if (procs.length > 0) {
     lines.push(`Participates in ${procs.length} execution flow(s):`);
     for (const p of procs) {
-      lines.push(`  • ${p.name} (step ${p.step_index}/${p.step_count})`);
+      let line = `  • ${p.name} (step ${p.step_index}/${p.step_count})`;
+      if (p.evidence_mode) {
+        line += ` [evidence: ${p.evidence_mode}, confidence: ${p.confidence || 'unknown'}]`;
+      }
+      lines.push(line);
     }
   }
 
