@@ -10,8 +10,8 @@
 | Schema 单元测试 | ✅ 通过 | 93 passed |
 | Neonspark 完整分析 | ✅ 通过 | 106,412 nodes, 526,327 edges, 8,076 files |
 | Benchmark 框架 | ✅ 通过 | unity-mini + neonspark API 模式运行正常 |
-| 全量测试（`npm test`） | ⚠️ 部分 | globalSetup 禁用，部分测试文件 @ts-nocheck |
-| CLI 入口分析 | ✅ 已修复 | fork CLI 在 8GB 堆下 segfault（根因：`@ladybugdb/core` 被降级为 ^0.15.1）；2026-05-09 升级到 ^0.16.1 后 unity-mini 分析正常 |
+| 全量测试（`npm test`） | ⚠️ 部分 | globalSetup 已取消注释，桥接/工具/资源/分派已修复（+45 tests ✅）。剩余 34 个 fork 被删函数回归待修复 |
+| CLI 入口分析 | ✅ 已修复 | fork CLI segfault 根因修复（LadybugDB 0.16.1），analyze unity-mini 成功 |
 | Unity benchmark gate | ⚠️ 未运行 | 需 Unity target + 完整 benchmark dataset |
 | fork analyze CLI 功能 | ✅ 已恢复 | `restore-analyze-fork-features` change 已归档 |
 
@@ -25,9 +25,9 @@
 | `call-processor.ts` | C | B | Unity 合成边在独立文件 | 无影响 |
 | `pipeline.ts` | C | B | 上游 DAG 完整 | Unity 阶段通过 PipelineOptions 字段兼容 |
 | `parse-worker.ts` | C | B | C# preproc 独立文件 | 无影响 |
-| `local-backend.ts` | C | B | 6482 行冲突 | **丢失 Unity hydration/parity**（待后续 change） |
+| `local-backend.ts` | C→B→✅D | 6482 行冲突 → adapter 模式 | Unity hydration/parity 已通过 adapter 注入恢复 |
 | `setup.ts` | C | A | fork Codex paths 优先 | 保留 fork 行为 |
-| `resources.ts` | C | B | 上游资源类型完整 | Unity 资源查询待添加 |
+| `resources.ts` | C→B→✅D | 上游资源类型完整 + fork 适配 | derived-process 资源 + lifecycle 字段已添加 |
 
 ---
 
@@ -95,8 +95,10 @@
 
 ## 缺口与阻塞项
 
-1. **local-backend.ts Unity 功能**: 需独立 change 恢复（hydration/parity/warmup/lazy overlay）
-2. **pipeline.ts Unity 阶段**: 需独立 change 添加到 DAG（resource scan/enrich）
-3. **全量测试恢复**: globalSetup 待取消注释 + 验证 LadybugDB 兼容性
-4. ✅ **CLI segfault 根因修复**: 2026-05-09 确认为 `@ladybugdb/core` 版本降级（^0.16.1 → ^0.15.1），升级到 0.16.1 后验证通过
-5. **writeback**: 待执行（更新前次 merge 文档摘要）
+1. ✅ **CLI segfault 根因修复**: LadybugDB 0.16.1 升级后已验证通过
+2. ✅ **local-backend.ts Unity 功能**: adapter 模式恢复（attachUnityContext + enrichWithUnityEvidence + Cypher workflow）
+3. ✅ **pipeline.ts Unity 阶段**: pipeline-phases/unity-scan.ts + unity-enrich.ts 已创建并注册到 DAG
+4. ✅ **tools.ts + resources.ts**: 补齐 fork 工具（rule_lab_*、unity_ui_trace）和资源（derived-process）
+5. ✅ **calltool-dispatch 18 failures**: 全部修复（69/69 passed）
+6. ⚠️ **剩余 11 个测试文件，34 个回归**: fork 被删函数的测试引用（local-backend next-hops、CLI direct dispatch 等）
+7. ⚠️ **writeback**: 待执行（更新前次 merge 文档摘要、AGENTS.md、README.md）

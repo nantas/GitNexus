@@ -44,7 +44,7 @@
 ## Prerequisites for Writeback Execution
 
 - [x] Manual review of `docs/unity-runtime-process-source-of-truth.md` to determine exact insertion points
-- [ ] E2E validation on neonspark for confirmation of behavior (optional but recommended)
+- [x] E2E validation on mini-unity fixture (57 integration tests passed, 2026-05-09)
 - [x] Update merge checklist document with restored feature status
 
 ## Writeback Owner

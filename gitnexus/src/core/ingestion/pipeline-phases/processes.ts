@@ -16,6 +16,7 @@ import type { RoutesOutput } from './routes.js';
 import type { ToolsOutput } from './tools.js';
 import type { StructureOutput } from './structure.js';
 import { processProcesses, type ProcessDetectionResult } from '../process-processor.js';
+import { applyUnityLifecycleSyntheticCalls } from '../unity-lifecycle-synthetic-calls.js';
 import { generateId } from '../../../lib/utils.js';
 import { isDev } from '../utils/env.js';
 
@@ -52,6 +53,15 @@ export const processesPhase: PipelinePhase<ProcessesOutput> = {
     });
     const dynamicMaxProcesses = Math.max(20, Math.min(300, Math.round(symbolCount / 10)));
 
+    // Inject Unity lifecycle synthetic edges before process detection so that
+    // runtime-root traces are discovered as unity_lifecycle processes.
+    const unitySyntheticResult = applyUnityLifecycleSyntheticCalls(ctx.graph);
+    if (isDev && unitySyntheticResult.syntheticEdgeCount > 0) {
+      logger.info(
+        `🎮 Unity synthetic edges: ${unitySyntheticResult.syntheticEdgeCount} (hosts: ${unitySyntheticResult.hostCount})`,
+      );
+    }
+
     const processResult = await processProcesses(
       ctx.graph,
       communityResult.memberships,
@@ -82,6 +92,10 @@ export const processesPhase: PipelinePhase<ProcessesOutput> = {
           filePath: '',
           heuristicLabel: proc.heuristicLabel,
           processType: proc.processType,
+          processSubtype: proc.processSubtype,
+          runtimeChainConfidence: proc.runtimeChainConfidence,
+          sourceReasons: proc.sourceReasons,
+          sourceConfidences: proc.sourceConfidences,
           stepCount: proc.stepCount,
           communities: proc.communities,
           entryPointId: proc.entryPointId,
@@ -96,8 +110,8 @@ export const processesPhase: PipelinePhase<ProcessesOutput> = {
         type: 'STEP_IN_PROCESS',
         sourceId: step.nodeId,
         targetId: step.processId,
-        confidence: 1.0,
-        reason: 'trace-detection',
+        confidence: step.confidence ?? 1.0,
+        reason: step.reason ?? 'trace-detection',
         step: step.step,
       });
     });

@@ -97,6 +97,12 @@ export function getResourceTemplates(): ResourceTemplate[] {
       description: 'Per-repo index and contract-registry staleness for a repository group',
       mimeType: 'text/yaml',
     },
+    {
+      uriTemplate: 'gitnexus://repo/{name}/derived-process/{id}',
+      name: 'Derived Process Detail',
+      description: 'Deep dive into a derived (synthetic/inferred) process, including origin trace',
+      mimeType: 'text/yaml',
+    },
   ];
 }
 
@@ -216,6 +222,14 @@ export function parseResourceUri(uri: string): ParsedGitnexusResource {
         param: rest.replace(/^process\//, ''),
       };
     }
+    if (rest.startsWith('derived-process/')) {
+      return {
+        kind: 'repo',
+        repoName,
+        resourceType: 'derived-process',
+        param: rest.replace(/^derived-process\//, ''),
+      };
+    }
 
     return { kind: 'repo', repoName, resourceType: rest };
   }
@@ -259,6 +273,8 @@ export async function readResource(uri: string, backend: LocalBackend): Promise<
       return getClusterDetailResource(parsed.param!, backend, repoName);
     case 'process':
       return getProcessDetailResource(parsed.param!, backend, repoName);
+    case 'derived-process':
+      return getDerivedProcessDetailResource(parsed.param!, backend, repoName);
     default:
       throw new Error(`Unknown resource: ${uri}`);
   }
@@ -412,6 +428,12 @@ async function getProcessesResource(backend: LocalBackend, repoName?: string): P
       lines.push(`  - name: "${label}"`);
       lines.push(`    type: ${proc.processType || 'unknown'}`);
       lines.push(`    steps: ${proc.stepCount || 0}`);
+      if ((proc as any).processSubtype) {
+        lines.push(`    subtype: ${(proc as any).processSubtype}`);
+      }
+      if ((proc as any).runtimeChainConfidence) {
+        lines.push(`    runtime_chain_confidence: ${(proc as any).runtimeChainConfidence}`);
+      }
     }
 
     if (result.processes.length > displayLimit) {
@@ -577,6 +599,54 @@ async function getProcessDetailResource(
       lines.push('trace:');
       for (const step of steps) {
         lines.push(`  ${step.step}: ${step.name} (${step.filePath})`);
+      }
+    }
+
+    return lines.join('\n');
+  } catch (err: any) {
+    return `error: ${err.message}`;
+  }
+}
+
+/**
+ * Derived process detail resource — queries graph via backend for a synthetic/inferred process.
+ */
+async function getDerivedProcessDetailResource(
+  id: string,
+  backend: LocalBackend,
+  repoName?: string,
+): Promise<string> {
+  try {
+    const raw = await backend.queryDerivedProcessDetail(id, repoName);
+
+    if (raw && typeof raw === 'object' && 'error' in raw) {
+      return `error: ${(raw as { error: string }).error}`;
+    }
+
+    const result = raw as Record<string, unknown>;
+
+    const lines: string[] = [
+      `id: "${result.id || id}"`,
+    ];
+
+    if (result.origin) {
+      lines.push(`origin:`);
+      if (typeof result.origin === 'object') {
+        const o = result.origin as Record<string, unknown>;
+        for (const [k, v] of Object.entries(o)) {
+          lines.push(`  ${k}: ${JSON.stringify(v)}`);
+        }
+      }
+    }
+
+    if (result.derivedSteps) {
+      const steps = result.derivedSteps as Array<Record<string, unknown>>;
+      lines.push('');
+      lines.push('derived_steps:');
+      for (const step of steps) {
+        lines.push(`  - step: ${step.step ?? '?'}`);
+        lines.push(`    name: ${JSON.stringify(step.name ?? '')}`);
+        if (step.filePath) lines.push(`    file: ${step.filePath}`);
       }
     }
 

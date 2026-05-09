@@ -37,6 +37,9 @@ function createMockBackend(overrides: Partial<Record<string, any>> = {}): any {
     queryProcessDetail: vi
       .fn()
       .mockResolvedValue(overrides.processDetail ?? { error: 'Not found' }),
+    queryDerivedProcessDetail: vi
+      .fn()
+      .mockResolvedValue(overrides.derivedProcessDetail ?? { error: 'Not found' }),
     readGroupContractsResource: vi
       .fn()
       .mockResolvedValue(overrides.groupContractsBody ?? 'contracts: []\n'),
@@ -80,9 +83,9 @@ describe('getResourceDefinitions', () => {
 });
 
 describe('getResourceTemplates', () => {
-  it('returns 7 dynamic templates', () => {
+  it('returns 9 dynamic templates', () => {
     const templates = getResourceTemplates();
-    expect(templates).toHaveLength(7);
+    expect(templates).toHaveLength(9);
   });
 
   it('includes context, clusters, processes, schema, cluster detail, process detail, derived-process detail', () => {
@@ -359,7 +362,17 @@ describe('readResource', () => {
   });
 
   it('derived-process resource', async () => {
-    const backend = createMockBackend();
+    const backend = createMockBackend({
+      derivedProcessDetail: {
+        id: 'derived:abcd',
+        origin: {
+          label: null,
+          heuristicLabel: null,
+          processType: null,
+          stepCount: null,
+        },
+      },
+    });
     const templates = getResourceTemplates();
     expect(templates.map(t => t.uriTemplate)).toContain('gitnexus://repo/{name}/derived-process/{id}');
 

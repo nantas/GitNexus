@@ -132,6 +132,28 @@ SERVICE: optional monorepo path prefix (POSIX-style, case-sensitive segments). W
           description:
             'Optional monorepo service root (relative path, "/" separators). In group mode (@repo), prefix-matches symbol file paths; ignored for a normal repo name. Empty string is rejected server-side.',
         },
+        unity_evidence_mode: {
+          type: 'string',
+          enum: ['off', 'compact', 'strict', 'parity'],
+          description:
+            'Unity runtime-chain evidence enrichment mode (phase 3). off=no enrichment, compact=summary edges only, strict=full lazy expansion, parity=expansion + parity warmup verification.',
+        },
+        hydration_policy: {
+          type: 'string',
+          enum: ['compact', 'strict', 'parity'],
+          description:
+            'Unity runtime hydration mode for evidence. compact=summary only, strict=full lazy expansion, parity=verification with warmup.',
+        },
+        resource_path_prefix: {
+          type: 'string',
+          description:
+            'Unity resource path prefix filter. Only includes resources matching this prefix in evidence enrichment.',
+        },
+        binding_kind: {
+          type: 'string',
+          description:
+            'Unity resource binding kind filter. Only includes resource bindings of this kind in evidence enrichment.',
+        },
       },
       required: ['query'],
     },
@@ -546,6 +568,103 @@ WHEN TO USE: After changing group.yaml or re-indexing member repos.`,
         exactOnly: { type: 'boolean', description: 'Exact match only in cascade' },
       },
       required: ['name'],
+    },
+  },
+  {
+    name: 'unity_ui_trace',
+    description: `Trace Unity UI element interactions back to their C# handler methods.
+
+Scans the serialized UI document tree, matches component references to MonoBehaviours, and returns the call chain from event trigger to handler method.
+
+WHEN TO USE: Understanding which C# method handles a Unity UI button press, slider change, or other UI event.
+AFTER THIS: Use context() on the discovered handler method for full caller/callee context.`,
+    annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', description: 'UI element name or path in the scene hierarchy' },
+        goal: { type: 'string', description: 'What kind of interaction to trace (click, hover, drag, value-change)' },
+      },
+      required: ['target', 'goal'],
+    },
+  },
+  {
+    name: 'rule_lab_analyze',
+    description: `Analyze a rule slice against the codebase to measure retention and overlap.
+
+Processes one slice at a time and reports how many new/retained rules would result.
+
+WHEN TO USE: Before curating or promoting rules to evaluate impact.`,
+    annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        run_id: { type: 'string', description: 'Lab run ID to analyze' },
+        slice_id: { type: 'string', description: 'Slice ID within the run' },
+      },
+      required: ['run_id', 'slice_id'],
+    },
+  },
+  {
+    name: 'rule_lab_review_pack',
+    description: `Package rules for human review — generates a review bundle with before/after diffs and confidence scores.
+
+WHEN TO USE: After rule_lab_analyze, before promoting rules to production.`,
+    annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        run_id: { type: 'string', description: 'Lab run ID' },
+        slice_id: { type: 'string', description: 'Slice ID' },
+      },
+      required: ['run_id', 'slice_id'],
+    },
+  },
+  {
+    name: 'rule_lab_curate',
+    description: `Curate a set of rules from a slice, applying filters and quality gates.
+
+WHEN TO USE: After review, to finalize which rules to promote to the active rule set.`,
+    annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        run_id: { type: 'string', description: 'Lab run ID' },
+        slice_id: { type: 'string', description: 'Slice ID' },
+        min_confidence: { type: 'number', description: 'Minimum confidence threshold (0-1)' },
+      },
+      required: ['run_id', 'slice_id'],
+    },
+  },
+  {
+    name: 'rule_lab_promote',
+    description: `Promote curated rules to the active rule set (production).
+
+WHEN TO USE: After curation, to deploy rules to the active knowledge base.`,
+    annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        run_id: { type: 'string', description: 'Lab run ID' },
+      },
+      required: ['run_id'],
+    },
+  },
+  {
+    name: 'rule_lab_regress',
+    description: `Run regression test suite against the active rule set.
+
+Reports precision and coverage metrics and flags regressions.
+
+WHEN TO USE: After promoting rules, to validate they don't introduce regressions.`,
+    annotations: READ_ONLY_TOOL_ANNOTATIONS,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        precision: { type: 'number', description: 'Expected precision threshold (0-1)' },
+        coverage: { type: 'number', description: 'Expected coverage threshold (0-1)' },
+      },
+      required: ['precision', 'coverage'],
     },
   },
 ];

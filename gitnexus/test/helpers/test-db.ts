@@ -14,6 +14,17 @@ export interface TestDBHandle {
 }
 
 /**
+ * Clean up a temporary directory by path.
+ */
+export async function cleanupTempDir(tmpDir: string): Promise<void> {
+  try {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  } catch {
+    // best-effort cleanup
+  }
+}
+
+/**
  * Create a temporary directory for LadybugDB tests.
  * Returns the path and a cleanup function.
  */

@@ -43,6 +43,7 @@ import {
 import { PhaseTimer } from '../../core/search/phase-timer.js';
 import type { UnityContextPayload } from './unity-enrichment.js';
 import type { UnityEvidenceViewResult } from './unity-evidence-view.js';
+import { runUnityUiTrace, type UnityUiTraceGoal, type UnityUiTraceOutput } from '../../core/unity/ui-trace.js';
 import { checkStalenessAsync, checkCwdMatch } from '../../core/git-staleness.js';
 import { logger } from '../../core/logger.js';
 // AI context generation is CLI-only (gitnexus analyze)
@@ -702,6 +703,8 @@ export class LocalBackend {
         return this.toolMap(repo, params);
       case 'api_impact':
         return this.apiImpact(repo, params);
+      case 'unity_ui_trace':
+        return this.unityUiTrace(repo, params);
       default:
         throw new Error(`Unknown tool: ${method}`);
     }
@@ -4181,6 +4184,50 @@ export class LocalBackend {
       })),
     };
   }
+
+  async queryDerivedProcessDetail(id: string, repoName?: string): Promise<any> {
+    const repo = await this.resolveRepo(repoName);
+    await this.ensureInitialized(repo.id);
+
+    const rows = await executeParameterized(
+      repo.id,
+      `
+      MATCH (p:Process)
+      WHERE p.id = $procId
+      RETURN p.id AS id, p.label AS label, p.heuristicLabel AS heuristicLabel, p.processType AS processType, p.stepCount AS stepCount
+      LIMIT 1
+    `,
+      { procId: id },
+    );
+    if (rows.length === 0) return { error: `Process '${id}' not found` };
+
+    const proc = rows[0];
+    return {
+      id: proc.id || proc[0],
+      origin: {
+        label: proc.label || proc[1] || null,
+        heuristicLabel: proc.heuristicLabel || proc[2] || null,
+        processType: proc.processType || proc[3] || null,
+        stepCount: proc.stepCount || proc[4] || null,
+      },
+    };
+  }
+
+
+  private async unityUiTrace(
+    repo: RepoHandle,
+    params: { target: string; goal?: string; selector_mode?: string },
+  ): Promise<UnityUiTraceOutput> {
+    const goal = String(params?.goal || "asset_refs").trim() as UnityUiTraceGoal;
+    const selectorMode = String(params?.selector_mode || "balanced").trim() as "strict" | "balanced";
+    return runUnityUiTrace({
+      repoRoot: repo.repoPath,
+      target: params.target,
+      goal,
+      selectorMode,
+    });
+  }
+
 
   async disconnect(): Promise<void> {
     await closeLbug(); // close all connections
