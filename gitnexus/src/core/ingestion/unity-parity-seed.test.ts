@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { buildUnityParitySeed } from './unity-parity-seed.js';
 
-test('buildUnityParitySeed extracts canonical script/guid/resource indexes', () => {
+it('buildUnityParitySeed extracts canonical script/guid/resource indexes', () => {
   const seed = buildUnityParitySeed({
     symbolToScriptPaths: new Map([
       ['DoorObj', ['Assets/Code/DoorObj.generated.cs', 'Assets/Code/DoorObj.cs']],
@@ -29,9 +29,9 @@ test('buildUnityParitySeed extracts canonical script/guid/resource indexes', () 
     resourceDocCache: new Map(),
   } as any);
 
-  assert.equal(seed.version, 1);
-  assert.equal(seed.symbolToScriptPath.DoorObj, 'Assets/Code/DoorObj.cs');
-  assert.equal(seed.scriptPathToGuid['Assets/Code/DoorObj.cs'], 'abc123abc123abc123abc123abc123ab');
-  assert.deepEqual(seed.guidToResourcePaths['abc123abc123abc123abc123abc123ab'], ['Assets/Prefabs/Door.prefab']);
-  assert.equal(seed.assetGuidToPath?.asset0000000000000000000000000001, 'Assets/Config/Ref.asset');
+  expect(seed.version).toBe(1);
+  expect(seed.symbolToScriptPath.DoorObj).toBe('Assets/Code/DoorObj.cs');
+  expect(seed.scriptPathToGuid['Assets/Code/DoorObj.cs']).toBe('abc123abc123abc123abc123abc123ab');
+  expect(seed.guidToResourcePaths['abc123abc123abc123abc123abc123ab']).toEqual(['Assets/Prefabs/Door.prefab']);
+  expect(seed.assetGuidToPath?.asset0000000000000000000000000001).toBe('Assets/Config/Ref.asset');
 });

@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { evaluateCheckE, evaluateCheckT, evaluateScenarioChecks } from './evaluators.js';
 
-test('evaluates mandatory target disambiguation check T', () => {
+it('evaluates mandatory target disambiguation check T', () => {
   const stepOutputs = [
     {
       symbol: { uid: 'Class:Sample:Target' },
@@ -13,15 +13,15 @@ test('evaluates mandatory target disambiguation check T', () => {
   ];
 
   const result = evaluateCheckT(stepOutputs, 'Class:Sample:Target');
-  assert.equal(result.pass, true);
+  expect(result.pass).toBe(true);
 });
 
-test('evaluates efficiency check E by tool call budget', () => {
+it('evaluates efficiency check E by tool call budget', () => {
   const result = evaluateCheckE(3, 4);
-  assert.equal(result.pass, true);
+  expect(result.pass).toBe(true);
 });
 
-test('evaluates internal coverage check I from context/impact result names', () => {
+it('evaluates internal coverage check I from context/impact result names', () => {
   const stepOutputs = [
     {
       incoming: {
@@ -40,5 +40,5 @@ test('evaluates internal coverage check I from context/impact result names', () 
     { id: 'I', internal_anchors: ['Refresh', 'Sync'], min_internal_hits: 2 },
   ];
   const [result] = evaluateScenarioChecks(stepOutputs, checks);
-  assert.equal(result.pass, true);
+  expect(result.pass).toBe(true);
 });

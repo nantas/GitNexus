@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { parseManifest, shouldIncludeRelativePath } from './neonspark-sync.js';
 
-test('parseManifest strips comments and blank lines', () => {
+it('parseManifest strips comments and blank lines', () => {
   const roots = parseManifest(`
 # main gameplay
 Assets/NEON/Code
@@ -10,13 +10,13 @@ Assets/NEON/Code
 Packages/com.veewo.*
 Packages/com.neonspark.*
 `);
-  assert.deepEqual(roots, ['Assets/NEON/Code', 'Packages/com.veewo.*', 'Packages/com.neonspark.*']);
+  expect(roots).toEqual(['Assets/NEON/Code', 'Packages/com.veewo.*', 'Packages/com.neonspark.*']);
 });
 
-test('shouldIncludeRelativePath keeps only .cs under allowed roots', () => {
+it('shouldIncludeRelativePath keeps only .cs under allowed roots', () => {
   const roots = ['Assets/NEON/Code', 'Packages/com.veewo.*', 'Packages/com.neonspark.*'];
-  assert.equal(shouldIncludeRelativePath('Assets/NEON/Code/Game/A.cs', roots), true);
-  assert.equal(shouldIncludeRelativePath('Packages/com.veewo.stat/Runtime/Stat.cs', roots), true);
-  assert.equal(shouldIncludeRelativePath('Packages/com.unity.inputsystem/Runtime/X.cs', roots), false);
-  assert.equal(shouldIncludeRelativePath('Assets/NEON/Code/Game/A.prefab', roots), false);
+  expect(shouldIncludeRelativePath('Assets/NEON/Code/Game/A.cs', roots)).toBe(true);
+  expect(shouldIncludeRelativePath('Packages/com.veewo.stat/Runtime/Stat.cs', roots)).toBe(true);
+  expect(shouldIncludeRelativePath('Packages/com.unity.inputsystem/Runtime/X.cs', roots)).toBe(false);
+  expect(shouldIncludeRelativePath('Assets/NEON/Code/Game/A.prefab', roots)).toBe(false);
 });

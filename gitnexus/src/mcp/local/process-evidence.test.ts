@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { deriveEvidenceFingerprint, mergeProcessEvidence } from './process-evidence.js';
 
-test('projected-only rows are method_projected + medium', () => {
+it('projected-only rows are method_projected + medium', () => {
   const out = mergeProcessEvidence({
     directRows: [],
     projectedRows: [
@@ -16,11 +16,11 @@ test('projected-only rows are method_projected + medium', () => {
     ],
   });
 
-  assert.equal(out[0].evidence_mode, 'method_projected');
-  assert.equal(out[0].confidence, 'medium');
+  expect(out[0].evidence_mode).toBe('method_projected');
+  expect(out[0].confidence).toBe('medium');
 });
 
-test('direct rows dominate projected rows for same process id', () => {
+it('direct rows dominate projected rows for same process id', () => {
   const out = mergeProcessEvidence({
     directRows: [{ pid: 'proc:login', label: 'User Login', step: 1, stepCount: 4 }],
     projectedRows: [
@@ -34,20 +34,20 @@ test('direct rows dominate projected rows for same process id', () => {
     ],
   });
 
-  assert.equal(out[0].evidence_mode, 'direct_step');
-  assert.equal(out[0].confidence, 'high');
+  expect(out[0].evidence_mode).toBe('direct_step');
+  expect(out[0].confidence).toBe('high');
 });
 
-test('mergeProcessEvidence never emits resource_heuristic rows', () => {
+it('mergeProcessEvidence never emits resource_heuristic rows', () => {
   const out = mergeProcessEvidence({
     directRows: [],
     projectedRows: [],
   });
 
-  assert.equal(out.some((row) => String((row as any).evidence_mode) === 'resource_heuristic'), false);
+  expect(out.some((row) => String((row as any).evidence_mode) === 'resource_heuristic')).toBe(false);
 });
 
-test('deriveEvidenceFingerprint is stable for same input ordering', () => {
+it('deriveEvidenceFingerprint is stable for same input ordering', () => {
   const left = deriveEvidenceFingerprint(
     { resourcePath: 'Assets/A.prefab', bindingKind: 'component', line: 10 },
     { pid: 'proc:123', step: 1 },
@@ -57,12 +57,12 @@ test('deriveEvidenceFingerprint is stable for same input ordering', () => {
     { step: 1, pid: 'proc:123' },
   );
 
-  assert.equal(left, right);
+  expect(left).toBe(right);
 });
 
-test('deriveEvidenceFingerprint changes when signal changes', () => {
+it('deriveEvidenceFingerprint changes when signal changes', () => {
   const left = deriveEvidenceFingerprint({ resourcePath: 'Assets/A.prefab', line: 10 });
   const right = deriveEvidenceFingerprint({ resourcePath: 'Assets/A.prefab', line: 11 });
 
-  assert.notEqual(left, right);
+  expect(left).not.toBe(right);
 });

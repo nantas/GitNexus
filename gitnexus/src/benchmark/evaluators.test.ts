@@ -1,13 +1,13 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { buildFailureTriage } from './evaluators.js';
 
-test('buildFailureTriage groups repeated failure classes', () => {
+it('buildFailureTriage groups repeated failure classes', () => {
   const triage = buildFailureTriage([
     { kind: 'ambiguous-name-wrong-hit' },
     { kind: 'ambiguous-name-wrong-hit' },
     { kind: 'impact-downstream-zero' },
   ]);
-  assert.equal(triage[0].kind, 'ambiguous-name-wrong-hit');
-  assert.equal(triage[0].count, 2);
+  expect(triage[0].kind).toBe('ambiguous-name-wrong-hit');
+  expect(triage[0].count).toBe(2);
 });

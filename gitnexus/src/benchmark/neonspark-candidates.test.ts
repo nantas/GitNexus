@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { filterNeonsparkPaths, mainCandidatesCli, parseCandidatesCliArgs, toCandidateRow } from './neonspark-candidates.js';
 
-test('filterNeonsparkPaths keeps code and allowed package prefixes', () => {
+it('filterNeonsparkPaths keeps code and allowed package prefixes', () => {
   const rows = [
     { file_path: 'Assets/NEON/Code/Game/A.cs' },
     { file_path: 'Packages/com.veewo.stat/Runtime/Stat.cs' },
@@ -10,10 +10,10 @@ test('filterNeonsparkPaths keeps code and allowed package prefixes', () => {
     { file_path: 'Packages/com.unity.inputsystem/Runtime/InputAction.cs' },
   ];
   const filtered = filterNeonsparkPaths(rows as any[]);
-  assert.equal(filtered.length, 3);
+  expect(filtered.length).toBe(3);
 });
 
-test('toCandidateRow normalizes required fields', () => {
+it('toCandidateRow normalizes required fields', () => {
   const row = toCandidateRow({
     symbol_uid: 'Method:Assets/NEON/Code/Game/A.cs:Tick',
     file_path: 'Assets/NEON/Code/Game/A.cs',
@@ -22,22 +22,22 @@ test('toCandidateRow normalizes required fields', () => {
     start_line: 11,
     end_line: 22,
   });
-  assert.equal(row.symbol_name, 'Tick');
-  assert.equal(row.start_line, 11);
+  expect(row.symbol_name).toBe('Tick');
+  expect(row.start_line).toBe(11);
 });
 
-test('parseCandidatesCliArgs parses repoName and outFile', () => {
+it('parseCandidatesCliArgs parses repoName and outFile', () => {
   const parsed = parseCandidatesCliArgs(['neonspark-v1', '/tmp/candidates.jsonl']);
-  assert.equal(parsed.repoName, 'neonspark-v1');
-  assert.equal(parsed.outFile, '/tmp/candidates.jsonl');
+  expect(parsed.repoName).toBe('neonspark-v1');
+  expect(parsed.outFile).toBe('/tmp/candidates.jsonl');
 });
 
-test('parseCandidatesCliArgs rejects missing required args', () => {
-  assert.throws(() => parseCandidatesCliArgs(['neonspark-v1']), /usage/i);
-  assert.throws(() => parseCandidatesCliArgs([]), /usage/i);
+it('parseCandidatesCliArgs rejects missing required args', () => {
+  expect(() => parseCandidatesCliArgs(['neonspark-v1'])).toThrow(/usage/i);
+  expect(() => parseCandidatesCliArgs([])).toThrow(/usage/i);
 });
 
-test('mainCandidatesCli parses args and forwards to extractor', async () => {
+it('mainCandidatesCli parses args and forwards to extractor', async () => {
   const calls: Array<{ repoName: string; outFile: string }> = [];
   const written = await mainCandidatesCli(
     ['neonspark-v1', '/tmp/candidates.jsonl'],
@@ -47,6 +47,6 @@ test('mainCandidatesCli parses args and forwards to extractor', async () => {
     },
   );
 
-  assert.equal(written, 42);
-  assert.deepEqual(calls, [{ repoName: 'neonspark-v1', outFile: '/tmp/candidates.jsonl' }]);
+  expect(written).toBe(42);
+  expect(calls).toEqual([{ repoName: 'neonspark-v1', outFile: '/tmp/candidates.jsonl' }]);
 });

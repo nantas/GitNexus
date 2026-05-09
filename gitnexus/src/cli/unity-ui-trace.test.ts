@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { unityUiTraceCommand } from './tool.js';
 
-test('unity-ui-trace command forwards params and prints result', async () => {
+it('unity-ui-trace command forwards params and prints result', async () => {
   const calls: Array<{ method: string; params: any }> = [];
   let printed: any = null;
 
@@ -22,10 +22,10 @@ test('unity-ui-trace command forwards params and prints result', async () => {
     },
   );
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].method, 'unity_ui_trace');
-  assert.equal(calls[0].params.target, 'EliteBossScreenController');
-  assert.equal(calls[0].params.goal, 'selector_bindings');
-  assert.equal(calls[0].params.selector_mode, 'strict');
-  assert.equal(printed.goal, 'selector_bindings');
+  expect(calls.length).toBe(1);
+  expect(calls[0].method).toBe('unity_ui_trace');
+  expect(calls[0].params.target).toBe('EliteBossScreenController');
+  expect(calls[0].params.goal).toBe('selector_bindings');
+  expect(calls[0].params.selector_mode).toBe('strict');
+  expect(printed.goal).toBe('selector_bindings');
 });

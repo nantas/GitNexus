@@ -1,12 +1,12 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { benchmarkAgentContextCommand, resolveAgentContextProfile } from './benchmark-agent-context.js';
 
-test('benchmark-agent-context resolves profile and runs runner', async () => {
+it('benchmark-agent-context resolves profile and runs runner', async () => {
   const quick = resolveAgentContextProfile('quick');
   const full = resolveAgentContextProfile('full');
-  assert.equal(quick.maxScenarios, 1);
-  assert.equal(full.maxScenarios, Number.MAX_SAFE_INTEGER);
+  expect(quick.maxScenarios).toBe(1);
+  expect(full.maxScenarios).toBe(Number.MAX_SAFE_INTEGER);
 
   const calls: Array<{ repo?: string; profile: { maxScenarios: number } }> = [];
   const output: string[] = [];
@@ -39,12 +39,12 @@ test('benchmark-agent-context resolves profile and runs runner', async () => {
     analyze: async () => ({ stdout: '', stderr: '' }),
   });
 
-  assert.equal(calls[0].repo, 'neonspark-v1-subset');
-  assert.equal(calls[0].profile.maxScenarios, 1);
-  assert.ok(output.some((line) => line.includes('Report:')));
+  expect(calls[0].repo).toBe('neonspark-v1-subset');
+  expect(calls[0].profile.maxScenarios).toBe(1);
+  expect(output.some((line) => line.includes('Report:'))).toBeTruthy();
 });
 
-test('benchmark-agent-context retries analyze once on null exit failure', async () => {
+it('benchmark-agent-context retries analyze once on null exit failure', async () => {
   let analyzeCalls = 0;
   let runCalls = 0;
 
@@ -82,6 +82,6 @@ test('benchmark-agent-context retries analyze once on null exit failure', async 
     },
   });
 
-  assert.equal(analyzeCalls, 2);
-  assert.equal(runCalls, 1);
+  expect(analyzeCalls).toBe(2);
+  expect(runCalls).toBe(1);
 });

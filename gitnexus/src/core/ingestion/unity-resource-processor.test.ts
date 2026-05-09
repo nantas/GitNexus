@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -40,7 +40,7 @@ const listRelativeFixtureFiles = async (root: string): Promise<string[]> => {
   return out;
 };
 
-test('processUnityResources emits schema-compatible component-instance edges and materialized resource file nodes', async () => {
+it('processUnityResources emits schema-compatible component-instance edges and materialized resource file nodes', async () => {
   const graph = createKnowledgeGraph();
 
   for (const symbol of symbols) {
@@ -85,21 +85,21 @@ test('processUnityResources emits schema-compatible component-instance edges and
   );
   const componentNodes = [...graph.iterNodes()].filter((node) => node.label === 'CodeElement');
 
-  assert.equal(result.bindingCount > 0, true);
-  assert.equal(unityFileRelations.length, 0);
-  assert.ok(unityComponentInstanceRelations.length > 0);
-  assert.ok(syntheticResourceFiles.length > 0);
-  assert.ok(unitySummaryRelations.length > 0);
-  assert.equal(componentNodes.length, 0);
-  assert.ok(result.bindingCount >= symbols.length);
-  assert.equal(result.paritySeed?.version, 1);
-  assert.ok((result.paritySeed?.scriptPathToGuid || {})['Assets/Scripts/MainUIManager.cs']);
-  assert.ok(result.timingsMs.scanContext >= 0);
-  assert.ok(result.timingsMs.resolve >= 0);
-  assert.ok(result.timingsMs.graphWrite > 0);
+  expect(result.bindingCount > 0).toBe(true);
+  expect(unityFileRelations.length).toBe(0);
+  expect(unityComponentInstanceRelations.length > 0).toBeTruthy();
+  expect(syntheticResourceFiles.length > 0).toBeTruthy();
+  expect(unitySummaryRelations.length > 0).toBeTruthy();
+  expect(componentNodes.length).toBe(0);
+  expect(result.bindingCount >= symbols.length).toBeTruthy();
+  expect(result.paritySeed?.version).toBe(1);
+  expect((result.paritySeed?.scriptPathToGuid || {})['Assets/Scripts/MainUIManager.cs']).toBeTruthy();
+  expect(result.timingsMs.scanContext >= 0).toBeTruthy();
+  expect(result.timingsMs.resolve >= 0).toBeTruthy();
+  expect(result.timingsMs.graphWrite > 0).toBeTruthy();
 });
 
-test('fixture run emits scene->prefab UNITY_ASSET_GUID_REF and keeps script ref edges', async () => {
+it('fixture run emits scene->prefab UNITY_ASSET_GUID_REF and keeps script ref edges', async () => {
   const graph = createKnowledgeGraph();
   for (const symbol of symbols) {
     const filePath = `Assets/Scripts/${symbol}.cs`;
@@ -145,12 +145,12 @@ test('fixture run emits scene->prefab UNITY_ASSET_GUID_REF and keeps script ref 
       && reason.fieldName === 'm_SourcePrefab'
     );
   });
-  assert.ok(scenePrefabRef);
+  expect(scenePrefabRef).toBeTruthy();
   const scriptRefs = [...graph.iterRelationships()].filter((rel) => rel.type === 'UNITY_GRAPH_NODE_SCRIPT_REF');
-  assert.ok(scriptRefs.length > 0);
+  expect(scriptRefs.length > 0).toBeTruthy();
 });
 
-test('processUnityResources persists UNITY_RESOURCE_SUMMARY in LadybugDB', async () => {
+it('processUnityResources persists UNITY_RESOURCE_SUMMARY in LadybugDB', async () => {
   const graph = createKnowledgeGraph();
 
   for (const symbol of symbols) {
@@ -210,14 +210,14 @@ test('processUnityResources persists UNITY_RESOURCE_SUMMARY in LadybugDB', async
       `MATCH (c:Class)-[r:CodeRelation {type:'UNITY_RESOURCE_SUMMARY'}]->(f:File)
        RETURN count(r) AS cnt`,
     );
-    assert.ok((rows?.[0]?.cnt ?? 0) > 0, 'UNITY_RESOURCE_SUMMARY must persist in LadybugDB');
+    expect((rows?.[0]?.cnt ?? 0) > 0).toBeTruthy();
   } finally {
     await closeLbug();
     await fs.rm(storageDir, { recursive: true, force: true });
   }
 });
 
-test('processUnityResources builds scan context once and enriches all class nodes', async () => {
+it('processUnityResources builds scan context once and enriches all class nodes', async () => {
   const graph = createKnowledgeGraph();
 
   for (const symbol of symbols) {
@@ -249,11 +249,11 @@ test('processUnityResources builds scan context once and enriches all class node
     scopedPaths: ['Assets/Scripts/MainUIManager.cs', 'Assets/Scene/MainUIManager.unity'],
   });
 
-  assert.ok(result.processedSymbols > 0);
-  assert.ok(result.bindingCount > 0);
+  expect(result.processedSymbols > 0).toBeTruthy();
+  expect(result.bindingCount > 0).toBeTruthy();
 });
 
-test('processUnityResources skips resolve for symbols without guid resource hits in scan context', async () => {
+it('processUnityResources skips resolve for symbols without guid resource hits in scan context', async () => {
   const graph = createKnowledgeGraph();
   for (const symbol of ['HitSymbol', 'MissSymbol']) {
     const filePath = `Assets/Scripts/${symbol}.cs`;
@@ -324,12 +324,12 @@ test('processUnityResources skips resolve for symbols without guid resource hits
     },
   );
 
-  assert.deepEqual(calledSymbols, ['HitSymbol']);
-  assert.equal(result.processedSymbols, 1);
-  assert.equal(result.bindingCount, 1);
+  expect(calledSymbols).toEqual(['HitSymbol']);
+  expect(result.processedSymbols).toBe(1);
+  expect(result.bindingCount).toBe(1);
 });
 
-test('processUnityResources skips resolve for symbols missing canonical script mapping', async () => {
+it('processUnityResources skips resolve for symbols missing canonical script mapping', async () => {
   const graph = createKnowledgeGraph();
   for (const symbol of ['HitSymbol', 'UnknownSymbol']) {
     const filePath = `Assets/Scripts/${symbol}.cs`;
@@ -382,11 +382,11 @@ test('processUnityResources skips resolve for symbols missing canonical script m
     },
   );
 
-  assert.deepEqual(calledSymbols, ['HitSymbol']);
-  assert.ok(result.diagnostics.some((line) => line.includes('missing canonical script mapping')));
+  expect(calledSymbols).toEqual(['HitSymbol']);
+  expect(result.diagnostics.some((line) => line.includes('missing canonical script mapping'))).toBeTruthy();
 });
 
-test('processUnityResources memoizes resolve results by symbol within one run', async () => {
+it('processUnityResources memoizes resolve results by symbol within one run', async () => {
   const graph = createKnowledgeGraph();
   for (const filePath of ['Assets/Scripts/DupA.cs', 'Assets/Scripts/DupB.cs']) {
     const classId = generateId('Class', `${filePath}:DupSymbol`);
@@ -438,13 +438,13 @@ test('processUnityResources memoizes resolve results by symbol within one run', 
     },
   );
 
-  assert.deepEqual(calledSymbols, ['DupSymbol']);
-  assert.equal(result.processedSymbols, 1);
-  assert.equal(result.bindingCount, 1);
-  assert.ok(result.diagnostics.some((line) => line.includes('skip-non-canonical=1')));
+  expect(calledSymbols).toEqual(['DupSymbol']);
+  expect(result.processedSymbols).toBe(1);
+  expect(result.bindingCount).toBe(1);
+  expect(result.diagnostics.some((line) => line.includes('skip-non-canonical=1'))).toBeTruthy();
 });
 
-test('processUnityResources writes UNITY_RESOURCE_SUMMARY only for canonical class node', async () => {
+it('processUnityResources writes UNITY_RESOURCE_SUMMARY only for canonical class node', async () => {
   const graph = createKnowledgeGraph();
   const canonicalPath = 'Assets/Scripts/PlayerActor.cs';
   const partialPath = 'Assets/Scripts/PlayerActor.Visual.cs';
@@ -499,15 +499,15 @@ test('processUnityResources writes UNITY_RESOURCE_SUMMARY only for canonical cla
   );
 
   const summaryRelations = [...graph.iterRelationships()].filter((rel) => rel.type === 'UNITY_RESOURCE_SUMMARY');
-  assert.equal(summaryRelations.length, 1);
-  assert.equal(summaryRelations[0]?.sourceId, canonicalClassId);
-  assert.equal(result.processedSymbols, 1);
-  assert.equal(result.bindingCount, 1);
-  assert.ok(result.diagnostics.some((line) => line.includes('selected=1')));
-  assert.ok(result.diagnostics.some((line) => line.includes('skip-non-canonical=1')));
+  expect(summaryRelations.length).toBe(1);
+  expect(summaryRelations[0]?.sourceId).toBe(canonicalClassId);
+  expect(result.processedSymbols).toBe(1);
+  expect(result.bindingCount).toBe(1);
+  expect(result.diagnostics.some((line) => line.includes('selected=1'))).toBeTruthy();
+  expect(result.diagnostics.some((line) => line.includes('skip-non-canonical=1'))).toBeTruthy();
 });
 
-test('processUnityResources writes UNITY_RESOURCE_SUMMARY for serializable class field matches', async () => {
+it('processUnityResources writes UNITY_RESOURCE_SUMMARY for serializable class field matches', async () => {
   const graph = createKnowledgeGraph();
   const hostPath = 'Assets/Scripts/HostClass.cs';
   const serializablePath = 'Assets/Scripts/AssetRef.cs';
@@ -579,16 +579,16 @@ test('processUnityResources writes UNITY_RESOURCE_SUMMARY for serializable class
 
   const summaryRelations = [...graph.iterRelationships()].filter((rel) => rel.type === 'UNITY_RESOURCE_SUMMARY');
   const serializableSummary = summaryRelations.filter((rel) => rel.sourceId === serializableClassId);
-  assert.equal(serializableSummary.length, 1);
+  expect(serializableSummary.length).toBe(1);
   const serializedTypeRelations = [...graph.iterRelationships()].filter((rel) => rel.type === 'UNITY_SERIALIZED_TYPE_IN');
-  assert.equal(serializedTypeRelations.length, 1);
+  expect(serializedTypeRelations.length).toBe(1);
   const reason = JSON.parse(String(serializedTypeRelations[0]?.reason || '{}'));
-  assert.equal(reason.fieldName, 'assetRef');
-  assert.equal(reason.declaredType, 'AssetRef');
-  assert.equal(reason.hostSymbol, 'HostClass');
+  expect(reason.fieldName).toBe('assetRef');
+  expect(reason.declaredType).toBe('AssetRef');
+  expect(reason.hostSymbol).toBe('HostClass');
 });
 
-test('processUnityResources writes asset-guid and graph-node reference edges from resolved references', async () => {
+it('processUnityResources writes asset-guid and graph-node reference edges from resolved references', async () => {
   const graph = createKnowledgeGraph();
   const hostPath = 'Assets/Scripts/WeaponConfig.cs';
   const classId = generateId('Class', `${hostPath}:WeaponConfig`);
@@ -646,15 +646,15 @@ test('processUnityResources writes asset-guid and graph-node reference edges fro
 
   const graphNodeRefs = [...graph.iterRelationships()].filter((rel) => rel.type === 'UNITY_GRAPH_NODE_SCRIPT_REF');
   const guidRefs = [...graph.iterRelationships()].filter((rel) => rel.type === 'UNITY_ASSET_GUID_REF');
-  assert.equal(graphNodeRefs.length, 1);
-  assert.equal(guidRefs.length, 1);
+  expect(graphNodeRefs.length).toBe(1);
+  expect(guidRefs.length).toBe(1);
   const guidReason = JSON.parse(String(guidRefs[0]?.reason || '{}'));
-  assert.equal(guidReason.guid, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
-  assert.equal(guidReason.targetResourcePath, 'Assets/Graphs/Weapon.asset');
-  assert.equal(guidReason.fieldName, 'gungraph');
+  expect(guidReason.guid).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  expect(guidReason.targetResourcePath).toBe('Assets/Graphs/Weapon.asset');
+  expect(guidReason.fieldName).toBe('gungraph');
 });
 
-test('processUnityResources emits prefab-source edges from scanContext.prefabSourceRefs only', async () => {
+it('processUnityResources emits prefab-source edges from scanContext.prefabSourceRefs only', async () => {
   const graph = createKnowledgeGraph();
   const fakeScanContext = {
     symbolToScriptPath: new Map<string, string>(),
@@ -683,14 +683,14 @@ test('processUnityResources emits prefab-source edges from scanContext.prefabSou
   );
 
   const guidRefs = [...graph.iterRelationships()].filter((rel) => rel.type === 'UNITY_ASSET_GUID_REF');
-  assert.equal(guidRefs.length, 1);
+  expect(guidRefs.length).toBe(1);
   const reason = JSON.parse(String(guidRefs[0]?.reason || '{}'));
-  assert.equal(reason.fieldName, 'm_SourcePrefab');
-  assert.equal(reason.sourceLayer, 'scene');
-  assert.ok(result.diagnostics.some((line) => line.includes('prefab-source: emitted=1')));
+  expect(reason.fieldName).toBe('m_SourcePrefab');
+  expect(reason.sourceLayer).toBe('scene');
+  expect(result.diagnostics.some((line) => line.includes('prefab-source: emitted=1'))).toBeTruthy();
 });
 
-test('processUnityResources consumes prefab-source stream incrementally and emits edges', async () => {
+it('processUnityResources consumes prefab-source stream incrementally and emits edges', async () => {
   const graph = createKnowledgeGraph();
   const fakeScanContext = {
     symbolToScriptPath: new Map<string, string>(),
@@ -729,12 +729,12 @@ test('processUnityResources consumes prefab-source stream incrementally and emit
     },
   );
 
-  assert.ok(result.diagnostics.some((line) => line.includes('prefab-source: emitted=2')));
-  assert.ok(result.diagnostics.some((line) => line.includes('prefab_source.rows_emitted=2')));
-  assert.ok(result.diagnostics.some((line) => line.includes('prefab_source.rows_parsed=')));
+  expect(result.diagnostics.some((line) => line.includes('prefab-source: emitted=2'))).toBeTruthy();
+  expect(result.diagnostics.some((line) => line.includes('prefab_source.rows_emitted=2'))).toBeTruthy();
+  expect(result.diagnostics.some((line) => line.includes('prefab_source.rows_parsed='))).toBeTruthy();
 });
 
-test('prefab-source accounting invariant closes', async () => {
+it('prefab-source accounting invariant closes', async () => {
   const graph = createKnowledgeGraph();
   const fakeScanContext = {
     symbolToScriptPath: new Map<string, string>(),
@@ -795,17 +795,14 @@ test('prefab-source accounting invariant closes', async () => {
       resolveBindings: async () => ({ resourceBindings: [], unityDiagnostics: [] }) as any,
     },
   );
-  assert.equal(
-    (result as any).prefabSourceStats.rowsParsed,
-    (result as any).prefabSourceStats.rowsFilteredZeroGuid
+  expect((result as any).prefabSourceStats.rowsParsed).toBe((result as any).prefabSourceStats.rowsFilteredZeroGuid
       + (result as any).prefabSourceStats.rowsFilteredPlaceholder
       + (result as any).prefabSourceStats.rowsFilteredUnresolved
       + (result as any).prefabSourceStats.rowsDeduped
-      + (result as any).prefabSourceStats.rowsEmitted,
-  );
+      + (result as any).prefabSourceStats.rowsEmitted,);
 });
 
-test('no cross-signal dedupe collision when same source has script-guid and prefab-source refs', async () => {
+it('no cross-signal dedupe collision when same source has script-guid and prefab-source refs', async () => {
   const graph = createKnowledgeGraph();
   const filePath = 'Assets/Scripts/MainUIManager.cs';
   const classId = generateId('Class', `${filePath}:MainUIManager`);
@@ -876,22 +873,22 @@ test('no cross-signal dedupe collision when same source has script-guid and pref
   const refs = [...graph.iterRelationships()]
     .filter((rel) => rel.type === 'UNITY_ASSET_GUID_REF')
     .map((rel) => JSON.parse(String(rel.reason || '{}')));
-  assert.ok(refs.some((reason) => reason.fieldName === 'm_SourcePrefab'));
-  assert.ok(refs.some((reason) => reason.fieldName === 'gungraph'));
+  expect(refs.some((reason) => reason.fieldName === 'm_SourcePrefab')).toBeTruthy();
+  expect(refs.some((reason) => reason.fieldName === 'gungraph')).toBeTruthy();
 });
 
-test('scan-context does not write graph edges directly; processor remains sole writer', async () => {
+it('scan-context does not write graph edges directly; processor remains sole writer', async () => {
   const graph = createKnowledgeGraph();
   const context = await buildUnityScanContext({ repoRoot: fixtureRoot });
-  assert.equal([...graph.iterRelationships()].length, 0);
+  expect([...graph.iterRelationships()].length).toBe(0);
   await processUnityResources(graph, { repoPath: fixtureRoot }, {
     buildScanContext: async () => context as any,
     resolveBindings: async () => ({ resourceBindings: [], unityDiagnostics: [] }) as any,
   });
-  assert.ok([...graph.iterRelationships()].some((rel) => rel.type === 'UNITY_ASSET_GUID_REF'));
+  expect([...graph.iterRelationships()].some((rel) => rel.type === 'UNITY_ASSET_GUID_REF')).toBeTruthy();
 });
 
-test('prefab source pass can be disabled via env toggle', async () => {
+it('prefab source pass can be disabled via env toggle', async () => {
   const graph = createKnowledgeGraph();
   const fakeScanContext = {
     symbolToScriptPath: new Map<string, string>(),
@@ -922,8 +919,8 @@ test('prefab source pass can be disabled via env toggle', async () => {
       },
     );
     const guidRefs = [...graph.iterRelationships()].filter((rel) => rel.type === 'UNITY_ASSET_GUID_REF');
-    assert.equal(guidRefs.length, 0);
-    assert.ok(result.diagnostics.some((line) => line.includes('prefab-source: skipped')));
+    expect(guidRefs.length).toBe(0);
+    expect(result.diagnostics.some((line) => line.includes('prefab-source: skipped'))).toBeTruthy();
   } finally {
     if (typeof originalValue === 'undefined') {
       delete process.env.GITNEXUS_DISABLE_PREFAB_SOURCE_PASS;
@@ -933,7 +930,7 @@ test('prefab source pass can be disabled via env toggle', async () => {
   }
 });
 
-test('prefab nested source dedupes duplicate PrefabInstance rows', async () => {
+it('prefab nested source dedupes duplicate PrefabInstance rows', async () => {
   const graph = createKnowledgeGraph();
   const fakeScanContext = {
     symbolToScriptPath: new Map<string, string>(),
@@ -970,12 +967,12 @@ test('prefab nested source dedupes duplicate PrefabInstance rows', async () => {
   );
 
   const guidRefs = [...graph.iterRelationships()].filter((rel) => rel.type === 'UNITY_ASSET_GUID_REF');
-  assert.equal(guidRefs.length, 1);
+  expect(guidRefs.length).toBe(1);
   const reason = JSON.parse(String(guidRefs[0]?.reason || '{}'));
-  assert.equal(reason.guid, '99999999999999999999999999999999');
+  expect(reason.guid).toBe('99999999999999999999999999999999');
 });
 
-test('drops placeholder unresolved and zero-guid prefab-source rows and reports filtered counters', async () => {
+it('drops placeholder unresolved and zero-guid prefab-source rows and reports filtered counters', async () => {
   const graph = createKnowledgeGraph();
   const fakeScanContext = {
     symbolToScriptPath: new Map<string, string>(),
@@ -1028,19 +1025,19 @@ test('drops placeholder unresolved and zero-guid prefab-source rows and reports 
   );
 
   const guidRefs = [...graph.iterRelationships()].filter((rel) => rel.type === 'UNITY_ASSET_GUID_REF');
-  assert.equal(guidRefs.length, 1);
+  expect(guidRefs.length).toBe(1);
   const reason = JSON.parse(String(guidRefs[0]?.reason || '{}'));
-  assert.equal(reason.targetResourcePath, 'Assets/Prefabs/BattleMode.prefab');
-  assert.notEqual(reason.guid, '00000000000000000000000000000000');
-  assert.ok((result as any).prefabSourceStats.rowsFilteredZeroGuid > 0);
-  assert.ok((result as any).prefabSourceStats.rowsFilteredPlaceholder > 0);
-  assert.ok((result as any).prefabSourceStats.rowsFilteredUnresolved > 0);
-  assert.ok(result.diagnostics.some((line) => line.includes('prefab_source.rows_filtered_zero_guid=')));
-  assert.ok(result.diagnostics.some((line) => line.includes('prefab_source.rows_filtered_placeholder=')));
-  assert.ok(result.diagnostics.some((line) => line.includes('prefab_source.rows_filtered_unresolved=')));
+  expect(reason.targetResourcePath).toBe('Assets/Prefabs/BattleMode.prefab');
+  expect(reason.guid).not.toBe('00000000000000000000000000000000');
+  expect((result as any).prefabSourceStats.rowsFilteredZeroGuid > 0).toBeTruthy();
+  expect((result as any).prefabSourceStats.rowsFilteredPlaceholder > 0).toBeTruthy();
+  expect((result as any).prefabSourceStats.rowsFilteredUnresolved > 0).toBeTruthy();
+  expect(result.diagnostics.some((line) => line.includes('prefab_source.rows_filtered_zero_guid='))).toBeTruthy();
+  expect(result.diagnostics.some((line) => line.includes('prefab_source.rows_filtered_placeholder='))).toBeTruthy();
+  expect(result.diagnostics.some((line) => line.includes('prefab_source.rows_filtered_unresolved='))).toBeTruthy();
 });
 
-test('per-file scan failure is isolated and does not abort subsequent file emission', async () => {
+it('per-file scan failure is isolated and does not abort subsequent file emission', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-prefab-source-file-error-'));
   const graph = createKnowledgeGraph();
   try {
@@ -1082,14 +1079,14 @@ test('per-file scan failure is isolated and does not abort subsequent file emiss
         resolveBindings: async () => ({ resourceBindings: [], unityDiagnostics: [] }) as any,
       },
     );
-    assert.ok((result as any).prefabSourceStats.rowsEmitted > 0);
-    assert.ok(result.diagnostics.some((line) => line.includes('prefab_source.file_errors=1')));
+    expect((result as any).prefabSourceStats.rowsEmitted > 0).toBeTruthy();
+    expect(result.diagnostics.some((line) => line.includes('prefab_source.file_errors=1'))).toBeTruthy();
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
-test('extracts prefab source refs without class binding resolve', async () => {
+it('extracts prefab source refs without class binding resolve', async () => {
   const graph = createKnowledgeGraph();
   let resolveBindingsCallCount = 0;
   const fakeScanContext = {
@@ -1122,11 +1119,11 @@ test('extracts prefab source refs without class binding resolve', async () => {
   );
 
   const guidRefs = [...graph.iterRelationships()].filter((rel) => rel.type === 'UNITY_ASSET_GUID_REF');
-  assert.equal(resolveBindingsCallCount, 0);
-  assert.equal(guidRefs.length, 1);
+  expect(resolveBindingsCallCount).toBe(0);
+  expect(guidRefs.length).toBe(1);
 });
 
-test('processUnityResources writes compact UNITY_RESOURCE_SUMMARY reason by default', async () => {
+it('processUnityResources writes compact UNITY_RESOURCE_SUMMARY reason by default', async () => {
   const graph = createKnowledgeGraph();
   const classId = generateId('Class', 'Assets/Scripts/Compact.cs:CompactSymbol');
   graph.addNode({
@@ -1174,14 +1171,14 @@ test('processUnityResources writes compact UNITY_RESOURCE_SUMMARY reason by defa
   );
 
   const summary = [...graph.iterRelationships()].find((rel) => rel.type === 'UNITY_RESOURCE_SUMMARY');
-  assert.ok(summary);
+  expect(summary).toBeTruthy();
   const reason = JSON.parse(String(summary.reason || '{}'));
-  assert.deepEqual(reason.bindingKinds, ['scene-override']);
-  assert.equal(reason.lightweight, true);
-  assert.equal(reason.resourceType, 'scene');
+  expect(reason.bindingKinds).toEqual(['scene-override']);
+  expect(reason.lightweight).toBe(true);
+  expect(reason.resourceType).toBe('scene');
 });
 
-test('processUnityResources keeps UNITY_RESOURCE_SUMMARY reason compact when bindings include assetRefPaths', async () => {
+it('processUnityResources keeps UNITY_RESOURCE_SUMMARY reason compact when bindings include assetRefPaths', async () => {
   const graph = createKnowledgeGraph();
   const classId = generateId('Class', 'Assets/Scripts/CharacterList.cs:CharacterList');
   graph.addNode({
@@ -1237,11 +1234,11 @@ test('processUnityResources keeps UNITY_RESOURCE_SUMMARY reason compact when bin
   );
 
   const summary = [...graph.iterRelationships()].find((rel) => rel.type === 'UNITY_RESOURCE_SUMMARY');
-  assert.ok(summary);
-  assert.equal(String(summary.reason).includes('assetRefPaths'), false);
+  expect(summary).toBeTruthy();
+  expect(String(summary.reason).includes('assetRefPaths')).toBe(false);
 });
 
-test('processUnityResources summary-only persistence ignores full payload mode and keeps summary reason', async () => {
+it('processUnityResources summary-only persistence ignores full payload mode and keeps summary reason', async () => {
   const graph = createKnowledgeGraph();
   const classId = generateId('Class', 'Assets/Scripts/Full.cs:FullSymbol');
   graph.addNode({
@@ -1286,14 +1283,14 @@ test('processUnityResources summary-only persistence ignores full payload mode a
   );
 
   const summary = [...graph.iterRelationships()].find((rel) => rel.type === 'UNITY_RESOURCE_SUMMARY');
-  assert.ok(summary);
+  expect(summary).toBeTruthy();
   const reason = JSON.parse(String(summary.reason || '{}'));
-  assert.equal(reason.resourceType, 'scene');
-  assert.deepEqual(reason.bindingKinds, ['scene-override']);
-  assert.equal(String(summary.reason).includes('evidence'), false);
+  expect(reason.resourceType).toBe('scene');
+  expect(reason.bindingKinds).toEqual(['scene-override']);
+  expect(String(summary.reason).includes('evidence')).toBe(false);
 });
 
-test('processUnityResources aggregates repetitive diagnostics with capped samples', async () => {
+it('processUnityResources aggregates repetitive diagnostics with capped samples', async () => {
   const graph = createKnowledgeGraph();
   const symbols = ['DiagA', 'DiagB', 'DiagC'];
   const fakeScanContext = {
@@ -1342,16 +1339,16 @@ test('processUnityResources aggregates repetitive diagnostics with capped sample
     },
   );
 
-  assert.ok(result.diagnostics.some((line) => line.includes('diagnostics: aggregated')));
-  assert.ok(result.diagnostics.some((line) => line.includes('category=no-monobehaviour-match') && line.includes('count=4')));
-  assert.ok(result.diagnostics.some((line) => line.includes('category=ambiguous-symbol') && line.includes('count=1')));
+  expect(result.diagnostics.some((line) => line.includes('diagnostics: aggregated'))).toBeTruthy();
+  expect(result.diagnostics.some((line) => line.includes('category=no-monobehaviour-match') && line.includes('count=4'))).toBeTruthy();
+  expect(result.diagnostics.some((line) => line.includes('category=ambiguous-symbol') && line.includes('count=1'))).toBeTruthy();
 
   const monoSamples = result.diagnostics.filter((line) => line.includes('sample[no-monobehaviour-match]'));
-  assert.ok(monoSamples.length <= 3);
-  assert.equal(result.diagnostics.filter((line) => line.startsWith('No MonoBehaviour block matched')).length, 0);
+  expect(monoSamples.length <= 3).toBeTruthy();
+  expect(result.diagnostics.filter((line) => line.startsWith('No MonoBehaviour block matched')).length).toBe(0);
 });
 
-test('processUnityResources passes class symbol declarations to scan context builder', async () => {
+it('processUnityResources passes class symbol declarations to scan context builder', async () => {
   const graph = createKnowledgeGraph();
   for (const filePath of ['Assets/Scripts/Alpha.cs', 'Assets/Scripts/Beta.cs']) {
     const symbol = path.basename(filePath, '.cs');
@@ -1391,10 +1388,7 @@ test('processUnityResources passes class symbol declarations to scan context bui
     },
   );
 
-  assert.ok(Array.isArray(capturedInput.symbolDeclarations));
-  assert.equal(capturedInput.symbolDeclarations.length, 2);
-  assert.deepEqual(
-    capturedInput.symbolDeclarations.map((entry: any) => entry.symbol).sort(),
-    ['Alpha', 'Beta'],
-  );
+  expect(Array.isArray(capturedInput.symbolDeclarations)).toBeTruthy();
+  expect(capturedInput.symbolDeclarations.length).toBe(2);
+  expect(capturedInput.symbolDeclarations.map((entry: any) => entry.symbol).sort()).toEqual(['Alpha', 'Beta'],);
 });

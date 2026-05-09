@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect, vi } from 'vitest';
+
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,112 +49,106 @@ const acceptanceBaseline: Record<
   },
 };
 
-test('resolveUnityBindings matches frozen acceptance baseline for required Unity samples', async () => {
+it('resolveUnityBindings matches frozen acceptance baseline for required Unity samples', async () => {
   const results = await Promise.all(
     requiredSamples.map((symbol) => resolveUnityBindings({ repoRoot: fixtureRoot, symbol })),
   );
 
   for (const result of results) {
     const baseline = acceptanceBaseline[result.symbol];
-    assert.ok(baseline, `Missing acceptance baseline for ${result.symbol}`);
+    expect(baseline).toBeTruthy();
 
     const bindingKinds = Array.from(new Set(result.resourceBindings.map((binding) => binding.bindingKind))).sort();
-    assert.ok(result.resourceBindings.length >= 1, `${result.symbol} should have at least one resource binding`);
-    assert.deepEqual(bindingKinds, [...baseline.expectedBindingKinds].sort(), `${result.symbol} binding kinds changed`);
-    assert.ok(
-      result.serializedFields.scalarFields.length >= baseline.minScalarFields,
-      `${result.symbol} scalar field count below baseline`,
-    );
-    assert.ok(
-      result.serializedFields.referenceFields.length >= baseline.minReferenceFields,
-      `${result.symbol} reference field count below baseline`,
-    );
+    expect(result.resourceBindings.length >= 1).toBeTruthy();
+    expect(bindingKinds).toEqual([...baseline.expectedBindingKinds].sort());
+    expect(result.serializedFields.scalarFields.length >= baseline.minScalarFields).toBeTruthy();
+    expect(result.serializedFields.referenceFields.length >= baseline.minReferenceFields).toBeTruthy();
 
     const scalarNames = new Set(result.serializedFields.scalarFields.map((field) => field.name));
     const referenceNames = new Set(result.serializedFields.referenceFields.map((field) => field.name));
     for (const fieldName of baseline.requiredScalarFields) {
-      assert.ok(scalarNames.has(fieldName), `${result.symbol} missing scalar field ${fieldName}`);
+      expect(scalarNames.has(fieldName)).toBeTruthy();
     }
     for (const fieldName of baseline.requiredReferenceFields) {
-      assert.ok(referenceNames.has(fieldName), `${result.symbol} missing reference field ${fieldName}`);
+      expect(referenceNames.has(fieldName)).toBeTruthy();
     }
   }
 
-  assert.deepEqual(hasCoverage(results), { hasScalar: true, hasReference: true });
+  expect(hasCoverage(results)).toEqual({ hasScalar: true, hasReference: true });
 });
 
-test('resolveUnityBindings applies PrefabInstance modifications for stripped scene components', async () => {
+it('resolveUnityBindings applies PrefabInstance modifications for stripped scene components', async () => {
   const result = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'MainUIManager' });
   const needPause = result.serializedFields.scalarFields.find((field) => field.name === 'needPause');
   const uiDocument = result.serializedFields.referenceFields.find((field) => field.name === 'mainUIDocument');
 
-  assert.equal(result.resourceBindings[0]?.bindingKind, 'scene-override');
-  assert.equal(needPause?.value, '1');
-  assert.equal(needPause?.sourceLayer, 'scene');
-  assert.equal(uiDocument?.guid, '44444444444444444444444444444444');
-  assert.equal(uiDocument?.sourceLayer, 'scene');
+  expect(result.resourceBindings[0]?.bindingKind).toBe('scene-override');
+  expect(needPause?.value).toBe('1');
+  expect(needPause?.sourceLayer).toBe('scene');
+  expect(uiDocument?.guid).toBe('44444444444444444444444444444444');
+  expect(uiDocument?.sourceLayer).toBe('scene');
 });
 
-test('resolveUnityBindings uses provided scan context without repo re-scan', async () => {
+it('resolveUnityBindings uses provided scan context without repo re-scan', async () => {
   const context = await buildUnityScanContext({ repoRoot: fixtureRoot });
   const result = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'MainUIManager', scanContext: context });
-  assert.ok(result.resourceBindings.length > 0);
+  expect(result.resourceBindings.length > 0).toBeTruthy();
 });
 
-test('resource YAML parse is reused across symbols sharing same resource file', async (t) => {
+it('resource YAML parse is reused across symbols sharing same resource file', async () => {
   const context = await buildUnityScanContext({ repoRoot: fixtureRoot });
   const scriptPath = context.symbolToScriptPath.get('Global');
-  assert.ok(scriptPath);
+  expect(scriptPath).toBeTruthy();
 
   context.symbolToScriptPath.set('GlobalAlias', scriptPath);
   const scriptGuid = context.scriptPathToGuid.get(scriptPath);
-  assert.ok(scriptGuid);
+  expect(scriptGuid).toBeTruthy();
   const targetResourcePath = context.guidToResourceHits.get(scriptGuid)?.[0]?.resourcePath;
-  assert.ok(targetResourcePath);
+  expect(targetResourcePath).toBeTruthy();
 
-  const originalReadFile = fs.readFile.bind(fs) as (...args: any[]) => Promise<string | Buffer>;
+  const originalReadFile = fs.readFile;
   let targetResourceReadCount = 0;
 
-  t.mock.method(fs as any, 'readFile', async (...args: any[]) => {
+  vi.spyOn(fs, 'readFile').mockImplementation(async (...args: any[]) => {
     const fileArg = args[0];
     const rawPath = typeof fileArg === 'string' ? fileArg : fileArg instanceof URL ? fileArg.pathname : String(fileArg);
     const normalizedPath = rawPath.replace(/\\/g, '/');
     if (normalizedPath.endsWith(targetResourcePath)) {
       targetResourceReadCount += 1;
     }
-    return originalReadFile(...args);
+    return originalReadFile(args[0], args[1]);
   });
 
   const first = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'Global', scanContext: context });
   const second = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'GlobalAlias', scanContext: context });
 
-  assert.ok(first.resourceBindings.length > 0);
-  assert.ok(second.resourceBindings.length > 0);
-  assert.equal(targetResourceReadCount, 1);
+  expect(first.resourceBindings.length > 0).toBeTruthy();
+  expect(second.resourceBindings.length > 0).toBeTruthy();
+  expect(targetResourceReadCount).toBe(1);
 });
 
-test('resolveUnityBindings emits structured local/list reference targets for agent consumption', async () => {
+it('resolveUnityBindings emits structured local/list reference targets for agent consumption', async () => {
   const result = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'MenuScreenCarrier' });
   const binding = result.resourceBindings[0];
-  assert.ok(binding);
+  expect(binding).toBeTruthy();
 
   const defaultRef = binding.resolvedReferences.find((ref) => ref.fieldName === 'defaultScreen' && !ref.fromList);
-  assert.equal(defaultRef?.resolution, 'local-object');
-  assert.equal(defaultRef?.target?.objectType, 'GameObject');
-  assert.equal(defaultRef?.target?.gameObjectName, 'ScreenA');
+  expect(defaultRef?.resolution).toBe('local-object');
+  expect(defaultRef?.target?.objectType).toBe('GameObject');
+  expect(defaultRef?.target?.gameObjectName).toBe('ScreenA');
 
   const listRefs = binding.resolvedReferences
     .filter((ref) => ref.fieldName === 'menuScreenList' && ref.fromList)
     .sort((left, right) => (left.listIndex || 0) - (right.listIndex || 0));
-  assert.equal(listRefs.length, 3);
-  assert.equal(listRefs[0].resolution, 'local-object');
-  assert.equal(listRefs[0].target?.gameObjectName, 'ScreenA');
-  assert.equal(listRefs[1].resolution, 'local-object');
-  assert.equal(listRefs[1].target?.gameObjectName, 'ScreenB');
-  assert.equal(listRefs[2].resolution, 'null');
+  expect(listRefs.length).toBe(3);
+  expect(listRefs[0].resolution).toBe('local-object');
+  expect(listRefs[0].target?.gameObjectName).toBe('ScreenA');
+  expect(listRefs[1].resolution).toBe('local-object');
+  expect(listRefs[1].target?.gameObjectName).toBe('ScreenB');
+  expect(listRefs[2].resolution).toBe('null');
 });
 
-test('resolveUnityBindings resolves external guid to asset path when scan context includes asset meta', async () => {
+it('resolveUnityBindings resolves external guid to asset path when scan context includes asset meta', async () => {
   const context = await buildUnityScanContext({
     repoRoot: fixtureRoot,
     scopedPaths: [
@@ -166,16 +160,16 @@ test('resolveUnityBindings resolves external guid to asset path when scan contex
   });
   const result = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'MainUIManager', scanContext: context });
   const mainBinding = result.resourceBindings[0];
-  assert.ok(mainBinding);
+  expect(mainBinding).toBeTruthy();
 
   const externalRef = mainBinding.resolvedReferences.find(
     (ref) => ref.fieldName === 'mainUIDocument' && ref.guid === '44444444444444444444444444444444',
   );
-  assert.equal(externalRef?.resolution, 'external-asset');
-  assert.equal(externalRef?.target?.assetPath, 'Assets/Config/MainUIDocument.asset');
+  expect(externalRef?.resolution).toBe('external-asset');
+  expect(externalRef?.target?.assetPath).toBe('Assets/Config/MainUIDocument.asset');
 });
 
-test('resolveUnityBindings supports ScriptableObject .asset resource bindings', async () => {
+it('resolveUnityBindings supports ScriptableObject .asset resource bindings', async () => {
   const context = await buildUnityScanContext({
     repoRoot: fixtureRoot,
     scopedPaths: [
@@ -188,35 +182,29 @@ test('resolveUnityBindings supports ScriptableObject .asset resource bindings', 
   });
   const result = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'U2ScriptableConfig', scanContext: context });
   const binding = result.resourceBindings[0];
-  assert.ok(binding);
-  assert.equal(binding.resourceType, 'asset');
-  assert.equal(binding.resourcePath, 'Assets/Config/U2ScriptableConfig.asset');
-  assert.deepEqual(binding.serializedFields, result.serializedFields);
-  assert.deepEqual(
-    binding.serializedFields.scalarFields.map((field) => field.name),
-    ['menuScreenList'],
-  );
-  assert.deepEqual(
-    binding.serializedFields.referenceFields.map((field) => field.name),
-    ['mainUIDocument'],
-  );
-  assert.equal(binding.serializedFields.referenceFields[0]?.sourceLayer, 'asset');
+  expect(binding).toBeTruthy();
+  expect(binding.resourceType).toBe('asset');
+  expect(binding.resourcePath).toBe('Assets/Config/U2ScriptableConfig.asset');
+  expect(binding.serializedFields).toEqual(result.serializedFields);
+  expect(binding.serializedFields.scalarFields.map((field) => field.name)).toEqual(['menuScreenList'],);
+  expect(binding.serializedFields.referenceFields.map((field) => field.name)).toEqual(['mainUIDocument'],);
+  expect(binding.serializedFields.referenceFields[0]?.sourceLayer).toBe('asset');
 
   const directExternal = binding.resolvedReferences.find(
     (ref) => ref.fieldName === 'mainUIDocument' && !ref.fromList,
   );
-  assert.equal(directExternal?.resolution, 'external-asset');
-  assert.equal(directExternal?.target?.assetPath, 'Assets/Config/MainUIDocument.asset');
+  expect(directExternal?.resolution).toBe('external-asset');
+  expect(directExternal?.target?.assetPath).toBe('Assets/Config/MainUIDocument.asset');
 
   const listRefs = binding.resolvedReferences
     .filter((ref) => ref.fieldName === 'menuScreenList' && ref.fromList)
     .sort((left, right) => (left.listIndex || 0) - (right.listIndex || 0));
-  assert.equal(listRefs.length, 2);
-  assert.equal(listRefs[0]?.resolution, 'null');
-  assert.equal(listRefs[1]?.resolution, 'external-asset');
+  expect(listRefs.length).toBe(2);
+  expect(listRefs[0]?.resolution).toBe('null');
+  expect(listRefs[1]?.resolution).toBe('external-asset');
 });
 
-test('resolveUnityBindings keeps existing scene serializedFields stable when .asset support is enabled', async () => {
+it('resolveUnityBindings keeps existing scene serializedFields stable when .asset support is enabled', async () => {
   const context = await buildUnityScanContext({
     repoRoot: fixtureRoot,
     scopedPaths: [
@@ -234,23 +222,23 @@ test('resolveUnityBindings keeps existing scene serializedFields stable when .as
   const needPause = result.serializedFields.scalarFields.find((field) => field.name === 'needPause');
   const mainUIDocument = result.serializedFields.referenceFields.find((field) => field.name === 'mainUIDocument');
 
-  assert.ok(result.resourceBindings.length > 0);
-  assert.equal(needPause?.sourceLayer, 'scene');
-  assert.equal(needPause?.value, '1');
-  assert.equal(mainUIDocument?.sourceLayer, 'scene');
-  assert.equal(mainUIDocument?.guid, '44444444444444444444444444444444');
+  expect(result.resourceBindings.length > 0).toBeTruthy();
+  expect(needPause?.sourceLayer).toBe('scene');
+  expect(needPause?.value).toBe('1');
+  expect(mainUIDocument?.sourceLayer).toBe('scene');
+  expect(mainUIDocument?.guid).toBe('44444444444444444444444444444444');
 });
 
-test('resolveUnityBindings supports resourcePathAllowlist filtering', async () => {
+it('resolveUnityBindings supports resourcePathAllowlist filtering', async () => {
   const result = await resolveUnityBindings({
     repoRoot: fixtureRoot,
     symbol: 'MainUIManager',
     resourcePathAllowlist: ['Assets/Scene/NonExisting.unity'],
   });
-  assert.equal(result.resourceBindings.length, 0);
+  expect(result.resourceBindings.length).toBe(0);
 });
 
-test('resolveUnityBindings deepParseLargeResources can override lightweight fallback', async () => {
+it('resolveUnityBindings deepParseLargeResources can override lightweight fallback', async () => {
   const tempRoot = await fs.mkdtemp(path.join(path.dirname(fixtureRoot), 'tmp-large-unity-'));
   const scriptsDir = path.join(tempRoot, 'Assets/Scripts');
   const sceneDir = path.join(tempRoot, 'Assets/Scene');
@@ -282,7 +270,7 @@ test('resolveUnityBindings deepParseLargeResources can override lightweight fall
       symbol: 'LargeSymbol',
       scanContext,
     });
-    assert.equal(lightweight.resourceBindings[0]?.lightweight, true);
+    expect(lightweight.resourceBindings[0]?.lightweight).toBe(true);
 
     const expanded = await resolveUnityBindings({
       repoRoot: tempRoot,
@@ -290,14 +278,14 @@ test('resolveUnityBindings deepParseLargeResources can override lightweight fall
       scanContext,
       deepParseLargeResources: true,
     });
-    assert.equal(expanded.resourceBindings[0]?.lightweight, undefined);
-    assert.equal(expanded.resourceBindings[0]?.componentObjectId, '11400000');
+    expect(expanded.resourceBindings[0]?.lightweight).toBe(undefined);
+    expect(expanded.resourceBindings[0]?.componentObjectId).toBe('11400000');
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
-test('resolveUnityBindings matches MonoBehaviour script guid case-insensitively', async () => {
+it('resolveUnityBindings matches MonoBehaviour script guid case-insensitively', async () => {
   const tempRoot = await fs.mkdtemp(path.join(path.dirname(fixtureRoot), 'tmp-guid-case-unity-'));
   const scriptsDir = path.join(tempRoot, 'Assets/Scripts');
   const assetDir = path.join(tempRoot, 'Assets/Data');
@@ -329,15 +317,15 @@ test('resolveUnityBindings matches MonoBehaviour script guid case-insensitively'
       scanContext,
     });
 
-    assert.equal(resolved.resourceBindings.length, 1);
-    assert.equal(resolved.resourceBindings[0]?.resourcePath, assetPath);
-    assert.equal(resolved.unityDiagnostics.length, 0);
+    expect(resolved.resourceBindings.length).toBe(1);
+    expect(resolved.resourceBindings[0]?.resourcePath).toBe(assetPath);
+    expect(resolved.unityDiagnostics.length).toBe(0);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
-test('resolveUnityBindings parses MonoBehaviour blocks with negative object ids', async () => {
+it('resolveUnityBindings parses MonoBehaviour blocks with negative object ids', async () => {
   const tempRoot = await fs.mkdtemp(path.join(path.dirname(fixtureRoot), 'tmp-negative-object-id-'));
   const scriptsDir = path.join(tempRoot, 'Assets/Scripts');
   const assetDir = path.join(tempRoot, 'Assets/Graphs');
@@ -369,15 +357,15 @@ test('resolveUnityBindings parses MonoBehaviour blocks with negative object ids'
       scanContext,
     });
 
-    assert.equal(resolved.resourceBindings.length, 1);
-    assert.equal(resolved.resourceBindings[0]?.resourcePath, assetPath);
-    assert.equal(resolved.unityDiagnostics.length, 0);
+    expect(resolved.resourceBindings.length).toBe(1);
+    expect(resolved.resourceBindings[0]?.resourcePath).toBe(assetPath);
+    expect(resolved.unityDiagnostics.length).toBe(0);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
-test('extractAssetRefPathReferences parses nested _relativePath rows and marks sprite assets', () => {
+it('extractAssetRefPathReferences parses nested _relativePath rows and marks sprite assets', () => {
   const refs = extractAssetRefPathReferences({
     scalarFields: [
       {
@@ -394,14 +382,14 @@ _actorPrefabRef:
     referenceFields: [],
   });
 
-  assert.equal(refs.length, 2);
-  assert.equal(refs[0]?.fieldName, '_Head_Ref');
-  assert.equal(refs[0]?.isSprite, true);
-  assert.equal(refs[1]?.fieldName, '_actorPrefabRef');
-  assert.equal(refs[1]?.isSprite, false);
+  expect(refs.length).toBe(2);
+  expect(refs[0]?.fieldName).toBe('_Head_Ref');
+  expect(refs[0]?.isSprite).toBe(true);
+  expect(refs[1]?.fieldName).toBe('_actorPrefabRef');
+  expect(refs[1]?.isSprite).toBe(false);
 });
 
-test('extractAssetRefPathReferences handles Unity Ref naming variants and stable sprite classification', () => {
+it('extractAssetRefPathReferences handles Unity Ref naming variants and stable sprite classification', () => {
   const refs = extractAssetRefPathReferences({
     scalarFields: [
       {
@@ -422,15 +410,15 @@ _empty_Ref:
     referenceFields: [],
   });
 
-  assert.equal(refs.length, 4);
-  assert.equal(refs[0]?.fieldName, '_icon_Ref');
-  assert.equal(refs[0]?.relativePath, 'Assets/NEON/Art/Sprites/UI/icon_main.PNG');
-  assert.equal(refs[0]?.isSprite, true);
-  assert.equal(refs[1]?.fieldName, 'actorPrefabRef');
-  assert.equal(refs[1]?.isSprite, false);
-  assert.equal(refs[2]?.fieldName, '_atlas_Ref');
-  assert.equal(refs[2]?.isSprite, true);
-  assert.equal(refs[3]?.fieldName, '_empty_Ref');
-  assert.equal(refs[3]?.isEmpty, true);
-  assert.equal(refs.every((row) => row.parentFieldName === 'Values'), true);
+  expect(refs.length).toBe(4);
+  expect(refs[0]?.fieldName).toBe('_icon_Ref');
+  expect(refs[0]?.relativePath).toBe('Assets/NEON/Art/Sprites/UI/icon_main.PNG');
+  expect(refs[0]?.isSprite).toBe(true);
+  expect(refs[1]?.fieldName).toBe('actorPrefabRef');
+  expect(refs[1]?.isSprite).toBe(false);
+  expect(refs[2]?.fieldName).toBe('_atlas_Ref');
+  expect(refs[2]?.isSprite).toBe(true);
+  expect(refs[3]?.fieldName).toBe('_empty_Ref');
+  expect(refs[3]?.isEmpty).toBe(true);
+  expect(refs.every((row) => row.parentFieldName === 'Values')).toBe(true);
 });

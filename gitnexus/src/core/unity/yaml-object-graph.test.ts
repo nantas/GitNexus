@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { parseUnityYamlObjects } from './yaml-object-graph.js';
 
 const sampleYaml = `--- !u!1 &1000
@@ -21,25 +21,22 @@ PrefabInstance:
       objectReference: {fileID: 0}
 `;
 
-test('parseUnityYamlObjects parses stripped MonoBehaviour and PrefabInstance blocks', () => {
+it('parseUnityYamlObjects parses stripped MonoBehaviour and PrefabInstance blocks', () => {
   const blocks = parseUnityYamlObjects(sampleYaml);
-  assert.equal(blocks.length, 3);
+  expect(blocks.length).toBe(3);
 
-  assert.deepEqual(
-    blocks.map((block) => ({ id: block.objectId, type: block.objectType, stripped: block.stripped })),
-    [
+  expect(blocks.map((block) => ({ id: block.objectId, type: block.objectType, stripped: block.stripped }))).toEqual([
       { id: '1000', type: 'GameObject', stripped: false },
       { id: '11400000', type: 'MonoBehaviour', stripped: true },
       { id: '2000', type: 'PrefabInstance', stripped: false },
-    ],
-  );
+    ],);
 
-  assert.equal(blocks[1].fields.needPause, '0');
-  assert.match(blocks[1].fields.mainUIDocument, /fileID: 11400000/);
-  assert.match(blocks[2].fields.m_Modification, /propertyPath: needPause/);
+  expect(blocks[1].fields.needPause).toBe('0');
+  expect(blocks[1].fields.mainUIDocument).toMatch(/fileID: 11400000/);
+  expect(blocks[2].fields.m_Modification).toMatch(/propertyPath: needPause/);
 });
 
-test('parseUnityYamlObjects keeps inline list entries under their parent field', () => {
+it('parseUnityYamlObjects keeps inline list entries under their parent field', () => {
   const yamlWithInlineList = `--- !u!114 &11400001
 MonoBehaviour:
   buttonMappings:
@@ -49,16 +46,16 @@ MonoBehaviour:
 `;
 
   const blocks = parseUnityYamlObjects(yamlWithInlineList);
-  assert.equal(blocks.length, 1);
+  expect(blocks.length).toBe(1);
 
   const mono = blocks[0];
-  assert.equal(mono.objectType, 'MonoBehaviour');
-  assert.ok(mono.fields.buttonMappings.includes('- {fileID: 11400000'));
-  assert.equal(mono.fields['- {fileID'], undefined);
-  assert.equal(mono.fields.needPause, '0');
+  expect(mono.objectType).toBe('MonoBehaviour');
+  expect(mono.fields.buttonMappings.includes('- {fileID: 11400000')).toBeTruthy();
+  expect(mono.fields['- {fileID']).toBe(undefined);
+  expect(mono.fields.needPause).toBe('0');
 });
 
-test('parseUnityYamlObjects supports negative object ids in headers', () => {
+it('parseUnityYamlObjects supports negative object ids in headers', () => {
   const yamlWithNegativeIds = `--- !u!114 &-8618438378761226257
 MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1b63118991a192f4d8ac217fd7fe49ce, type: 3}
@@ -69,9 +66,9 @@ MonoBehaviour:
 `;
 
   const blocks = parseUnityYamlObjects(yamlWithNegativeIds);
-  assert.equal(blocks.length, 2);
-  assert.equal(blocks[0]?.objectId, '-8618438378761226257');
-  assert.equal(blocks[0]?.objectType, 'MonoBehaviour');
-  assert.match(blocks[0]?.fields.m_Script || '', /guid:\s*1b63118991a192f4d8ac217fd7fe49ce/);
-  assert.equal(blocks[1]?.objectId, '11400000');
+  expect(blocks.length).toBe(2);
+  expect(blocks[0]?.objectId).toBe('-8618438378761226257');
+  expect(blocks[0]?.objectType).toBe('MonoBehaviour');
+  expect(blocks[0]?.fields.m_Script || '').toMatch(/guid:\s*1b63118991a192f4d8ac217fd7fe49ce/);
+  expect(blocks[1]?.objectId).toBe('11400000');
 });

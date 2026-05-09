@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { unityBindingsCommand } from './unity-bindings.js';
@@ -7,7 +7,7 @@ import { unityBindingsCommand } from './unity-bindings.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureRoot = path.resolve(here, '../../src/core/unity/__fixtures__/mini-unity');
 
-test('prints human readable summary by default', async () => {
+it('prints human readable summary by default', async () => {
   const lines: string[] = [];
 
   await unityBindingsCommand(
@@ -17,12 +17,12 @@ test('prints human readable summary by default', async () => {
   );
 
   const output = lines.join('\n');
-  assert.match(output, /resource bindings/i);
-  assert.match(output, /MainUIManager/);
-  assert.match(output, /needPause/);
+  expect(output).toMatch(/resource bindings/i);
+  expect(output).toMatch(/MainUIManager/);
+  expect(output).toMatch(/needPause/);
 });
 
-test('prints JSON when --json is enabled', async () => {
+it('prints JSON when --json is enabled', async () => {
   const lines: string[] = [];
 
   await unityBindingsCommand(
@@ -37,8 +37,8 @@ test('prints JSON when --json is enabled', async () => {
     serializedFields: { scalarFields: unknown[]; referenceFields: unknown[] };
   };
 
-  assert.equal(payload.symbol, 'MainUIManager');
-  assert.ok(Array.isArray(payload.resourceBindings));
-  assert.ok(Array.isArray(payload.serializedFields.scalarFields));
-  assert.ok(Array.isArray(payload.serializedFields.referenceFields));
+  expect(payload.symbol).toBe('MainUIManager');
+  expect(Array.isArray(payload.resourceBindings)).toBeTruthy();
+  expect(Array.isArray(payload.serializedFields.scalarFields)).toBeTruthy();
+  expect(Array.isArray(payload.serializedFields.referenceFields)).toBeTruthy();
 });

@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { streamPrefabSourceRefs } from './prefab-source-scan.js';
@@ -9,7 +9,7 @@ const fixtureRoot = path.resolve(here, '../../../src/core/unity/__fixtures__/min
 const assetGuidToPath = new Map([['99999999999999999999999999999999', 'Assets/Prefabs/BattleMode.prefab']]);
 const scopedFiles = ['Assets/Scene/MainUIManager.unity', 'Assets/Prefabs/BattleMode.prefab'];
 
-test('same source can yield prefab-source rows while script-guid flow remains independent', async () => {
+it('same source can yield prefab-source rows while script-guid flow remains independent', async () => {
   const rows: any[] = [];
   for await (const row of streamPrefabSourceRefs({
     repoRoot: fixtureRoot,
@@ -18,11 +18,11 @@ test('same source can yield prefab-source rows while script-guid flow remains in
   })) {
     rows.push(row);
   }
-  assert.ok(rows.length > 0);
-  assert.equal(rows.every((r) => r.fieldName === 'm_SourcePrefab'), true);
+  expect(rows.length > 0).toBeTruthy();
+  expect(rows.every((r) => r.fieldName === 'm_SourcePrefab')).toBe(true);
 });
 
-test('streamPrefabSourceRefs does not open second file before first row is yielded', async () => {
+it('streamPrefabSourceRefs does not open second file before first row is yielded', async () => {
   const probe: string[] = [];
   const iterator = streamPrefabSourceRefs({
     repoRoot: fixtureRoot,
@@ -34,13 +34,13 @@ test('streamPrefabSourceRefs does not open second file before first row is yield
     },
   })[Symbol.asyncIterator]();
   const first = await iterator.next();
-  assert.equal(first.done, false);
-  assert.equal(first.value.fieldName, 'm_SourcePrefab');
-  assert.equal(probe.includes('open:Assets/Prefabs/BattleMode.prefab'), false);
+  expect(first.done).toBe(false);
+  expect(first.value.fieldName).toBe('m_SourcePrefab');
+  expect(probe.includes('open:Assets/Prefabs/BattleMode.prefab')).toBe(false);
   await iterator.return?.(undefined);
 });
 
-test('producer rows are immutable snapshots (consumer mutation does not backflow)', async () => {
+it('producer rows are immutable snapshots (consumer mutation does not backflow)', async () => {
   for await (const row of streamPrefabSourceRefs({
     repoRoot: fixtureRoot,
     resourceFiles: scopedFiles,
@@ -58,10 +58,10 @@ test('producer rows are immutable snapshots (consumer mutation does not backflow
   })) {
     again.push(row);
   }
-  assert.equal(again.some((r) => r.targetResourcePath === '__PLACEHOLDER__'), false);
+  expect(again.some((r) => r.targetResourcePath === '__PLACEHOLDER__')).toBe(false);
 });
 
-test('bounded queue backpressure never exceeds configured depth when decoupled mode is enabled', async () => {
+it('bounded queue backpressure never exceeds configured depth when decoupled mode is enabled', async () => {
   const depthSamples: number[] = [];
   for await (const _row of streamPrefabSourceRefs({
     repoRoot: fixtureRoot,
@@ -72,5 +72,5 @@ test('bounded queue backpressure never exceeds configured depth when decoupled m
   })) {
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
-  assert.equal(depthSamples.every((depth) => depth <= 64), true);
+  expect(depthSamples.every((depth) => depth <= 64)).toBe(true);
 });

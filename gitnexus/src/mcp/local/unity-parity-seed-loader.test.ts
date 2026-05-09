@@ -1,9 +1,13 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { __resetUnityParitySeedLoaderCacheForTest, loadUnityParitySeed } from './unity-parity-seed-loader.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const baseSeed = {
   version: 1 as const,
@@ -24,96 +28,102 @@ async function writeSeed(storagePath: string, symbol = 'DoorObj'): Promise<void>
   );
 }
 
-test('loadUnityParitySeed returns null on missing file and parsed object on valid file', async () => {
+it('loadUnityParitySeed returns null on missing file and parsed object on valid file', async () => {
   const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-seed-loader-'));
   try {
     const missing = await loadUnityParitySeed(storagePath);
-    assert.equal(missing, null);
+    expect(missing).toBe(null);
 
     await writeSeed(storagePath, 'DoorObj');
 
     const loaded = await loadUnityParitySeed(storagePath);
-    assert.equal(loaded?.version, 1);
-    assert.equal(loaded?.symbolToScriptPath.DoorObj, 'Assets/Code/DoorObj.cs');
+    expect(loaded?.version).toBe(1);
+    expect(loaded?.symbolToScriptPath.DoorObj).toBe('Assets/Code/DoorObj.cs');
   } finally {
     __resetUnityParitySeedLoaderCacheForTest();
     await fs.rm(storagePath, { recursive: true, force: true });
   }
 });
 
-test('loadUnityParitySeed deduplicates concurrent requests for same storage key', async (t) => {
+it('loadUnityParitySeed deduplicates concurrent requests for same storage key', async () => {
   const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-seed-loader-'));
   try {
     await writeSeed(storagePath, 'ConcurrentSymbol');
-    const readFileOriginal = fs.readFile.bind(fs);
+    const seedContent = await fs.readFile(path.join(storagePath, 'unity-parity-seed.json'), 'utf-8');
     let readFileCalls = 0;
-    t.mock.method(fs, 'readFile', async (...args: Parameters<typeof fs.readFile>) => {
+    vi.spyOn(fs, 'readFile').mockImplementation(async () => {
       readFileCalls += 1;
       await new Promise((resolve) => setTimeout(resolve, 20));
-      return readFileOriginal(...args);
+      return seedContent;
     });
 
     const results = await Promise.all(
       Array.from({ length: 10 }, () => loadUnityParitySeed(storagePath)),
     );
-    assert.equal(results.every((row) => row?.symbolToScriptPath.ConcurrentSymbol), true);
-    assert.equal(readFileCalls, 1);
+    expect(results.every((row) => row?.symbolToScriptPath.ConcurrentSymbol)).toBe(true);
+    expect(readFileCalls).toBe(1);
   } finally {
     __resetUnityParitySeedLoaderCacheForTest();
     await fs.rm(storagePath, { recursive: true, force: true });
   }
 });
 
-test('loadUnityParitySeed evicts idle cache entry after ttl', async (t) => {
+it('loadUnityParitySeed evicts idle cache entry after ttl', async () => {
   const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-seed-loader-'));
 
   try {
     await writeSeed(storagePath, 'IdleSymbol');
-    const readFileOriginal = fs.readFile.bind(fs);
+    const seedContent = await fs.readFile(path.join(storagePath, 'unity-parity-seed.json'), 'utf-8');
     let readFileCalls = 0;
-    t.mock.method(fs, 'readFile', async (...args: Parameters<typeof fs.readFile>) => {
+    vi.spyOn(fs, 'readFile').mockImplementation(async () => {
       readFileCalls += 1;
-      return readFileOriginal(...args);
+      return seedContent;
     });
 
     await loadUnityParitySeed(storagePath, { idleMsOverride: 15 });
     await loadUnityParitySeed(storagePath, { idleMsOverride: 15 });
-    assert.equal(readFileCalls, 1);
+    expect(readFileCalls).toBe(1);
 
     await new Promise((resolve) => setTimeout(resolve, 30));
     await loadUnityParitySeed(storagePath, { idleMsOverride: 15 });
-    assert.equal(readFileCalls, 2);
+    expect(readFileCalls).toBe(2);
   } finally {
     __resetUnityParitySeedLoaderCacheForTest();
     await fs.rm(storagePath, { recursive: true, force: true });
   }
 });
 
-test('loadUnityParitySeed invalidates cache when seed mtime changes', async (t) => {
+it('loadUnityParitySeed invalidates cache when seed mtime changes', async () => {
   const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-seed-loader-'));
   const seedPath = path.join(storagePath, 'unity-parity-seed.json');
   try {
     await writeSeed(storagePath, 'VersionA');
-    const readFileOriginal = fs.readFile.bind(fs);
+    let currentSeedContent = await fs.readFile(path.join(storagePath, 'unity-parity-seed.json'), 'utf-8');
     let readFileCalls = 0;
-    t.mock.method(fs, 'readFile', async (...args: Parameters<typeof fs.readFile>) => {
+    vi.spyOn(fs, 'readFile').mockImplementation(async () => {
       readFileCalls += 1;
-      return readFileOriginal(...args);
+      return currentSeedContent;
     });
 
     const first = await loadUnityParitySeed(storagePath);
     const second = await loadUnityParitySeed(storagePath);
-    assert.equal(first?.symbolToScriptPath.VersionA, 'Assets/Code/VersionA.cs');
-    assert.equal(second?.symbolToScriptPath.VersionA, 'Assets/Code/VersionA.cs');
-    assert.equal(readFileCalls, 1);
+    expect(first?.symbolToScriptPath.VersionA).toBe('Assets/Code/VersionA.cs');
+    expect(second?.symbolToScriptPath.VersionA).toBe('Assets/Code/VersionA.cs');
+    expect(readFileCalls).toBe(1);
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     await writeSeed(storagePath, 'VersionB');
+    // Update the content variable to reflect the new version
+    currentSeedContent = JSON.stringify({
+      ...baseSeed,
+      symbolToScriptPath: { VersionB: 'Assets/Code/VersionB.cs' },
+      scriptPathToGuid: { 'Assets/Code/VersionB.cs': 'abc123abc123abc123abc123abc123ab' },
+    });
     await fs.utimes(seedPath, new Date(), new Date());
 
     const third = await loadUnityParitySeed(storagePath);
-    assert.equal(third?.symbolToScriptPath.VersionB, 'Assets/Code/VersionB.cs');
-    assert.equal(readFileCalls, 2);
+    expect(third?.symbolToScriptPath.VersionB).toBe('Assets/Code/VersionB.cs');
+    expect(readFileCalls).toBe(2);
   } finally {
     __resetUnityParitySeedLoaderCacheForTest();
     await fs.rm(storagePath, { recursive: true, force: true });

@@ -1,11 +1,11 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { benchmarkAgentSafeQueryContextCommand } from './benchmark-agent-safe-query-context.js';
 
-test('benchmark-agent-safe-query-context runs suite loader, benchmark, and report writer', async () => {
+it('benchmark-agent-safe-query-context runs suite loader, benchmark, and report writer', async () => {
   const output: string[] = [];
   const calls: Array<{ repo?: string }> = [];
 
@@ -253,15 +253,15 @@ test('benchmark-agent-safe-query-context runs suite loader, benchmark, and repor
     analyze: async () => ({ stdout: '', stderr: '' }),
   });
 
-  assert.equal(calls[0].repo, 'neonspark-core');
-  assert.ok(output.some((line) => line.includes('PASS')));
-  assert.ok(output.some((line) => line.includes('weapon_powerup: guid_invariance_pass=true, live_tool_evidence_pass=true, freeze_ready')));
-  assert.ok(output.some((line) => line.includes('Report:')));
-  assert.equal(report.workflow_replay_slim.weapon_powerup.placeholder_leak_detected, false);
-  assert.equal(report.workflow_replay_slim.weapon_powerup.heuristic_top_summary_detected, false);
+  expect(calls[0].repo).toBe('neonspark-core');
+  expect(output.some((line) => line.includes('PASS'))).toBeTruthy();
+  expect(output.some((line) => line.includes('weapon_powerup: guid_invariance_pass=true, live_tool_evidence_pass=true, freeze_ready'))).toBeTruthy();
+  expect(output.some((line) => line.includes('Report:'))).toBeTruthy();
+  expect(report.workflow_replay_slim.weapon_powerup.placeholder_leak_detected).toBe(false);
+  expect(report.workflow_replay_slim.weapon_powerup.heuristic_top_summary_detected).toBe(false);
 });
 
-test('runtime retrieval contract docs remove heuristic mode and pin full as debug-only', async () => {
+it('runtime retrieval contract docs remove heuristic mode and pin full as debug-only', async () => {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
   const docPaths = [
     'gitnexus/src/mcp/tools.ts',
@@ -269,9 +269,9 @@ test('runtime retrieval contract docs remove heuristic mode and pin full as debu
 
   const text = (await Promise.all(docPaths.map((filePath) => fs.readFile(filePath, 'utf-8')))).join('\n');
 
-  assert.ok(text.includes('discovery -> seed narrowing -> closure verification'));
-  assert.ok(!text.includes('resource_heuristic'));
-  assert.ok(text.includes('response_profile=slim is the default and sufficient'));
-  assert.ok(text.includes('response_profile=full is for debugging'));
-  assert.ok(text.includes('strong graph hops can coexist with failed closure'));
+  expect(text.includes('discovery -> seed narrowing -> closure verification')).toBeTruthy();
+  expect(!text.includes('resource_heuristic')).toBeTruthy();
+  expect(text.includes('response_profile=slim is the default and sufficient')).toBeTruthy();
+  expect(text.includes('response_profile=full is for debugging')).toBeTruthy();
+  expect(text.includes('strong graph hops can coexist with failed closure')).toBeTruthy();
 });

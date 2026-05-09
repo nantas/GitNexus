@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -9,16 +9,16 @@ import { loadBenchmarkDataset } from './io.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, '../..');
 
-test('loadBenchmarkDataset parses thresholds and jsonl rows', async () => {
+it('loadBenchmarkDataset parses thresholds and jsonl rows', async () => {
   const root = path.resolve(projectRoot, '../benchmarks/unity-baseline/v1');
   const ds = await loadBenchmarkDataset(root);
-  assert.equal(typeof ds.thresholds.query.precisionMin, 'number');
-  assert.ok(ds.symbols.length > 0);
-  assert.ok(ds.relations.length > 0);
-  assert.ok(ds.tasks.length > 0);
+  expect(typeof ds.thresholds.query.precisionMin).toBe('number');
+  expect(ds.symbols.length > 0).toBeTruthy();
+  expect(ds.relations.length > 0).toBeTruthy();
+  expect(ds.tasks.length > 0).toBeTruthy();
 });
 
-test('loadBenchmarkDataset rejects missing required fields', async () => {
+it('loadBenchmarkDataset rejects missing required fields', async () => {
   const badRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-bad-dataset-'));
   try {
     await fs.writeFile(path.join(badRoot, 'thresholds.json'), JSON.stringify({
@@ -47,38 +47,38 @@ test('loadBenchmarkDataset rejects missing required fields', async () => {
       // intentionally omit must_not_hit_uids
     })}\n`, 'utf-8');
 
-    await assert.rejects(() => loadBenchmarkDataset(badRoot), /missing required field/i);
+    await expect(() => loadBenchmarkDataset(badRoot)).rejects.toMatch(/missing required field/i);
   } finally {
     await fs.rm(badRoot, { recursive: true, force: true });
   }
 });
 
-test('loadBenchmarkDataset parses neonspark-v1 dataset', async () => {
+it('loadBenchmarkDataset parses neonspark-v1 dataset', async () => {
   const root = path.resolve(projectRoot, '../benchmarks/unity-baseline/neonspark-v1');
   const ds = await loadBenchmarkDataset(root);
-  assert.equal(ds.symbols.length, 20);
-  assert.ok(ds.relations.length > 0);
-  assert.ok(ds.tasks.some((t) => t.tool === 'query'));
-  assert.ok(ds.tasks.some((t) => t.tool === 'context'));
-  assert.ok(ds.tasks.some((t) => t.tool === 'impact'));
+  expect(ds.symbols.length).toBe(20);
+  expect(ds.relations.length > 0).toBeTruthy();
+  expect(ds.tasks.some((t) => t.tool === 'query')).toBeTruthy();
+  expect(ds.tasks.some((t) => t.tool === 'context')).toBeTruthy();
+  expect(ds.tasks.some((t) => t.tool === 'impact')).toBeTruthy();
 });
 
-test('loadBenchmarkDataset parses neonspark-v2 dataset', async () => {
+it('loadBenchmarkDataset parses neonspark-v2 dataset', async () => {
   const root = path.resolve(projectRoot, '../benchmarks/unity-baseline/neonspark-v2');
   const ds = await loadBenchmarkDataset(root);
-  assert.ok(ds.symbols.length >= 40 && ds.symbols.length <= 60);
-  assert.ok(ds.relations.length > 0);
-  assert.ok(ds.tasks.length >= 24);
-  assert.ok(ds.tasks.some((t) => t.tool === 'query'));
-  assert.ok(ds.tasks.some((t) => t.tool === 'context'));
-  assert.ok(ds.tasks.some((t) => t.tool === 'impact'));
+  expect(ds.symbols.length >= 40 && ds.symbols.length <= 60).toBeTruthy();
+  expect(ds.relations.length > 0).toBeTruthy();
+  expect(ds.tasks.length >= 24).toBeTruthy();
+  expect(ds.tasks.some((t) => t.tool === 'query')).toBeTruthy();
+  expect(ds.tasks.some((t) => t.tool === 'context')).toBeTruthy();
+  expect(ds.tasks.some((t) => t.tool === 'impact')).toBeTruthy();
 });
 
-test('latest unity hydration gate report includes hydrationMetaSummary schema', async () => {
+it('latest unity hydration gate report includes hydrationMetaSummary schema', async () => {
   const reportPath = path.resolve(projectRoot, 'docs/reports/2026-03-15-unity-hydration-gates.json');
   const raw = await fs.readFile(reportPath, 'utf-8');
   const report = JSON.parse(raw) as any;
-  assert.ok(report.hydrationMetaSummary);
-  assert.equal(typeof report.hydrationMetaSummary.compactNeedsRetryRate, 'number');
-  assert.equal(typeof report.hydrationMetaSummary.parityCompleteRate, 'number');
+  expect(report.hydrationMetaSummary).toBeTruthy();
+  expect(typeof report.hydrationMetaSummary.compactNeedsRetryRate).toBe('number');
+  expect(typeof report.hydrationMetaSummary.parityCompleteRate).toBe('number');
 });

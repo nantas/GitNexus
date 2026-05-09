@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { buildMissingEvidenceFromHydrationMeta, hydrateUnityForSymbol } from './unity-runtime-hydration.js';
 
-test('hydrateUnityForSymbol(compact) marks needsParityRetry when lightweight bindings remain', async () => {
+it('hydrateUnityForSymbol(compact) marks needsParityRetry when lightweight bindings remain', async () => {
   const out = await hydrateUnityForSymbol({
     mode: 'compact',
     basePayload: {
@@ -47,11 +47,11 @@ test('hydrateUnityForSymbol(compact) marks needsParityRetry when lightweight bin
     },
   } as any);
 
-  assert.equal(out.hydrationMeta?.effectiveMode, 'compact');
-  assert.equal(out.hydrationMeta?.needsParityRetry, true);
+  expect(out.hydrationMeta?.effectiveMode).toBe('compact');
+  expect(out.hydrationMeta?.needsParityRetry).toBe(true);
 });
 
-test('hydrateUnityForSymbol(parity) sets isComplete=true on parity success', async () => {
+it('hydrateUnityForSymbol(parity) sets isComplete=true on parity success', async () => {
   const out = await hydrateUnityForSymbol({
     mode: 'parity',
     basePayload: {
@@ -107,11 +107,11 @@ test('hydrateUnityForSymbol(parity) sets isComplete=true on parity success', asy
     },
   } as any);
 
-  assert.equal(out.hydrationMeta?.effectiveMode, 'parity');
-  assert.equal(out.hydrationMeta?.isComplete, true);
+  expect(out.hydrationMeta?.effectiveMode).toBe('parity');
+  expect(out.hydrationMeta?.isComplete).toBe(true);
 });
 
-test('buildMissingEvidenceFromHydrationMeta maps incomplete reasons', () => {
+it('buildMissingEvidenceFromHydrationMeta maps incomplete reasons', () => {
   const missing = buildMissingEvidenceFromHydrationMeta({
     requestedMode: 'compact',
     effectiveMode: 'compact',
@@ -123,5 +123,5 @@ test('buildMissingEvidenceFromHydrationMeta maps incomplete reasons', () => {
     completenessReason: ['lightweight_bindings_remaining', 'budget_exceeded'],
     needsParityRetry: true,
   });
-  assert.deepEqual(missing, ['lightweight_bindings_remaining', 'budget_exceeded']);
+  expect(missing).toEqual(['lightweight_bindings_remaining', 'budget_exceeded']);
 });

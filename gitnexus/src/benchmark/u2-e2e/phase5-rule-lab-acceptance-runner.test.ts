@@ -1,27 +1,24 @@
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { buildPhase5RuleLabAcceptanceReport, runPhase5RuleLabGate } from './phase5-rule-lab-acceptance-runner.js';
 
-const { test: rawTest } = process.env.VITEST
-  ? await import('vitest')
-  : await import('node:test');
-const test: any = rawTest;
 
-test('phase5 rule-lab acceptance runner emits complete stage coverage', async () => {
+it('phase5 rule-lab acceptance runner emits complete stage coverage', async () => {
   const report = await buildPhase5RuleLabAcceptanceReport({ repoAlias: 'GitNexus' });
-  assert.equal(report.stage_coverage.length, 5);
-  assert.equal(typeof report.metrics.precision, 'number');
+  expect(report.stage_coverage.length).toBe(5);
+  expect(typeof report.metrics.precision).toBe('number');
 });
 
-test('phase5 gate fails when required artifacts are missing', async () => {
+it('phase5 gate fails when required artifacts are missing', async () => {
   const gate = await runPhase5RuleLabGate({ reportPath: '/tmp/missing.json' });
-  assert.equal(gate.pass, false);
-  assert.equal(gate.reason, 'acceptance_report_missing');
+  expect(gate.pass).toBe(false);
+  expect(gate.reason).toBe('acceptance_report_missing');
 });
 
-test('phase5 gate fails when anti-hardcode scan or dsl lint fails', async () => {
+it('phase5 gate fails when anti-hardcode scan or dsl lint fails', async () => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'phase5-gate-'));
   const reportPath = path.join(tmpDir, 'report.json');
   await fs.writeFile(
@@ -43,7 +40,7 @@ test('phase5 gate fails when anti-hardcode scan or dsl lint fails', async () => 
     'utf-8',
   );
   const gate = await runPhase5RuleLabGate({ reportPath });
-  assert.equal(gate.pass, false);
-  assert.ok(['static_hardcode_detected', 'dsl_lint_failed'].includes(String(gate.reason)));
+  expect(gate.pass).toBe(false);
+  expect(['static_hardcode_detected', 'dsl_lint_failed'].includes(String(gate.reason))).toBeTruthy();
   await fs.rm(tmpDir, { recursive: true, force: true });
 });

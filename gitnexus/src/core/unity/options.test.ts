@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import {
   parseHydrationPolicy,
   parseUnityEvidenceMode,
@@ -7,32 +7,32 @@ import {
   parseUnityResourcesMode,
 } from './options.js';
 
-test('parseUnityResourcesMode defaults to off', () => {
-  assert.equal(parseUnityResourcesMode(undefined), 'off');
+it('parseUnityResourcesMode defaults to off', () => {
+  expect(parseUnityResourcesMode(undefined)).toBe('off');
 });
 
-test('parseUnityResourcesMode validates mode', () => {
-  assert.equal(parseUnityResourcesMode('on'), 'on');
-  assert.throws(() => parseUnityResourcesMode('bad'), /unity resources mode/i);
+it('parseUnityResourcesMode validates mode', () => {
+  expect(parseUnityResourcesMode('on')).toBe('on');
+  expect(() => parseUnityResourcesMode('bad')).toThrow(/unity resources mode/i);
 });
 
-test('parseUnityHydrationMode defaults to compact', () => {
-  assert.equal(parseUnityHydrationMode(undefined), 'compact');
+it('parseUnityHydrationMode defaults to compact', () => {
+  expect(parseUnityHydrationMode(undefined)).toBe('compact');
 });
 
-test('parseUnityHydrationMode validates mode', () => {
-  assert.equal(parseUnityHydrationMode('compact'), 'compact');
-  assert.throws(() => parseUnityHydrationMode('bad'), /unity hydration mode/i);
+it('parseUnityHydrationMode validates mode', () => {
+  expect(parseUnityHydrationMode('compact')).toBe('compact');
+  expect(() => parseUnityHydrationMode('bad')).toThrow(/unity hydration mode/i);
 });
 
-test('parseUnityEvidenceMode defaults to summary and validates mode', () => {
-  assert.equal(parseUnityEvidenceMode(undefined), 'summary');
-  assert.equal(parseUnityEvidenceMode('focused'), 'focused');
-  assert.throws(() => parseUnityEvidenceMode('bad'), /unity evidence mode/i);
+it('parseUnityEvidenceMode defaults to summary and validates mode', () => {
+  expect(parseUnityEvidenceMode(undefined)).toBe('summary');
+  expect(parseUnityEvidenceMode('focused')).toBe('focused');
+  expect(() => parseUnityEvidenceMode('bad')).toThrow(/unity evidence mode/i);
 });
 
-test('parseHydrationPolicy defaults to balanced and validates mode', () => {
-  assert.equal(parseHydrationPolicy(undefined), 'balanced');
-  assert.equal(parseHydrationPolicy('strict'), 'strict');
-  assert.throws(() => parseHydrationPolicy('bad'), /hydration policy/i);
+it('parseHydrationPolicy defaults to balanced and validates mode', () => {
+  expect(parseHydrationPolicy(undefined)).toBe('balanced');
+  expect(parseHydrationPolicy('strict')).toBe('strict');
+  expect(() => parseHydrationPolicy('bad')).toThrow(/hydration policy/i);
 });

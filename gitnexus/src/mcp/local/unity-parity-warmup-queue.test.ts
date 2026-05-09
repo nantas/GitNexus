@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { createParityWarmupQueue } from './unity-parity-warmup-queue.js';
 
-test('runWarmupTask respects max parallel limit', async () => {
+it('runWarmupTask respects max parallel limit', async () => {
   let running = 0;
   let maxSeen = 0;
   const queue = createParityWarmupQueue({ maxParallel: 2 });
@@ -14,5 +14,5 @@ test('runWarmupTask respects max parallel limit', async () => {
     running -= 1;
   })));
 
-  assert.equal(maxSeen <= 2, true);
+  expect(maxSeen <= 2).toBe(true);
 });

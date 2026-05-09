@@ -1,17 +1,17 @@
 // @ts-nocheck
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { FileContentCache, toCodeElementCsvRow } from './csv-generator.js';
 
-test('FileContentCache evicts oldest entries when max entry count is exceeded', async () => {
+it('FileContentCache evicts oldest entries when max entry count is exceeded', async () => {
   const cache = new FileContentCache('/tmp/repo', 1);
   cache.setForTest('a.cs', '123456');
   cache.setForTest('b.cs', '123456');
-  assert.equal(cache.hasForTest('a.cs'), false);
-  assert.equal(cache.hasForTest('b.cs'), true);
+  expect(cache.hasForTest('a.cs')).toBe(false);
+  expect(cache.hasForTest('b.cs')).toBe(true);
 });
 
-test('Unity component CodeElement rows store compact description and empty content', async () => {
+it('Unity component CodeElement rows store compact description and empty content', async () => {
   const row = await toCodeElementCsvRow({
     id: 'CodeElement:Assets/A.prefab:114',
     label: 'CodeElement',
@@ -27,5 +27,5 @@ test('Unity component CodeElement rows store compact description and empty conte
       }),
     },
   } as any);
-  assert.match(row, /,\"\"\,\"\{/);
+  expect(row).toMatch(/,\"\"\,\"\{/);
 });

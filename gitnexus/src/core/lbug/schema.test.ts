@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { RELATION_SCHEMA } from './schema.js';
 
-test('RELATION_SCHEMA includes audited fallback pairs for Property/Delegate links', () => {
+it('RELATION_SCHEMA includes audited fallback pairs for Property/Delegate links', () => {
   const requiredPairs = [
     'FROM Method TO `Delegate`',
     'FROM Class TO `Property`',
@@ -15,10 +15,6 @@ test('RELATION_SCHEMA includes audited fallback pairs for Property/Delegate link
   ];
 
   for (const pair of requiredPairs) {
-    assert.match(
-      RELATION_SCHEMA,
-      new RegExp(pair.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')),
-      `Missing relationship pair in schema: ${pair}`,
-    );
+    expect(RELATION_SCHEMA).toMatch(new RegExp(pair.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')));
   }
 });

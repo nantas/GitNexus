@@ -1,16 +1,16 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { readUnityParityCache, upsertUnityParityCache } from './unity-parity-cache.js';
 
-test('unity parity cache reads and writes by symbol key', async () => {
+it('unity parity cache reads and writes by symbol key', async () => {
   const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-unity-parity-'));
   try {
     const before = await readUnityParityCache(storagePath, 'abc123', 'Class:Foo');
-    assert.equal(before, null);
+    expect(before).toBe(null);
 
     await upsertUnityParityCache(storagePath, 'abc123', 'Class:Foo', {
       resourceBindings: [{
@@ -27,14 +27,14 @@ test('unity parity cache reads and writes by symbol key', async () => {
     });
 
     const after = await readUnityParityCache(storagePath, 'abc123', 'Class:Foo');
-    assert.equal(after?.resourceBindings.length, 1);
-    assert.equal(after?.resourceBindings[0]?.componentObjectId, '100');
+    expect(after?.resourceBindings.length).toBe(1);
+    expect(after?.resourceBindings[0]?.componentObjectId).toBe('100');
   } finally {
     await fs.rm(storagePath, { recursive: true, force: true });
   }
 });
 
-test('unity parity cache invalidates entries on indexed commit change', async () => {
+it('unity parity cache invalidates entries on indexed commit change', async () => {
   const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-unity-parity-'));
   try {
     await upsertUnityParityCache(storagePath, 'old-commit', 'Class:Foo', {
@@ -52,13 +52,13 @@ test('unity parity cache invalidates entries on indexed commit change', async ()
     });
 
     const stale = await readUnityParityCache(storagePath, 'new-commit', 'Class:Foo');
-    assert.equal(stale, null);
+    expect(stale).toBe(null);
   } finally {
     await fs.rm(storagePath, { recursive: true, force: true });
   }
 });
 
-test('unity parity cache persists entries in shard files and supports atomic replace', async () => {
+it('unity parity cache persists entries in shard files and supports atomic replace', async () => {
   const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-unity-parity-'));
   try {
     await upsertUnityParityCache(storagePath, 'abc123', 'Class:Foo', {
@@ -90,14 +90,14 @@ test('unity parity cache persists entries in shard files and supports atomic rep
 
     const shardsDir = path.join(storagePath, 'unity-parity-cache');
     const shards = await fs.readdir(shardsDir);
-    assert.ok(shards.length > 0);
-    assert.ok(shards.every((name) => name.endsWith('.json')));
+    expect(shards.length > 0).toBeTruthy();
+    expect(shards.every((name) => name.endsWith('.json'))).toBeTruthy();
   } finally {
     await fs.rm(storagePath, { recursive: true, force: true });
   }
 });
 
-test('unity parity cache evicts oldest entries when max entries exceeded', async () => {
+it('unity parity cache evicts oldest entries when max entries exceeded', async () => {
   const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-unity-parity-'));
   try {
     const shard = (key: string): string => createHash('sha1').update(key).digest('hex').slice(0, 2);
@@ -110,7 +110,7 @@ test('unity parity cache evicts oldest entries when max entries exceeded', async
         break;
       }
     }
-    assert.notEqual(secondKey, '');
+    expect(secondKey).not.toBe('');
 
     await upsertUnityParityCache(storagePath, 'abc123', firstKey, {
       resourceBindings: [{
@@ -142,8 +142,8 @@ test('unity parity cache evicts oldest entries when max entries exceeded', async
 
     const evicted = await readUnityParityCache(storagePath, 'abc123', firstKey);
     const retained = await readUnityParityCache(storagePath, 'abc123', secondKey);
-    assert.equal(evicted, null);
-    assert.ok(retained);
+    expect(evicted).toBe(null);
+    expect(retained).toBeTruthy();
   } finally {
     await fs.rm(storagePath, { recursive: true, force: true });
   }

@@ -1,11 +1,11 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { writeAgentContextReports } from './report.js';
 
-test('writes benchmark-report.json and benchmark-summary.md with scenario breakdown', async () => {
+it('writes benchmark-report.json and benchmark-summary.md with scenario breakdown', async () => {
   const outDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-context-report-'));
   const result = {
     pass: true,
@@ -40,11 +40,11 @@ test('writes benchmark-report.json and benchmark-summary.md with scenario breakd
   await fs.access(mdPath);
 
   const summary = await fs.readFile(mdPath, 'utf-8');
-  assert.match(summary, /sample-refactor-context/);
-  assert.match(summary, /coverage/i);
+  expect(summary).toMatch(/sample-refactor-context/);
+  expect(summary).toMatch(/coverage/i);
 });
 
-test('summary includes failure classes and triage order for failing runs', async () => {
+it('summary includes failure classes and triage order for failing runs', async () => {
   const outDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-context-report-fail-'));
   const result = {
     pass: false,
@@ -85,7 +85,7 @@ test('summary includes failure classes and triage order for failing runs', async
 
   await writeAgentContextReports(outDir, result);
   const summary = await fs.readFile(path.join(outDir, 'benchmark-summary.md'), 'utf-8');
-  assert.match(summary, /Top Failure Classes/i);
-  assert.match(summary, /Recommended Triage Order/i);
-  assert.match(summary, /U/);
+  expect(summary).toMatch(/Top Failure Classes/i);
+  expect(summary).toMatch(/Recommended Triage Order/i);
+  expect(summary).toMatch(/U/);
 });

@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { replayFallbackRelationships } from './fallback-relationship-replay.js';
 
-test('replayFallbackRelationships returns attempted/succeeded/failed for mixed insert outcomes', async () => {
+it('replayFallbackRelationships returns attempted/succeeded/failed for mixed insert outcomes', async () => {
   const validRelLines = [
     '"from","to","type","confidence","reason","step"',
     '"Class:A","File:A","UNITY_RESOURCE_SUMMARY",1,"ok",0',
@@ -20,7 +20,7 @@ test('replayFallbackRelationships returns attempted/succeeded/failed for mixed i
     },
   });
 
-  assert.deepEqual(stats, {
+  expect(stats).toEqual({
     attempted: 3,
     succeeded: 2,
     failed: 1,

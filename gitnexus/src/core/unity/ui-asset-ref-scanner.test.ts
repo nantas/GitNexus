@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,30 +9,26 @@ import { scanUiAssetRefs } from './ui-asset-ref-scanner.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureRoot = path.resolve(here, '../../../src/core/unity/__fixtures__/mini-unity-ui');
 
-test('scans prefab and asset VisualTreeAsset refs with evidence lines', async () => {
+it('scans prefab and asset VisualTreeAsset refs with evidence lines', async () => {
   const refs = await scanUiAssetRefs({ repoRoot: fixtureRoot });
 
-  assert.ok(
-    refs.some(
+  expect(refs.some(
       (entry) =>
         entry.sourceType === 'prefab'
         && entry.sourcePath === 'Assets/Prefabs/EliteBossScreen.prefab'
         && entry.guid === 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
         && entry.line > 0,
-    ),
-  );
-  assert.ok(
-    refs.some(
+    )).toBeTruthy();
+  expect(refs.some(
       (entry) =>
         entry.sourceType === 'asset'
         && entry.sourcePath === 'Assets/Config/DressUpScreenConfig.asset'
         && entry.guid === 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
         && entry.line > 0,
-    ),
-  );
+    )).toBeTruthy();
 });
 
-test('parses multiline YAML object refs and supports target guid prefilter', async () => {
+it('parses multiline YAML object refs and supports target guid prefilter', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-ui-asset-scan-'));
   await fs.mkdir(path.join(tempRoot, 'Assets/Prefabs'), { recursive: true });
   await fs.writeFile(
@@ -55,10 +51,10 @@ test('parses multiline YAML object refs and supports target guid prefilter', asy
     repoRoot: tempRoot,
     targetGuids: ['abcdefabcdefabcdefabcdefabcdefab'],
   });
-  assert.equal(refs.length, 1);
-  assert.equal(refs[0].sourcePath, 'Assets/Prefabs/MultiLine.prefab');
-  assert.equal(refs[0].fieldName, 'm_VisualTreeAsset');
-  assert.equal(refs[0].guid, 'abcdefabcdefabcdefabcdefabcdefab');
+  expect(refs.length).toBe(1);
+  expect(refs[0].sourcePath).toBe('Assets/Prefabs/MultiLine.prefab');
+  expect(refs[0].fieldName).toBe('m_VisualTreeAsset');
+  expect(refs[0].guid).toBe('abcdefabcdefabcdefabcdefabcdefab');
 
   await fs.rm(tempRoot, { recursive: true, force: true });
 });

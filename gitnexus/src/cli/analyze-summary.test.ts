@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import {
   formatFallbackSummary,
   formatUnityDiagnosticsSummary,
@@ -7,23 +7,23 @@ import {
   resolveFallbackStats,
 } from './analyze-summary.js';
 
-test('formatUnityDiagnosticsSummary returns empty when diagnostics are missing', () => {
+it('formatUnityDiagnosticsSummary returns empty when diagnostics are missing', () => {
   const lines = formatUnityDiagnosticsSummary([]);
-  assert.deepEqual(lines, []);
+  expect(lines).toEqual([]);
 });
 
-test('formatUnityDiagnosticsSummary renders diagnostics with count and bullets', () => {
+it('formatUnityDiagnosticsSummary renders diagnostics with count and bullets', () => {
   const lines = formatUnityDiagnosticsSummary([
     'scanContext: scripts=4, guids=4, resources=0',
   ]);
 
-  assert.deepEqual(lines, [
+  expect(lines).toEqual([
     'Unity Diagnostics: 1 message(s)',
     '- scanContext: scripts=4, guids=4, resources=0',
   ]);
 });
 
-test('formatUnityDiagnosticsSummary truncates output after max preview items', () => {
+it('formatUnityDiagnosticsSummary truncates output after max preview items', () => {
   const lines = formatUnityDiagnosticsSummary([
     'diag-a',
     'diag-b',
@@ -31,7 +31,7 @@ test('formatUnityDiagnosticsSummary truncates output after max preview items', (
     'diag-d',
   ]);
 
-  assert.deepEqual(lines, [
+  expect(lines).toEqual([
     'Unity Diagnostics: 4 message(s)',
     '- diag-a',
     '- diag-b',
@@ -40,7 +40,7 @@ test('formatUnityDiagnosticsSummary truncates output after max preview items', (
   ]);
 });
 
-test('formatUnityRuleBindingSummary renders diagnostics and agent report status', () => {
+it('formatUnityRuleBindingSummary renders diagnostics and agent report status', () => {
   const lines = formatUnityRuleBindingSummary({
     edgesInjected: 3,
     ruleResults: [{ ruleId: 'unity.global-init', edgesInjected: 3 }],
@@ -64,7 +64,7 @@ test('formatUnityRuleBindingSummary renders diagnostics and agent report status'
     },
   } as any);
 
-  assert.deepEqual(lines, [
+  expect(lines).toEqual([
     'Unity Rule Binding Diagnostics:',
     '- rule_binding.summary: rules=1, bindings=1, edges=3',
     '- rule_binding.lookup: method_calls=5, cache_hits=4',
@@ -72,7 +72,7 @@ test('formatUnityRuleBindingSummary renders diagnostics and agent report status'
   ]);
 });
 
-test('formatUnityRuleBindingSummary renders anomaly preview', () => {
+it('formatUnityRuleBindingSummary renders anomaly preview', () => {
   const lines = formatUnityRuleBindingSummary({
     edgesInjected: 0,
     ruleResults: [],
@@ -98,7 +98,7 @@ test('formatUnityRuleBindingSummary renders anomaly preview', () => {
     },
   } as any, 1);
 
-  assert.deepEqual(lines, [
+  expect(lines).toEqual([
     'Unity Rule Binding Diagnostics:',
     '- rule_binding.summary: rules=1, bindings=1, edges=0',
     '- rule_binding.agent_report: should_report=true reason="rule-binding anomalies detected"',
@@ -108,16 +108,16 @@ test('formatUnityRuleBindingSummary renders anomaly preview', () => {
   ]);
 });
 
-test('formatFallbackSummary returns empty when no warnings exist', () => {
+it('formatFallbackSummary returns empty when no warnings exist', () => {
   const lines = formatFallbackSummary([], {
     attempted: 0,
     succeeded: 0,
     failed: 0,
   });
-  assert.deepEqual(lines, []);
+  expect(lines).toEqual([]);
 });
 
-test('formatFallbackSummary renders attempted/succeeded/failed with warning preview', () => {
+it('formatFallbackSummary renders attempted/succeeded/failed with warning preview', () => {
   const lines = formatFallbackSummary(
     [
       'Method->Delegate (1233 edges): missing rel pair in schema',
@@ -133,7 +133,7 @@ test('formatFallbackSummary renders attempted/succeeded/failed with warning prev
     3,
   );
 
-  assert.deepEqual(lines, [
+  expect(lines).toEqual([
     'Fallback edges: attempted=1547, succeeded=0, failed=1547, pairTypes=4',
     '- Method->Delegate (1233 edges): missing rel pair in schema',
     '- Class->Property (200 edges): missing rel pair in schema',
@@ -142,19 +142,13 @@ test('formatFallbackSummary renders attempted/succeeded/failed with warning prev
   ]);
 });
 
-test('resolveFallbackStats prefers runtime fallback insert stats when available', () => {
-  assert.deepEqual(
-    resolveFallbackStats(
+it('resolveFallbackStats prefers runtime fallback insert stats when available', () => {
+  expect(resolveFallbackStats(
       ['Class->File (12 edges): missing rel pair in schema'],
       { attempted: 12, succeeded: 3, failed: 9 },
-    ),
-    { attempted: 12, succeeded: 3, failed: 9 },
-  );
+    )).toEqual({ attempted: 12, succeeded: 3, failed: 9 },);
 });
 
-test('resolveFallbackStats derives attempted/failed from warnings when runtime stats are missing', () => {
-  assert.deepEqual(
-    resolveFallbackStats(['Class->File (7 edges): missing rel pair in schema'], undefined),
-    { attempted: 7, succeeded: 0, failed: 7 },
-  );
+it('resolveFallbackStats derives attempted/failed from warnings when runtime stats are missing', () => {
+  expect(resolveFallbackStats(['Class->File (7 edges): missing rel pair in schema'], undefined)).toEqual({ attempted: 7, succeeded: 0, failed: 7 },);
 });

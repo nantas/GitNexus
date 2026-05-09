@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { generateId } from '../../lib/utils.js';
 import { createKnowledgeGraph } from '../graph/graph.js';
 import {
@@ -79,7 +79,7 @@ const addClass = (
   return classId;
 };
 
-test('detects Unity lifecycle hosts and callback anchors', () => {
+it('detects Unity lifecycle hosts and callback anchors', () => {
   const graph = createKnowledgeGraph();
 
   const monoClassId = addClass(graph, {
@@ -108,21 +108,18 @@ test('detects Unity lifecycle hosts and callback anchors', () => {
   const hosts = detectUnityLifecycleHosts(graph);
   const hostIds = new Set(hosts.map((host) => host.classNode.id));
 
-  assert.equal(hostIds.has(monoClassId), true);
-  assert.equal(hosts.length >= 2, true);
-  assert.equal(hosts.some((host) => host.baseType === 'MonoBehaviour'), true);
-  assert.equal(hosts.some((host) => host.baseType === 'ScriptableObject'), true);
-  assert.equal(hosts.some((host) => host.classNode.properties.name === 'PlainService'), false);
+  expect(hostIds.has(monoClassId)).toBe(true);
+  expect(hosts.length >= 2).toBe(true);
+  expect(hosts.some((host) => host.baseType === 'MonoBehaviour')).toBe(true);
+  expect(hosts.some((host) => host.baseType === 'ScriptableObject')).toBe(true);
+  expect(hosts.some((host) => host.classNode.properties.name === 'PlainService')).toBe(false);
 
   const monoHost = hosts.find((host) => host.classNode.id === monoClassId);
-  assert.ok(monoHost);
-  assert.deepEqual(
-    monoHost.lifecycleCallbacks.map((method) => method.properties.name).sort(),
-    ['Awake', 'OnEnable', 'Start', 'Update'],
-  );
+  expect(monoHost).toBeTruthy();
+  expect(monoHost.lifecycleCallbacks.map((method) => method.properties.name).sort()).toEqual(['Awake', 'OnEnable', 'Start', 'Update'],);
 });
 
-test('emits bounded synthetic CALLS edges with reason tags', () => {
+it('emits bounded synthetic CALLS edges with reason tags', () => {
   const graph = createKnowledgeGraph();
   const plainClassId = addClass(graph, {
     className: 'PlainService',
@@ -160,23 +157,17 @@ test('emits bounded synthetic CALLS edges with reason tags', () => {
       .map((edge) => edge.targetId),
   );
 
-  assert.equal(result.syntheticEdgeCount, edges.length);
-  assert.equal(result.syntheticEdgeCount > 0, true);
-  assert.equal(result.syntheticEdgeCount <= 10, true);
-  assert.equal(edges.every((edge) => edge.type === 'CALLS'), true);
-  assert.equal(edges.every((edge) => edge.confidence < 1), true);
-  assert.equal(
-    edges.every((edge) => /unity-(lifecycle|runtime-loader)-synthetic/.test(edge.reason)),
-    true,
-  );
-  assert.equal(edges.some((edge) => edge.sourceId.includes('unity-runtime-root')), true);
-  assert.equal(
-    edges.some((edge) => plainMethods.has(edge.sourceId) || plainMethods.has(edge.targetId)),
-    false,
-  );
+  expect(result.syntheticEdgeCount).toBe(edges.length);
+  expect(result.syntheticEdgeCount > 0).toBe(true);
+  expect(result.syntheticEdgeCount <= 10).toBe(true);
+  expect(edges.every((edge) => edge.type === 'CALLS')).toBe(true);
+  expect(edges.every((edge) => edge.confidence < 1)).toBe(true);
+  expect(edges.every((edge) => /unity-(lifecycle|runtime-loader)-synthetic/.test(edge.reason))).toBe(true,);
+  expect(edges.some((edge) => edge.sourceId.includes('unity-runtime-root'))).toBe(true);
+  expect(edges.some((edge) => plainMethods.has(edge.sourceId) || plainMethods.has(edge.targetId))).toBe(false,);
 });
 
-test('rejects placeholder paths and fake compliance', () => {
+it('rejects placeholder paths and fake compliance', () => {
   const graph = createKnowledgeGraph();
   addClass(graph, {
     className: 'FakeHost',
@@ -204,17 +195,14 @@ test('rejects placeholder paths and fake compliance', () => {
   );
   const syntheticEdges = [...graph.iterRelationships()].filter((edge) => edge.reason.includes('unity-'));
 
-  assert.equal(result.rejectedHostCount >= 1, true);
-  assert.equal(result.syntheticEdgeCount > 0, true);
-  assert.ok(syntheticRoot);
-  assert.equal(syntheticRoot.properties.filePath === '' || !PLACEHOLDER_RE.test(syntheticRoot.properties.filePath), true);
-  assert.equal(
-    syntheticEdges.every((edge) => !PLACEHOLDER_RE.test(`${edge.sourceId} ${edge.targetId} ${edge.reason}`)),
-    true,
-  );
+  expect(result.rejectedHostCount >= 1).toBe(true);
+  expect(result.syntheticEdgeCount > 0).toBe(true);
+  expect(syntheticRoot).toBeTruthy();
+  expect(syntheticRoot.properties.filePath === '' || !PLACEHOLDER_RE.test(syntheticRoot.properties.filePath)).toBe(true);
+  expect(syntheticEdges.every((edge) => !PLACEHOLDER_RE.test(`${edge.sourceId} ${edge.targetId} ${edge.reason}`))).toBe(true,);
 });
 
-test('emits no synthetic edges when there is no Unity host signal', () => {
+it('emits no synthetic edges when there is no Unity host signal', () => {
   const graph = createKnowledgeGraph();
   addClass(graph, {
     className: 'PlainService',
@@ -232,12 +220,12 @@ test('emits no synthetic edges when there is no Unity host signal', () => {
   const syntheticEdges = [...graph.iterRelationships()].filter((edge) => edge.reason.includes('unity-'));
   const runtimeRoot = [...graph.iterNodes()].find((node) => node.id.includes('unity-runtime-root'));
 
-  assert.equal(result.syntheticEdgeCount, 0);
-  assert.equal(syntheticEdges.length, 0);
-  assert.equal(runtimeRoot, undefined);
+  expect(result.syntheticEdgeCount).toBe(0);
+  expect(syntheticEdges.length).toBe(0);
+  expect(runtimeRoot).toBe(undefined);
 });
 
-test('detects Unity hosts through transitive inheritance chains', () => {
+it('detects Unity hosts through transitive inheritance chains', () => {
   const graph = createKnowledgeGraph();
 
   const scriptableObjectId = generateId('Type', 'ScriptableObject');
@@ -304,12 +292,12 @@ test('detects Unity hosts through transitive inheritance chains', () => {
   const hosts = detectUnityLifecycleHosts(graph);
   const gunGraphHost = hosts.find((host) => host.classNode.id === gunGraphId);
 
-  assert.ok(gunGraphHost);
-  assert.equal(gunGraphHost.baseType, 'ScriptableObject');
-  assert.ok(gunGraphHost.methods.length > 0);
+  expect(gunGraphHost).toBeTruthy();
+  expect(gunGraphHost.baseType).toBe('ScriptableObject');
+  expect(gunGraphHost.methods.length > 0).toBeTruthy();
 });
 
-test('respects global lifecycle edge budget without emitting loader bridges', () => {
+it('respects global lifecycle edge budget without emitting loader bridges', () => {
   const graph = createKnowledgeGraph();
 
   for (let i = 0; i < 6; i += 1) {
@@ -351,14 +339,14 @@ test('respects global lifecycle edge budget without emitting loader bridges', ()
     (edge) => edge.type === 'CALLS' && edge.reason === 'unity-runtime-loader-synthetic',
   );
 
-  assert.equal(result.syntheticEdgeCount, 8);
-  assert.equal(result.lifecycleEdgeCount, 8);
-  assert.equal(result.loaderEdgeCount, 0);
-  assert.equal(lifecycleEdges.length, 8);
-  assert.equal(loaderEdges.length, 0);
+  expect(result.syntheticEdgeCount).toBe(8);
+  expect(result.lifecycleEdgeCount).toBe(8);
+  expect(result.loaderEdgeCount).toBe(0);
+  expect(lifecycleEdges.length).toBe(8);
+  expect(loaderEdges.length).toBe(0);
 });
 
-test('resolves named class inheritance targets when direct target node lookup is ambiguous', () => {
+it('resolves named class inheritance targets when direct target node lookup is ambiguous', () => {
   const graph = createKnowledgeGraph();
 
   const nodeGraphId = generateId('Class', 'Assets/Plugins/xNode/Scripts/NodeGraph.cs:NodeGraph');
@@ -414,11 +402,11 @@ test('resolves named class inheritance targets when direct target node lookup is
   const hosts = detectUnityLifecycleHosts(graph);
   const gunGraphHost = hosts.find((host) => host.classNode.id === gunGraphId);
 
-  assert.ok(gunGraphHost);
-  assert.equal(gunGraphHost.baseType, 'ScriptableObject');
+  expect(gunGraphHost).toBeTruthy();
+  expect(gunGraphHost.baseType).toBe('ScriptableObject');
 });
 
-test('lifecycle phase does not emit runtime-loader bridge edges', () => {
+it('lifecycle phase does not emit runtime-loader bridge edges', () => {
   const graph = createKnowledgeGraph();
 
   addClass(graph, {
@@ -526,14 +514,14 @@ test('lifecycle phase does not emit runtime-loader bridge edges', () => {
     (edge) => edge.type === 'CALLS' && edge.reason === 'unity-lifecycle-synthetic',
   );
 
-  assert.equal(result.syntheticEdgeCount, 3);
-  assert.equal(result.lifecycleEdgeCount, 3);
-  assert.equal(result.loaderEdgeCount, 0);
-  assert.equal(lifecycleEdges.length, 3);
-  assert.equal(syntheticLoaderEdges.length, 0);
+  expect(result.syntheticEdgeCount).toBe(3);
+  expect(result.lifecycleEdgeCount).toBe(3);
+  expect(result.loaderEdgeCount).toBe(0);
+  expect(lifecycleEdges.length).toBe(3);
+  expect(syntheticLoaderEdges.length).toBe(0);
 });
 
-test('lifecycle edge cap does not rely on runtime-loader bridge injection', () => {
+it('lifecycle edge cap does not rely on runtime-loader bridge injection', () => {
   const graph = createKnowledgeGraph();
 
   for (let i = 0; i < 20; i += 1) {
@@ -642,5 +630,5 @@ test('lifecycle edge cap does not rely on runtime-loader bridge injection', () =
     (edge) => edge.type === 'CALLS' && edge.reason === 'unity-runtime-loader-synthetic',
   );
 
-  assert.equal(loaderEdges.length, 0);
+  expect(loaderEdges.length).toBe(0);
 });

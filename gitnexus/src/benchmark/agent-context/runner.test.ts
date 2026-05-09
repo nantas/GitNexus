@@ -1,9 +1,9 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { executeToolPlan, runAgentContextBenchmark } from './runner.js';
 import type { AgentContextDataset } from './types.js';
 
-test('runner computes per-scenario coverage and suite averages', async () => {
+it('runner computes per-scenario coverage and suite averages', async () => {
   const dataset: AgentContextDataset = {
     thresholds: {
       coverage: { minPerScenario: 0.5, suiteAvgMin: 0.5 },
@@ -54,11 +54,11 @@ test('runner computes per-scenario coverage and suite averages', async () => {
     runner: fakeRunner,
   });
 
-  assert.ok(result.metrics.avgCoverage > 0);
-  assert.ok(result.scenarios[0].checks.length > 0);
+  expect(result.metrics.avgCoverage > 0).toBeTruthy();
+  expect(result.scenarios[0].checks.length > 0).toBeTruthy();
 });
 
-test('executeToolPlan maps impact uid to target_uid for backend impact contract', async () => {
+it('executeToolPlan maps impact uid to target_uid for backend impact contract', async () => {
   const calls: any[] = [];
   const fakeRunner = {
     query: async () => ({}),
@@ -86,14 +86,11 @@ test('executeToolPlan maps impact uid to target_uid for backend impact contract'
     'neonspark-v1-subset',
   );
 
-  assert.equal(calls.length, 1);
-  assert.equal(
-    calls[0].target_uid,
-    'Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:MirrorNetMgr',
-  );
+  expect(calls.length).toBe(1);
+  expect(calls[0].target_uid).toBe('Class:Assets/NEON/Code/NetworkCode/NeonMgr/MirrorNetMgr.cs:MirrorNetMgr',);
 });
 
-test('executeToolPlan injects response_profile=full for legacy query/context payloads', async () => {
+it('executeToolPlan injects response_profile=full for legacy query/context payloads', async () => {
   const calls: any[] = [];
   const fakeRunner = {
     query: async (params: any) => {
@@ -118,6 +115,6 @@ test('executeToolPlan injects response_profile=full for legacy query/context pay
     'sample-repo',
   );
 
-  assert.equal(calls[0].params.response_profile, 'full');
-  assert.equal(calls[1].params.response_profile, 'full');
+  expect(calls[0].params.response_profile).toBe('full');
+  expect(calls[1].params.response_profile).toBe('full');
 });

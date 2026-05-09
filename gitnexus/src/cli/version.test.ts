@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
 
-test('cli --version matches package.json version', async () => {
+it('cli --version matches package.json version', async () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const packageRoot = path.resolve(here, '..', '..');
   const cliPath = path.join(packageRoot, 'dist', 'cli', 'index.js');
@@ -19,5 +19,5 @@ test('cli --version matches package.json version', async () => {
     cwd: packageRoot,
   });
 
-  assert.equal(stdout.trim(), packageJson.version);
+  expect(stdout.trim()).toBe(packageJson.version);
 });

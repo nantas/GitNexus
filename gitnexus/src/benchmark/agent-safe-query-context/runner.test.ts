@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { runWorkflowReplay } from './runner.js';
 import type { AgentSafeBenchmarkCase } from './types.js';
 
@@ -31,7 +31,7 @@ const fakeCase: AgentSafeBenchmarkCase = {
   },
 };
 
-test('workflow replay narrows query only when retry triggers fire', async () => {
+it('workflow replay narrows query only when retry triggers fire', async () => {
   const calls: Array<{ tool: string; input: Record<string, unknown> }> = [];
   let queryCount = 0;
 
@@ -79,15 +79,15 @@ test('workflow replay narrows query only when retry triggers fire', async () => 
   };
 
   const result = await runWorkflowReplay(fakeCase, fakeRunner);
-  assert.equal(result.tool_calls_to_completion, 4);
-  assert.equal(result.retry_breakdown.query_retry_count, 1);
-  assert.equal(result.retry_breakdown.context_retry_count, 0);
-  assert.equal(result.semantic_tuple_pass, true);
-  assert.equal(result.stop_reason, 'semantic_tuple_satisfied');
-  assert.equal(calls.map((entry) => entry.tool).join(','), 'query,query,context,cypher');
+  expect(result.tool_calls_to_completion).toBe(4);
+  expect(result.retry_breakdown.query_retry_count).toBe(1);
+  expect(result.retry_breakdown.context_retry_count).toBe(0);
+  expect(result.semantic_tuple_pass).toBe(true);
+  expect(result.stop_reason).toBe('semantic_tuple_satisfied');
+  expect(calls.map((entry) => entry.tool).join(',')).toBe('query,query,context,cypher');
 });
 
-test('workflow replay applies response_profile to query and context calls', async () => {
+it('workflow replay applies response_profile to query and context calls', async () => {
   const calls: Array<{ tool: string; input: Record<string, unknown> }> = [];
 
   const fakeRunner = {
@@ -126,14 +126,14 @@ test('workflow replay applies response_profile to query and context calls', asyn
 
   const queryCalls = calls.filter((entry) => entry.tool === 'query');
   const contextCalls = calls.filter((entry) => entry.tool === 'context');
-  assert.equal(queryCalls.every((entry) => entry.input.response_profile === 'slim'), true);
-  assert.equal(contextCalls.every((entry) => entry.input.response_profile === 'slim'), true);
-  assert.equal(result.guid_invariance_pass, true);
-  assert.equal(result.guid_variant?.primary_candidate, result.base?.primary_candidate);
-  assert.equal(result.guid_variant?.recommended_follow_up, result.base?.recommended_follow_up);
+  expect(queryCalls.every((entry) => entry.input.response_profile === 'slim')).toBe(true);
+  expect(contextCalls.every((entry) => entry.input.response_profile === 'slim')).toBe(true);
+  expect(result.guid_invariance_pass).toBe(true);
+  expect(result.guid_variant?.primary_candidate).toBe(result.base?.primary_candidate);
+  expect(result.guid_variant?.recommended_follow_up).toBe(result.base?.recommended_follow_up);
 });
 
-test('workflow replay exposes drift-sensitive metrics from the first-hop output and ambiguity detours', async () => {
+it('workflow replay exposes drift-sensitive metrics from the first-hop output and ambiguity detours', async () => {
   const fakeRunner = {
     async query() {
       return {
@@ -167,14 +167,14 @@ test('workflow replay exposes drift-sensitive metrics from the first-hop output 
 
   const result = await runWorkflowReplay(fakeCase, fakeRunner, { maxSteps: 3, responseProfile: 'slim' });
 
-  assert.equal(result.anchor_top1_pass, false);
-  assert.equal(result.recommended_follow_up_hit, false);
-  assert.equal(result.post_narrowing_anchor_pass, false);
-  assert.equal(result.post_narrowing_follow_up_hit, false);
-  assert.equal(result.ambiguity_detour_count, 1);
+  expect(result.anchor_top1_pass).toBe(false);
+  expect(result.recommended_follow_up_hit).toBe(false);
+  expect(result.post_narrowing_anchor_pass).toBe(false);
+  expect(result.post_narrowing_follow_up_hit).toBe(false);
+  expect(result.ambiguity_detour_count).toBe(1);
 });
 
-test('workflow replay tracks post-narrowing convergence separately from first-hop drift', async () => {
+it('workflow replay tracks post-narrowing convergence separately from first-hop drift', async () => {
   let queryCount = 0;
   const fakeRunner = {
     async query() {
@@ -217,13 +217,13 @@ test('workflow replay tracks post-narrowing convergence separately from first-ho
 
   const result = await runWorkflowReplay(fakeCase, fakeRunner, { maxSteps: 4, responseProfile: 'slim' });
 
-  assert.equal(result.anchor_top1_pass, false);
-  assert.equal(result.recommended_follow_up_hit, false);
-  assert.equal(result.post_narrowing_anchor_pass, true);
-  assert.equal(result.post_narrowing_follow_up_hit, true);
+  expect(result.anchor_top1_pass).toBe(false);
+  expect(result.recommended_follow_up_hit).toBe(false);
+  expect(result.post_narrowing_anchor_pass).toBe(true);
+  expect(result.post_narrowing_follow_up_hit).toBe(true);
 });
 
-test('workflow replay flags unrelated placeholder follow-up leakage', async () => {
+it('workflow replay flags unrelated placeholder follow-up leakage', async () => {
   const fakeRunner = {
     async query() {
       return {
@@ -253,20 +253,17 @@ test('workflow replay flags unrelated placeholder follow-up leakage', async () =
   };
 
   const result = await runWorkflowReplay(fakeCase, fakeRunner, { maxSteps: 4, responseProfile: 'slim' });
-  assert.equal(result.semantic_tuple_pass, true);
-  assert.equal(result.placeholder_leak_detected, true);
-  assert.equal(result.live_tool_evidence_pass, true);
-  assert.equal(
-    result.freeze_ready,
-    (result.confirmed_chain?.steps.length ?? 0) > 0
+  expect(result.semantic_tuple_pass).toBe(true);
+  expect(result.placeholder_leak_detected).toBe(true);
+  expect(result.live_tool_evidence_pass).toBe(true);
+  expect(result.freeze_ready).toBe((result.confirmed_chain?.steps.length ?? 0) > 0
       && !result.placeholder_leak_detected
       && Boolean(result.live_tool_evidence_pass)
-      && result.guid_invariance_pass,
-  );
-  assert.equal((result.confirmed_chain?.steps.length ?? 0) > 0, false);
+      && result.guid_invariance_pass,);
+  expect((result.confirmed_chain?.steps.length ?? 0) > 0).toBe(false);
 });
 
-test('workflow replay surfaces heuristic first-screen drift separately from semantic tuple pass', async () => {
+it('workflow replay surfaces heuristic first-screen drift separately from semantic tuple pass', async () => {
   const fakeRunner = {
     async query() {
       return {
@@ -308,6 +305,6 @@ test('workflow replay surfaces heuristic first-screen drift separately from sema
   };
 
   const result = await runWorkflowReplay(fakeCase, fakeRunner, { maxSteps: 4, responseProfile: 'slim' });
-  assert.equal(result.semantic_tuple_pass, true);
-  assert.equal(result.heuristic_top_summary_detected, true);
+  expect(result.semantic_tuple_pass).toBe(true);
+  expect(result.heuristic_top_summary_detected).toBe(true);
 });

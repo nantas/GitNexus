@@ -1,15 +1,15 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { estimateTokens, summarizeDurations } from './metrics.js';
 
-test('estimateTokens uses chars-per-token heuristic', () => {
-  assert.equal(estimateTokens('1234'), 1);
-  assert.equal(estimateTokens('12345'), 2);
+it('estimateTokens uses chars-per-token heuristic', () => {
+  expect(estimateTokens('1234')).toBe(1);
+  expect(estimateTokens('12345')).toBe(2);
 });
 
-test('summarizeDurations computes median/min/max', () => {
+it('summarizeDurations computes median/min/max', () => {
   const out = summarizeDurations([50, 100, 150]);
-  assert.equal(out.medianMs, 100);
-  assert.equal(out.minMs, 50);
-  assert.equal(out.maxMs, 150);
+  expect(out.medianMs).toBe(100);
+  expect(out.minMs).toBe(50);
+  expect(out.maxMs).toBe(150);
 });

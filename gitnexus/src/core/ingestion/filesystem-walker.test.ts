@@ -1,11 +1,11 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import { walkRepositoryPaths, walkUnityResourcePaths } from './filesystem-walker.js';
 
-test('walkUnityResourcePaths includes large Unity resources while walkRepositoryPaths skips them', async () => {
+it('walkUnityResourcePaths includes large Unity resources while walkRepositoryPaths skips them', async () => {
   const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-fswalker-'));
   const assetsDir = path.join(repoRoot, 'Assets/Scene');
   await fs.mkdir(assetsDir, { recursive: true });
@@ -21,19 +21,19 @@ test('walkUnityResourcePaths includes large Unity resources while walkRepository
 
     const scanned = await walkRepositoryPaths(repoRoot);
     const scannedPaths = new Set(scanned.map((entry) => entry.path));
-    assert.equal(scannedPaths.has(largePrefab), false);
-    assert.equal(scannedPaths.has(smallPrefab), true);
-    assert.equal(scannedPaths.has(scriptFile), true);
+    expect(scannedPaths.has(largePrefab)).toBe(false);
+    expect(scannedPaths.has(smallPrefab)).toBe(true);
+    expect(scannedPaths.has(scriptFile)).toBe(true);
 
     const unityPaths = await walkUnityResourcePaths(repoRoot);
-    assert.equal(unityPaths.includes(largePrefab), true);
-    assert.equal(unityPaths.includes(smallPrefab), true);
+    expect(unityPaths.includes(largePrefab)).toBe(true);
+    expect(unityPaths.includes(smallPrefab)).toBe(true);
   } finally {
     await fs.rm(repoRoot, { recursive: true, force: true });
   }
 });
 
-test('walkUnityResourcePaths only returns prefab/unity/asset files and still honors ignore rules', async () => {
+it('walkUnityResourcePaths only returns prefab/unity/asset files and still honors ignore rules', async () => {
   const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-fswalker-'));
   await fs.mkdir(path.join(repoRoot, 'Assets/Scene'), { recursive: true });
   await fs.mkdir(path.join(repoRoot, 'node_modules/pkg'), { recursive: true });
@@ -46,7 +46,7 @@ test('walkUnityResourcePaths only returns prefab/unity/asset files and still hon
     await fs.writeFile(path.join(repoRoot, 'node_modules/pkg/Hidden.prefab'), 'hidden', 'utf-8');
 
     const unityPaths = await walkUnityResourcePaths(repoRoot);
-    assert.deepEqual(unityPaths, [
+    expect(unityPaths).toEqual([
       'Assets/Scene/Keep.asset',
       'Assets/Scene/Keep.prefab',
       'Assets/Scene/Keep.unity',

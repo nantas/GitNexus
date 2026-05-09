@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { buildFinalVerdictMarkdown } from './report.js';
 
-test('buildFinalVerdictMarkdown includes estimate comparison and symbol outcomes', () => {
+it('buildFinalVerdictMarkdown includes estimate comparison and symbol outcomes', () => {
   const md = buildFinalVerdictMarkdown({
     runId: 'test-run',
     buildTimings: { buildMs: 1200, pipelineProfileMs: 2500, analyzeSec: 114.8 },
@@ -18,12 +18,12 @@ test('buildFinalVerdictMarkdown includes estimate comparison and symbol outcomes
     failures: [],
   });
 
-  assert.match(md, /Estimate Comparison/);
-  assert.match(md, /MainUIManager/);
-  assert.match(md, /CoinPowerUp/);
+  expect(md).toMatch(/Estimate Comparison/);
+  expect(md).toMatch(/MainUIManager/);
+  expect(md).toMatch(/CoinPowerUp/);
 });
 
-test('buildFinalVerdictMarkdown deduplicates repeated failures and renders serialized edge count', () => {
+it('buildFinalVerdictMarkdown deduplicates repeated failures and renders serialized edge count', () => {
   const md = buildFinalVerdictMarkdown({
     runId: 'test-run',
     retrievalSummary: {
@@ -36,11 +36,11 @@ test('buildFinalVerdictMarkdown deduplicates repeated failures and renders seria
   });
 
   const duplicateMatches = md.match(/duration\.min=1\.1ms median=2\.2ms max=3\.3ms/g) || [];
-  assert.equal(duplicateMatches.length, 1);
-  assert.match(md, /UNITY_SERIALIZED_TYPE_IN Edges: 12/);
+  expect(duplicateMatches.length).toBe(1);
+  expect(md).toMatch(/UNITY_SERIALIZED_TYPE_IN Edges: 12/);
 });
 
-test('buildFinalVerdictMarkdown renders CharacterList AssetRef sprite summary when provided', () => {
+it('buildFinalVerdictMarkdown renders CharacterList AssetRef sprite summary when provided', () => {
   const md = buildFinalVerdictMarkdown({
     runId: 'test-run',
     retrievalSummary: {
@@ -59,6 +59,6 @@ test('buildFinalVerdictMarkdown renders CharacterList AssetRef sprite summary wh
     failures: [],
   } as any);
 
-  assert.match(md, /CharacterList AssetRef Sprite Instances: 63/);
-  assert.match(md, /CharacterList AssetRef Sprite Ratio: 51.22%/);
+  expect(md).toMatch(/CharacterList AssetRef Sprite Instances: 63/);
+  expect(md).toMatch(/CharacterList AssetRef Sprite Ratio: 51.22%/);
 });

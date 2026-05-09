@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { formatLazyHydrationBudgetDiagnostic, loadUnityContext, projectUnityBindings } from './unity-enrichment.js';
 
-test('projectUnityBindings restores graph-native Unity payload rows', () => {
+it('projectUnityBindings restores graph-native Unity payload rows', () => {
   const out = projectUnityBindings([
     {
       resourcePath: 'Assets/Scene/MainUIManager.unity',
@@ -20,15 +20,15 @@ test('projectUnityBindings restores graph-native Unity payload rows', () => {
     },
   ]);
 
-  assert.equal(out.resourceBindings[0].bindingKind, 'nested');
-  assert.ok(out.serializedFields.scalarFields.length >= 1);
-  assert.ok(out.serializedFields.referenceFields.length >= 1);
+  expect(out.resourceBindings[0].bindingKind).toBe('nested');
+  expect(out.serializedFields.scalarFields.length >= 1).toBeTruthy();
+  expect(out.serializedFields.referenceFields.length >= 1).toBeTruthy();
 });
 
-test('loadUnityContext queries component payload rows and projects stable output', async () => {
+it('loadUnityContext queries component payload rows and projects stable output', async () => {
   const out = await loadUnityContext('repo-id', 'Class:Assets/Scripts/MainUIManager.cs:MainUIManager', async (query) => {
-    assert.match(query, /UNITY_COMPONENT_INSTANCE/);
-    assert.match(query, /UNITY_SERIALIZED_TYPE_IN/);
+    expect(query).toMatch(/UNITY_COMPONENT_INSTANCE/);
+    expect(query).toMatch(/UNITY_SERIALIZED_TYPE_IN/);
     return [
       {
         resourcePath: 'Assets/Scene/MainUIManager.unity',
@@ -47,12 +47,12 @@ test('loadUnityContext queries component payload rows and projects stable output
     ];
   });
 
-  assert.equal(out.resourceBindings[0]?.bindingKind, 'scene-override');
-  assert.equal(out.serializedFields.scalarFields[0]?.name, 'needPause');
-  assert.deepEqual(out.unityDiagnostics, []);
+  expect(out.resourceBindings[0]?.bindingKind).toBe('scene-override');
+  expect(out.serializedFields.scalarFields[0]?.name).toBe('needPause');
+  expect(out.unityDiagnostics).toEqual([]);
 });
 
-test('loadUnityContext returns resourceBindings for UNITY_SERIALIZED_TYPE_IN relations', async () => {
+it('loadUnityContext returns resourceBindings for UNITY_SERIALIZED_TYPE_IN relations', async () => {
   const out = await loadUnityContext('repo-id', 'Class:Assets/Scripts/AssetRef.cs:AssetRef', async () => [
     {
       relationType: 'UNITY_SERIALIZED_TYPE_IN',
@@ -65,12 +65,12 @@ test('loadUnityContext returns resourceBindings for UNITY_SERIALIZED_TYPE_IN rel
     },
   ] as any);
 
-  assert.equal(out.resourceBindings.length, 1);
-  assert.equal(out.resourceBindings[0]?.resourcePath, 'Assets/Config/Inventory.asset');
-  assert.equal(out.resourceBindings[0]?.resourceType, 'asset');
+  expect(out.resourceBindings.length).toBe(1);
+  expect(out.resourceBindings[0]?.resourcePath).toBe('Assets/Config/Inventory.asset');
+  expect(out.resourceBindings[0]?.resourceType).toBe('asset');
 });
 
-test('projectUnityBindings preserves structured assetRefPaths from payload', () => {
+it('projectUnityBindings preserves structured assetRefPaths from payload', () => {
   const out = projectUnityBindings([
     {
       resourcePath: 'Assets/NEON/DataAssets/CharacterList.asset',
@@ -97,13 +97,13 @@ test('projectUnityBindings preserves structured assetRefPaths from payload', () 
     },
   ]);
 
-  assert.equal(out.resourceBindings.length, 1);
-  assert.equal(out.resourceBindings[0]?.assetRefPaths?.length, 1);
-  assert.equal(out.resourceBindings[0]?.assetRefPaths?.[0]?.fieldName, '_Head_Ref');
-  assert.equal(out.resourceBindings[0]?.assetRefPaths?.[0]?.isSprite, true);
+  expect(out.resourceBindings.length).toBe(1);
+  expect(out.resourceBindings[0]?.assetRefPaths?.length).toBe(1);
+  expect(out.resourceBindings[0]?.assetRefPaths?.[0]?.fieldName).toBe('_Head_Ref');
+  expect(out.resourceBindings[0]?.assetRefPaths?.[0]?.isSprite).toBe(true);
 });
 
-test('projectUnityBindings derives assetRefPaths from serialized scalar fields when payload lacks structured rows', () => {
+it('projectUnityBindings derives assetRefPaths from serialized scalar fields when payload lacks structured rows', () => {
   const out = projectUnityBindings([
     {
       resourcePath: 'Assets/NEON/DataAssets/CharacterList.asset',
@@ -132,14 +132,14 @@ _actorPrefabRef:
   ]);
 
   const refs = out.resourceBindings[0]?.assetRefPaths || [];
-  assert.equal(refs.length, 2);
-  assert.equal(refs[0]?.fieldName, '_Head_Ref');
-  assert.equal(refs[0]?.isSprite, true);
-  assert.equal(refs[1]?.fieldName, '_actorPrefabRef');
-  assert.equal(refs[1]?.isSprite, false);
+  expect(refs.length).toBe(2);
+  expect(refs[0]?.fieldName).toBe('_Head_Ref');
+  expect(refs[0]?.isSprite).toBe(true);
+  expect(refs[1]?.fieldName).toBe('_actorPrefabRef');
+  expect(refs[1]?.isSprite).toBe(false);
 });
 
-test('projectUnityBindings preserves lightweight marker from payload', () => {
+it('projectUnityBindings preserves lightweight marker from payload', () => {
   const out = projectUnityBindings([
     {
       resourcePath: 'Assets/Scene/LargeScene.unity',
@@ -154,11 +154,11 @@ test('projectUnityBindings preserves lightweight marker from payload', () => {
     },
   ]);
 
-  assert.equal(out.resourceBindings.length, 1);
-  assert.equal(out.resourceBindings[0]?.lightweight, true);
+  expect(out.resourceBindings.length).toBe(1);
+  expect(out.resourceBindings[0]?.lightweight).toBe(true);
 });
 
-test('projectUnityBindings infers lightweight marker from legacy line-* component id', () => {
+it('projectUnityBindings infers lightweight marker from legacy line-* component id', () => {
   const out = projectUnityBindings([
     {
       resourcePath: 'Assets/Scene/LargeScene.unity',
@@ -173,11 +173,11 @@ test('projectUnityBindings infers lightweight marker from legacy line-* componen
     },
   ]);
 
-  assert.equal(out.resourceBindings.length, 1);
-  assert.equal(out.resourceBindings[0]?.lightweight, true);
+  expect(out.resourceBindings.length).toBe(1);
+  expect(out.resourceBindings[0]?.lightweight).toBe(true);
 });
 
-test('projectUnityBindings restores compact component payload rows without embedded resourcePath', () => {
+it('projectUnityBindings restores compact component payload rows without embedded resourcePath', () => {
   const out = projectUnityBindings([
     {
       resourcePath: 'Assets/A.prefab',
@@ -189,13 +189,13 @@ test('projectUnityBindings restores compact component payload rows without embed
     },
   ]);
 
-  assert.equal(out.resourceBindings.length, 1);
-  assert.equal(out.resourceBindings[0]?.resourcePath, 'Assets/A.prefab');
-  assert.equal(out.resourceBindings[0]?.bindingKind, 'direct');
-  assert.deepEqual(out.unityDiagnostics, []);
+  expect(out.resourceBindings.length).toBe(1);
+  expect(out.resourceBindings[0]?.resourcePath).toBe('Assets/A.prefab');
+  expect(out.resourceBindings[0]?.bindingKind).toBe('direct');
+  expect(out.unityDiagnostics).toEqual([]);
 });
 
-test('loadUnityContext can project UNITY_RESOURCE_SUMMARY rows before hydration', async () => {
+it('loadUnityContext can project UNITY_RESOURCE_SUMMARY rows before hydration', async () => {
   const out = await loadUnityContext('repo-id', 'Class:Assets/Scripts/DoorObj.cs:DoorObj', async () => [
     {
       relationType: 'UNITY_RESOURCE_SUMMARY',
@@ -204,13 +204,13 @@ test('loadUnityContext can project UNITY_RESOURCE_SUMMARY rows before hydration'
       payload: '',
     },
   ] as any);
-  assert.equal(out.resourceBindings.length, 1);
-  assert.equal(out.resourceBindings[0]?.resourcePath, 'Assets/Doors/Door.prefab');
-  assert.equal(out.resourceBindings[0]?.lightweight, true);
+  expect(out.resourceBindings.length).toBe(1);
+  expect(out.resourceBindings[0]?.resourcePath).toBe('Assets/Doors/Door.prefab');
+  expect(out.resourceBindings[0]?.lightweight).toBe(true);
 });
 
-test('formatLazyHydrationBudgetDiagnostic returns stable budget warning', () => {
+it('formatLazyHydrationBudgetDiagnostic returns stable budget warning', () => {
   const message = formatLazyHydrationBudgetDiagnostic(17);
-  assert.match(message, /budget exceeded/i);
-  assert.match(message, /17ms/);
+  expect(message).toMatch(/budget exceeded/i);
+  expect(message).toMatch(/17ms/);
 });

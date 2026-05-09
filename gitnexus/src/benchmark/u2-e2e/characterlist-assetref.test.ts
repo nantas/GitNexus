@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import {
   extractAssetRefPathInstances,
   summarizeCharacterListAssetRefSprite,
@@ -30,37 +30,37 @@ _activeSkillPowerUp_Ref:
   },
 };
 
-test('extractAssetRefPathInstances parses _relativePath rows and preserves field names', () => {
+it('extractAssetRefPathInstances parses _relativePath rows and preserves field names', () => {
   const rows = extractAssetRefPathInstances([SAMPLE_BINDING as any]);
-  assert.equal(rows.length, 4);
+  expect(rows.length).toBe(4);
 
   const byField = new Map(rows.map((row) => [row.fieldName, row]));
-  assert.equal(byField.get('_Head_Ref')?.relativePath, 'Assets/NEON/Art/Sprites/UI/0_pixle/ui_character_head/hero_head_Nik.png');
-  assert.equal(byField.get('_actorPrefabRef')?.relativePath, 'Assets/ActorPrefab/Actor_Nik/V_Actor_Nik.prefab');
-  assert.equal(byField.get('_lockedSprite_Ref')?.relativePath, 'Assets/NEON/Art/Sprites/UI/4K/new_UI_character_choose/heroes_pic/hero_pic_nik.png');
-  assert.equal(byField.get('_activeSkillPowerUp_Ref')?.relativePath, '');
+  expect(byField.get('_Head_Ref')?.relativePath).toBe('Assets/NEON/Art/Sprites/UI/0_pixle/ui_character_head/hero_head_Nik.png');
+  expect(byField.get('_actorPrefabRef')?.relativePath).toBe('Assets/ActorPrefab/Actor_Nik/V_Actor_Nik.prefab');
+  expect(byField.get('_lockedSprite_Ref')?.relativePath).toBe('Assets/NEON/Art/Sprites/UI/4K/new_UI_character_choose/heroes_pic/hero_pic_nik.png');
+  expect(byField.get('_activeSkillPowerUp_Ref')?.relativePath).toBe('');
 });
 
-test('summarizeCharacterListAssetRefSprite counts non-empty and sprite instances', () => {
+it('summarizeCharacterListAssetRefSprite counts non-empty and sprite instances', () => {
   const summary = summarizeCharacterListAssetRefSprite([SAMPLE_BINDING as any]);
-  assert.equal(summary.extractedAssetRefInstances, 4);
-  assert.equal(summary.nonEmptyAssetRefInstances, 3);
-  assert.equal(summary.spriteAssetRefInstances, 2);
-  assert.equal(summary.uniqueSpriteAssets, 2);
-  assert.equal(summary.spriteRatioInNonEmpty, 0.6667);
+  expect(summary.extractedAssetRefInstances).toBe(4);
+  expect(summary.nonEmptyAssetRefInstances).toBe(3);
+  expect(summary.spriteAssetRefInstances).toBe(2);
+  expect(summary.uniqueSpriteAssets).toBe(2);
+  expect(summary.spriteRatioInNonEmpty).toBe(0.6667);
 });
 
-test('summarizeCharacterListAssetRefSprite field histogram keeps only sprite fields for sprite map', () => {
+it('summarizeCharacterListAssetRefSprite field histogram keeps only sprite fields for sprite map', () => {
   const summary = summarizeCharacterListAssetRefSprite([SAMPLE_BINDING as any]);
-  assert.equal(summary.byFieldAllNonEmpty._Head_Ref, 1);
-  assert.equal(summary.byFieldAllNonEmpty._actorPrefabRef, 1);
-  assert.equal(summary.byFieldAllNonEmpty._lockedSprite_Ref, 1);
-  assert.equal(summary.byFieldSpriteOnly._Head_Ref, 1);
-  assert.equal(summary.byFieldSpriteOnly._lockedSprite_Ref, 1);
-  assert.equal((summary.byFieldSpriteOnly as Record<string, number>)._actorPrefabRef, undefined);
+  expect(summary.byFieldAllNonEmpty._Head_Ref).toBe(1);
+  expect(summary.byFieldAllNonEmpty._actorPrefabRef).toBe(1);
+  expect(summary.byFieldAllNonEmpty._lockedSprite_Ref).toBe(1);
+  expect(summary.byFieldSpriteOnly._Head_Ref).toBe(1);
+  expect(summary.byFieldSpriteOnly._lockedSprite_Ref).toBe(1);
+  expect((summary.byFieldSpriteOnly as Record<string, number>)._actorPrefabRef).toBe(undefined);
 });
 
-test('extractAssetRefPathInstances marks sprite with extension or /Sprites/ path', () => {
+it('extractAssetRefPathInstances marks sprite with extension or /Sprites/ path', () => {
   const rows = extractAssetRefPathInstances([
     {
       serializedFields: {
@@ -81,10 +81,10 @@ _folderSprite_Ref:
   ]);
 
   const spriteOnly = rows.filter((row) => row.isSprite).map((row) => row.fieldName);
-  assert.deepEqual(spriteOnly, ['_icon_Ref', '_atlas_Ref', '_folderSprite_Ref']);
+  expect(spriteOnly).toEqual(['_icon_Ref', '_atlas_Ref', '_folderSprite_Ref']);
 });
 
-test('extractAssetRefPathInstances prefers structured assetRefPaths when provided', () => {
+it('extractAssetRefPathInstances prefers structured assetRefPaths when provided', () => {
   const rows = extractAssetRefPathInstances([
     {
       assetRefPaths: [
@@ -114,7 +114,7 @@ _Head_Ref:
     } as any,
   ]);
 
-  assert.equal(rows.length, 2);
-  assert.equal(rows[0]?.relativePath, 'Assets/NEON/Art/Sprites/UI/head.png');
-  assert.equal(rows[1]?.relativePath, 'Assets/ActorPrefab/Actor_Nik/V_Actor_Nik.prefab');
+  expect(rows.length).toBe(2);
+  expect(rows[0]?.relativePath).toBe('Assets/NEON/Art/Sprites/UI/head.png');
+  expect(rows[1]?.relativePath).toBe('Assets/ActorPrefab/Actor_Nik/V_Actor_Nik.prefab');
 });

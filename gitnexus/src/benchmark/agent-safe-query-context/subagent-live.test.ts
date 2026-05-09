@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,31 +30,31 @@ const fakeCase: AgentSafeBenchmarkCase = {
   },
 };
 
-test('buildSubagentPrompt includes wrapper command and final JSON schema without leaking canonical proof edges', () => {
+it('buildSubagentPrompt includes wrapper command and final JSON schema without leaking canonical proof edges', () => {
   const prompt = buildSubagentPrompt(fakeCase, {
     repo: 'neonspark-core',
     runDir: '/tmp/run',
     resultPath: '/tmp/run/result.json',
   });
 
-  assert.equal(prompt.includes('telemetry-tool.js'), true);
-  assert.equal(prompt.includes('Final JSON schema:'), true);
-  assert.equal(prompt.includes('strongest supported relation'), false);
-  assert.equal(prompt.includes('pickup/equip bridge proof'), true);
-  assert.equal(prompt.includes('HoldPickup -> WeaponPowerUp.PickItUp'), false);
-  assert.equal(prompt.includes('EquipWithEvent -> WeaponPowerUp.Equip'), false);
+  expect(prompt.includes('telemetry-tool.js')).toBe(true);
+  expect(prompt.includes('Final JSON schema:')).toBe(true);
+  expect(prompt.includes('strongest supported relation')).toBe(false);
+  expect(prompt.includes('pickup/equip bridge proof')).toBe(true);
+  expect(prompt.includes('HoldPickup -> WeaponPowerUp.PickItUp')).toBe(false);
+  expect(prompt.includes('EquipWithEvent -> WeaponPowerUp.Equip')).toBe(false);
 });
 
-test('prepareSubagentCaseRun writes prompt artifact', async () => {
+it('prepareSubagentCaseRun writes prompt artifact', async () => {
   const runDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-safe-run-'));
   const prepared = await prepareSubagentCaseRun(runDir, fakeCase, { repo: 'neonspark-core' });
 
   const prompt = await fs.readFile(prepared.promptPath, 'utf-8');
-  assert.equal(prompt.includes('WeaponPowerUp'), true);
-  assert.equal(prompt.includes('telemetry-tool.js'), true);
+  expect(prompt.includes('WeaponPowerUp')).toBe(true);
+  expect(prompt.includes('telemetry-tool.js')).toBe(true);
 });
 
-test('loadSubagentLiveCaseResult validates telemetry rows and derives semantic tuple from tool evidence', async () => {
+it('loadSubagentLiveCaseResult validates telemetry rows and derives semantic tuple from tool evidence', async () => {
   const runDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-safe-run-'));
   const promptPath = path.join(runDir, 'prompt.txt');
   const resultPath = path.join(runDir, 'result.json');
@@ -102,15 +102,15 @@ test('loadSubagentLiveCaseResult validates telemetry rows and derives semantic t
   );
 
   const result = await loadSubagentLiveCaseResult(runDir, fakeCase);
-  assert.equal(result.normalized_tuple_pass, true);
-  assert.equal(result.evidence_validation_pass, true);
-  assert.equal(result.failure_class, undefined);
-  assert.equal(result.semantic_tuple_pass, true);
-  assert.equal(result.tool_calls_to_completion, 2);
-  assert.equal(result.tokens_to_completion, 200);
+  expect(result.normalized_tuple_pass).toBe(true);
+  expect(result.evidence_validation_pass).toBe(true);
+  expect(result.failure_class).toBe(undefined);
+  expect(result.semantic_tuple_pass).toBe(true);
+  expect(result.tool_calls_to_completion).toBe(2);
+  expect(result.tokens_to_completion).toBe(200);
 });
 
-test('loadSubagentLiveCaseResult keeps case non-passing when evidence validation fails', async () => {
+it('loadSubagentLiveCaseResult keeps case non-passing when evidence validation fails', async () => {
   const runDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-safe-run-'));
   const promptPath = path.join(runDir, 'prompt.txt');
   const resultPath = path.join(runDir, 'result.json');
@@ -148,13 +148,13 @@ test('loadSubagentLiveCaseResult keeps case non-passing when evidence validation
   );
 
   const result = await loadSubagentLiveCaseResult(runDir, fakeCase);
-  assert.equal(result.normalized_tuple_pass, true);
-  assert.equal(result.evidence_validation_pass, false);
-  assert.equal(result.semantic_tuple_pass, false);
-  assert.equal(result.failure_class, 'evidence_missing');
+  expect(result.normalized_tuple_pass).toBe(true);
+  expect(result.evidence_validation_pass).toBe(false);
+  expect(result.semantic_tuple_pass).toBe(false);
+  expect(result.failure_class).toBe('evidence_missing');
 });
 
-test('loadSubagentLiveCaseResult rejects non-allowlisted tools', async () => {
+it('loadSubagentLiveCaseResult rejects non-allowlisted tools', async () => {
   const runDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-safe-run-'));
   const promptPath = path.join(runDir, 'prompt.txt');
   const resultPath = path.join(runDir, 'result.json');
@@ -179,5 +179,5 @@ test('loadSubagentLiveCaseResult rejects non-allowlisted tools', async () => {
     'utf-8',
   );
 
-  await assert.rejects(() => loadSubagentLiveCaseResult(runDir, fakeCase), /non-allowlisted tool/);
+  await expect(() => loadSubagentLiveCaseResult(runDir, fakeCase)).rejects.toMatch(/non-allowlisted tool/);
 });

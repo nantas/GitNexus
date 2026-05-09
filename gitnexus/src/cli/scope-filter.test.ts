@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { parseScopeRules, pathMatchesScopeRules, selectEntriesByScopeRules } from '../core/ingestion/scope-filter.js';
 
-test('parseScopeRules ignores comments and blank lines', () => {
+it('parseScopeRules ignores comments and blank lines', () => {
   const rules = parseScopeRules(`
 # comment
 Assets/NEON/Code
@@ -10,22 +10,22 @@ Assets/NEON/Code
 Packages/com.veewo.*
   Packages/com.neonspark.*
 `);
-  assert.deepEqual(rules, [
+  expect(rules).toEqual([
     'Assets/NEON/Code',
     'Packages/com.veewo.*',
     'Packages/com.neonspark.*',
   ]);
 });
 
-test('pathMatchesScopeRules supports wildcard and descendant semantics', () => {
+it('pathMatchesScopeRules supports wildcard and descendant semantics', () => {
   const rules = ['Assets/NEON/Code', 'Packages/com.veewo.*'];
-  assert.equal(pathMatchesScopeRules('Assets/NEON/Code/Game/A.cs', rules), true);
-  assert.equal(pathMatchesScopeRules('Assets/NEON/Code', rules), true);
-  assert.equal(pathMatchesScopeRules('Packages/com.veewo.stat/Runtime/Stat.cs', rules), true);
-  assert.equal(pathMatchesScopeRules('Packages/com.unity.inputsystem/Runtime/X.cs', rules), false);
+  expect(pathMatchesScopeRules('Assets/NEON/Code/Game/A.cs', rules)).toBe(true);
+  expect(pathMatchesScopeRules('Assets/NEON/Code', rules)).toBe(true);
+  expect(pathMatchesScopeRules('Packages/com.veewo.stat/Runtime/Stat.cs', rules)).toBe(true);
+  expect(pathMatchesScopeRules('Packages/com.unity.inputsystem/Runtime/X.cs', rules)).toBe(false);
 });
 
-test('selectEntriesByScopeRules reports overlap dedupe and normalized path collisions', () => {
+it('selectEntriesByScopeRules reports overlap dedupe and normalized path collisions', () => {
   const entries = [
     { path: 'Assets/NEON/Code/Game/A.cs' },
     { path: 'Packages/com.veewo.stat/Runtime/Stat.cs' },
@@ -39,12 +39,12 @@ test('selectEntriesByScopeRules reports overlap dedupe and normalized path colli
     'Packages/com.veewo.*',
   ]);
 
-  assert.equal(result.selected.length, 3);
-  assert.equal(result.diagnostics.appliedRuleCount, 3);
-  assert.equal(result.diagnostics.overlapFiles, 1);
-  assert.equal(result.diagnostics.dedupedMatchCount, 1);
-  assert.equal(result.diagnostics.normalizedCollisions.length, 1);
-  assert.deepEqual(result.diagnostics.normalizedCollisions[0], {
+  expect(result.selected.length).toBe(3);
+  expect(result.diagnostics.appliedRuleCount).toBe(3);
+  expect(result.diagnostics.overlapFiles).toBe(1);
+  expect(result.diagnostics.dedupedMatchCount).toBe(1);
+  expect(result.diagnostics.normalizedCollisions.length).toBe(1);
+  expect(result.diagnostics.normalizedCollisions[0]).toEqual({
     normalizedPath: 'Packages/com.veewo.stat/Runtime/Stat.cs',
     paths: [
       'Packages/com.veewo.stat/Runtime/Stat.cs',

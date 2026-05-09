@@ -1,8 +1,8 @@
-import assert from 'node:assert/strict';
-import { test } from 'vitest';
+
+import { describe, it, expect } from 'vitest';
 import { buildRuntimeClaimFromRule } from './runtime-claim.js';
 
-test('runtime_claim contract includes rule-driven metadata and guarantees', () => {
+it('runtime_claim contract includes rule-driven metadata and guarantees', () => {
   const claim = buildRuntimeClaimFromRule({
     rule: {
       id: 'demo.reload.v1',
@@ -22,8 +22,8 @@ test('runtime_claim contract includes rule-driven metadata and guarantees', () =
     gaps: [],
   });
 
-  assert.equal(claim.rule_id, 'demo.reload.v1');
-  assert.equal(claim.rule_version, '1.2.3');
-  assert.deepEqual(claim.guarantees, ['demo_chain_closed']);
-  assert.deepEqual(claim.non_guarantees, ['demo_non_guarantee']);
+  expect(claim.rule_id).toBe('demo.reload.v1');
+  expect(claim.rule_version).toBe('1.2.3');
+  expect(claim.guarantees).toEqual(['demo_chain_closed']);
+  expect(claim.non_guarantees).toEqual(['demo_non_guarantee']);
 });

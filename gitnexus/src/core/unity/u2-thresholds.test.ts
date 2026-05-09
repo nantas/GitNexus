@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ResolveOutput, UnityResolvedReference, UnityScalarField } from './resolver.js';
@@ -55,7 +55,7 @@ function collectU2ReferenceStats(results: ResolveOutput[]): {
   return { candidateRefs, resolvedRefs, listCandidates, parsedListRefs };
 }
 
-test('U2 threshold: reference_resolution_rate stays above baseline', async () => {
+it('U2 threshold: reference_resolution_rate stays above baseline', async () => {
   const scanContext = await buildUnityScanContext({
     repoRoot: fixtureRoot,
     scopedPaths: [
@@ -75,23 +75,17 @@ test('U2 threshold: reference_resolution_rate stays above baseline', async () =>
   ]);
 
   const stats = collectU2ReferenceStats([mainUIManager, menuScreenCarrier]);
-  assert.ok(stats.candidateRefs > 0, 'candidate reference count must be > 0');
+  expect(stats.candidateRefs > 0).toBeTruthy();
 
   const referenceResolutionRate = stats.resolvedRefs / stats.candidateRefs;
-  assert.ok(
-    referenceResolutionRate >= U2_REFERENCE_RESOLUTION_RATE_THRESHOLD,
-    `reference_resolution_rate=${referenceResolutionRate.toFixed(3)} below threshold=${U2_REFERENCE_RESOLUTION_RATE_THRESHOLD.toFixed(3)} (resolved=${stats.resolvedRefs}, candidates=${stats.candidateRefs})`,
-  );
+  expect(referenceResolutionRate >= U2_REFERENCE_RESOLUTION_RATE_THRESHOLD).toBeTruthy();
 });
 
-test('U2 threshold: list_reference_parse_rate stays above baseline', async () => {
+it('U2 threshold: list_reference_parse_rate stays above baseline', async () => {
   const result = await resolveUnityBindings({ repoRoot: fixtureRoot, symbol: 'MenuScreenCarrier' });
   const stats = collectU2ReferenceStats([result]);
 
-  assert.ok(stats.listCandidates > 0, 'list reference candidate count must be > 0');
+  expect(stats.listCandidates > 0).toBeTruthy();
   const listReferenceParseRate = stats.parsedListRefs / stats.listCandidates;
-  assert.ok(
-    listReferenceParseRate >= U2_LIST_REFERENCE_PARSE_RATE_THRESHOLD,
-    `list_reference_parse_rate=${listReferenceParseRate.toFixed(3)} below threshold=${U2_LIST_REFERENCE_PARSE_RATE_THRESHOLD.toFixed(3)} (parsed=${stats.parsedListRefs}, candidates=${stats.listCandidates})`,
-  );
+  expect(listReferenceParseRate >= U2_LIST_REFERENCE_PARSE_RATE_THRESHOLD).toBeTruthy();
 });

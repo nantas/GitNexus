@@ -1,13 +1,13 @@
 // @ts-nocheck
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
 import { generateAIContextFiles } from './ai-context.js';
 
-test('generateAIContextFiles installs repo skills under .agents/skills/gitnexus', async () => {
+it('generateAIContextFiles installs repo skills under .agents/skills/gitnexus', async () => {
   const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-ai-context-'));
 
   try {
@@ -35,27 +35,24 @@ test('generateAIContextFiles installs repo skills under .agents/skills/gitnexus'
     await fs.access(skillPath);
     await fs.access(sharedRuntimeContractPath);
 
-    assert.match(agentsContent, /slim guidance is narrowing-first/);
-    assert.match(agentsContent, /Query-time runtime closure is graph-only/);
-    assert.match(agentsContent, /\.agents\/skills\/gitnexus\/gitnexus-exploring\/SKILL\.md/);
-    assert.match(claudeContent, /\.agents\/skills\/gitnexus\/gitnexus-exploring\/SKILL\.md/);
-    assert.doesNotMatch(agentsContent, /## Unity Runtime Process 真理源/);
-    assert.doesNotMatch(claudeContent, /## Unity Runtime Process 真理源/);
-    assert.doesNotMatch(agentsContent, /## Dev Workflow \(Source Build\)/);
-    assert.doesNotMatch(claudeContent, /## Dev Workflow \(Source Build\)/);
-    assert.equal(agentsContent, claudeContent, 'AGENTS.md and CLAUDE.md should stay content-identical');
-    assert.ok(
-      result.files.some((entry) => entry.includes('.agents/skills/gitnexus/')),
-      'expected generated file summary to include .agents/skills/gitnexus/',
-    );
+    expect(agentsContent).toMatch(/slim guidance is narrowing-first/);
+    expect(agentsContent).toMatch(/Query-time runtime closure is graph-only/);
+    expect(agentsContent).toMatch(/\.agents\/skills\/gitnexus\/gitnexus-exploring\/SKILL\.md/);
+    expect(claudeContent).toMatch(/\.agents\/skills\/gitnexus\/gitnexus-exploring\/SKILL\.md/);
+    expect(agentsContent).not.toMatch(/## Unity Runtime Process 真理源/);
+    expect(claudeContent).not.toMatch(/## Unity Runtime Process 真理源/);
+    expect(agentsContent).not.toMatch(/## Dev Workflow \(Source Build\)/);
+    expect(claudeContent).not.toMatch(/## Dev Workflow \(Source Build\)/);
+    expect(agentsContent).toBe(claudeContent,'AGENTS.md and CLAUDE.md should stay content-identical');
+    expect(result.files.some((entry) => entry.includes('.agents/skills/gitnexus/'))).toBeTruthy();
 
-    await assert.rejects(fs.access(legacyClaudeSkillsDir));
+    await expect(fs.access(legacyClaudeSkillsDir)).rejects.toThrow();
   } finally {
     await fs.rm(repoPath, { recursive: true, force: true });
   }
 });
 
-test('generateAIContextFiles with global scope skips repo skill install', async () => {
+it('generateAIContextFiles with global scope skips repo skill install', async () => {
   const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-ai-context-global-'));
 
   try {
@@ -72,21 +69,18 @@ test('generateAIContextFiles with global scope skips repo skill install', async 
     const agentsContent = await fs.readFile(agentsPath, 'utf-8');
     const claudeContent = await fs.readFile(claudePath, 'utf-8');
 
-    assert.match(agentsContent, /slim guidance is narrowing-first/);
-    assert.match(agentsContent, /Query-time runtime closure is graph-only/);
-    assert.match(agentsContent, /~\/\.agents\/skills\/gitnexus\/gitnexus-exploring\/SKILL\.md/);
-    assert.match(claudeContent, /~\/\.agents\/skills\/gitnexus\/gitnexus-exploring\/SKILL\.md/);
-    assert.doesNotMatch(agentsContent, /## Unity Runtime Process 真理源/);
-    assert.doesNotMatch(claudeContent, /## Unity Runtime Process 真理源/);
-    assert.doesNotMatch(agentsContent, /## Dev Workflow \(Source Build\)/);
-    assert.doesNotMatch(claudeContent, /## Dev Workflow \(Source Build\)/);
-    assert.equal(agentsContent, claudeContent, 'AGENTS.md and CLAUDE.md should stay content-identical');
-    assert.ok(
-      !result.files.some((entry) => entry.includes('.agents/skills/gitnexus/')),
-      'did not expect repo-local skills in generated file summary',
-    );
+    expect(agentsContent).toMatch(/slim guidance is narrowing-first/);
+    expect(agentsContent).toMatch(/Query-time runtime closure is graph-only/);
+    expect(agentsContent).toMatch(/~\/\.agents\/skills\/gitnexus\/gitnexus-exploring\/SKILL\.md/);
+    expect(claudeContent).toMatch(/~\/\.agents\/skills\/gitnexus\/gitnexus-exploring\/SKILL\.md/);
+    expect(agentsContent).not.toMatch(/## Unity Runtime Process 真理源/);
+    expect(claudeContent).not.toMatch(/## Unity Runtime Process 真理源/);
+    expect(agentsContent).not.toMatch(/## Dev Workflow \(Source Build\)/);
+    expect(claudeContent).not.toMatch(/## Dev Workflow \(Source Build\)/);
+    expect(agentsContent).toBe(claudeContent,'AGENTS.md and CLAUDE.md should stay content-identical');
+    expect(!result.files.some((entry) => entry.includes('.agents/skills/gitnexus/'))).toBeTruthy();
 
-    await assert.rejects(fs.access(localSkillsDir));
+    await expect(fs.access(localSkillsDir)).rejects.toThrow();
   } finally {
     await fs.rm(repoPath, { recursive: true, force: true });
   }

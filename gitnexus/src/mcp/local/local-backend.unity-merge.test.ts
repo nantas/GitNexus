@@ -1,10 +1,10 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { projectUnityBindings } from './unity-enrichment.js';
 import { hydrateLazyBindings } from './unity-lazy-hydrator.js';
 import { attachUnityHydrationMeta, mergeParityUnityBindings, mergeUnityBindings } from './unity-runtime-hydration.js';
 
-test('summary-only rows hydrate and merge into full bindings with preserved field coverage', async () => {
+it('summary-only rows hydrate and merge into full bindings with preserved field coverage', async () => {
   const projected = projectUnityBindings([
     {
       relationType: 'UNITY_RESOURCE_SUMMARY',
@@ -93,20 +93,20 @@ test('summary-only rows hydrate and merge into full bindings with preserved fiel
   });
 
   const merged = mergeUnityBindings(projected.resourceBindings, hydration.resolvedByPath);
-  assert.equal(merged.length, 4);
-  assert.equal(merged.filter((row) => row.resourcePath === 'Assets/Doors/Door.prefab').length, 2);
-  assert.equal(merged.filter((row) => row.resourcePath === 'Assets/Doors/Boss.prefab').length, 1);
-  assert.equal(merged.filter((row) => row.resourcePath === 'Assets/Scene/Test.unity').length, 1);
-  assert.equal(merged.some((row) => row.componentObjectId === 'summary'), false);
-  assert.equal(merged.some((row) => row.lightweight), false);
+  expect(merged.length).toBe(4);
+  expect(merged.filter((row) => row.resourcePath === 'Assets/Doors/Door.prefab').length).toBe(2);
+  expect(merged.filter((row) => row.resourcePath === 'Assets/Doors/Boss.prefab').length).toBe(1);
+  expect(merged.filter((row) => row.resourcePath === 'Assets/Scene/Test.unity').length).toBe(1);
+  expect(merged.some((row) => row.componentObjectId === 'summary')).toBe(false);
+  expect(merged.some((row) => row.lightweight)).toBe(false);
 
   const scalarFieldNames = merged.flatMap((row) => row.serializedFields.scalarFields.map((field) => field.name));
-  assert.equal(scalarFieldNames.includes('Shows'), true);
-  assert.equal(scalarFieldNames.includes('ToSecretRoom'), true);
-  assert.equal(scalarFieldNames.includes('needPause'), true);
+  expect(scalarFieldNames.includes('Shows')).toBe(true);
+  expect(scalarFieldNames.includes('ToSecretRoom')).toBe(true);
+  expect(scalarFieldNames.includes('needPause')).toBe(true);
 });
 
-test('mergeUnityBindings keeps lightweight summaries when hydration has no expanded rows', async () => {
+it('mergeUnityBindings keeps lightweight summaries when hydration has no expanded rows', async () => {
   const projected = projectUnityBindings([
     {
       relationType: 'UNITY_RESOURCE_SUMMARY',
@@ -117,13 +117,13 @@ test('mergeUnityBindings keeps lightweight summaries when hydration has no expan
   ]);
 
   const merged = mergeUnityBindings(projected.resourceBindings, new Map());
-  assert.equal(merged.length, 1);
-  assert.equal(merged[0]?.resourcePath, 'Assets/Doors/Unresolved.prefab');
-  assert.equal(merged[0]?.lightweight, true);
-  assert.equal(merged[0]?.componentObjectId, 'summary');
+  expect(merged.length).toBe(1);
+  expect(merged[0]?.resourcePath).toBe('Assets/Doors/Unresolved.prefab');
+  expect(merged[0]?.lightweight).toBe(true);
+  expect(merged[0]?.componentObjectId).toBe('summary');
 });
 
-test('mergeParityUnityBindings prefers full resolved rows and preserves non-lightweight base evidence', () => {
+it('mergeParityUnityBindings prefers full resolved rows and preserves non-lightweight base evidence', () => {
   const merged = mergeParityUnityBindings(
     [
       {
@@ -164,13 +164,13 @@ test('mergeParityUnityBindings prefers full resolved rows and preserves non-ligh
     ],
   );
 
-  assert.equal(merged.length, 2);
-  assert.equal(merged.some((row) => row.componentObjectId === 'legacy-1'), true);
-  assert.equal(merged.some((row) => row.componentObjectId === 'new-1'), true);
-  assert.equal(merged.some((row) => row.lightweight), false);
+  expect(merged.length).toBe(2);
+  expect(merged.some((row) => row.componentObjectId === 'legacy-1')).toBe(true);
+  expect(merged.some((row) => row.componentObjectId === 'new-1')).toBe(true);
+  expect(merged.some((row) => row.lightweight)).toBe(false);
 });
 
-test('attachUnityHydrationMeta annotates payload with requested/effective mode and counts', () => {
+it('attachUnityHydrationMeta annotates payload with requested/effective mode and counts', () => {
   const payload = projectUnityBindings([
     {
       relationType: 'UNITY_RESOURCE_SUMMARY',
@@ -188,21 +188,21 @@ test('attachUnityHydrationMeta annotates payload with requested/effective mode a
     hasExpandableBindings: true,
   });
 
-  assert.equal(out.hydrationMeta?.requestedMode, 'parity');
-  assert.equal(out.hydrationMeta?.effectiveMode, 'compact');
-  assert.equal(out.hydrationMeta?.elapsedMs, 42);
-  assert.equal(out.hydrationMeta?.fallbackToCompact, true);
-  assert.equal(out.hydrationMeta?.resourceBindingCount, 1);
-  assert.equal(out.hydrationMeta?.unityDiagnosticsCount, 0);
-  assert.equal(out.hydrationMeta?.isComplete, false);
-  assert.equal(out.hydrationMeta?.needsParityRetry, true);
-  assert.equal(out.hydrationMeta?.retryHint, 'rerun_with_unity_hydration=parity');
-  assert.equal(out.hydrationMeta?.completenessReason.includes('mode_compact'), true);
-  assert.equal(out.hydrationMeta?.completenessReason.includes('fallback_to_compact'), true);
-  assert.equal(out.hydrationMeta?.completenessReason.includes('lightweight_bindings_remaining'), true);
+  expect(out.hydrationMeta?.requestedMode).toBe('parity');
+  expect(out.hydrationMeta?.effectiveMode).toBe('compact');
+  expect(out.hydrationMeta?.elapsedMs).toBe(42);
+  expect(out.hydrationMeta?.fallbackToCompact).toBe(true);
+  expect(out.hydrationMeta?.resourceBindingCount).toBe(1);
+  expect(out.hydrationMeta?.unityDiagnosticsCount).toBe(0);
+  expect(out.hydrationMeta?.isComplete).toBe(false);
+  expect(out.hydrationMeta?.needsParityRetry).toBe(true);
+  expect(out.hydrationMeta?.retryHint).toBe('rerun_with_unity_hydration=parity');
+  expect(out.hydrationMeta?.completenessReason.includes('mode_compact')).toBe(true);
+  expect(out.hydrationMeta?.completenessReason.includes('fallback_to_compact')).toBe(true);
+  expect(out.hydrationMeta?.completenessReason.includes('lightweight_bindings_remaining')).toBe(true);
 });
 
-test('attachUnityHydrationMeta marks parity payload complete when no fallback/diagnostics remain', () => {
+it('attachUnityHydrationMeta marks parity payload complete when no fallback/diagnostics remain', () => {
   const payload = projectUnityBindings([
     {
       resourcePath: 'Assets/Scene/Test.unity',
@@ -227,13 +227,13 @@ test('attachUnityHydrationMeta marks parity payload complete when no fallback/di
     hasExpandableBindings: false,
   });
 
-  assert.equal(out.hydrationMeta?.isComplete, true);
-  assert.equal(out.hydrationMeta?.needsParityRetry, false);
-  assert.equal(out.hydrationMeta?.retryHint, undefined);
-  assert.deepEqual(out.hydrationMeta?.completenessReason, []);
+  expect(out.hydrationMeta?.isComplete).toBe(true);
+  expect(out.hydrationMeta?.needsParityRetry).toBe(false);
+  expect(out.hydrationMeta?.retryHint).toBe(undefined);
+  expect(out.hydrationMeta?.completenessReason).toEqual([]);
 });
 
-test('attachUnityHydrationMeta marks compact payload complete when no expandable bindings remain', () => {
+it('attachUnityHydrationMeta marks compact payload complete when no expandable bindings remain', () => {
   const payload = projectUnityBindings([
     {
       resourcePath: 'Assets/Scene/Test.unity',
@@ -258,12 +258,12 @@ test('attachUnityHydrationMeta marks compact payload complete when no expandable
     hasExpandableBindings: false,
   });
 
-  assert.equal(out.hydrationMeta?.isComplete, true);
-  assert.equal(out.hydrationMeta?.needsParityRetry, false);
-  assert.deepEqual(out.hydrationMeta?.completenessReason, []);
+  expect(out.hydrationMeta?.isComplete).toBe(true);
+  expect(out.hydrationMeta?.needsParityRetry).toBe(false);
+  expect(out.hydrationMeta?.completenessReason).toEqual([]);
 });
 
-test('attachUnityHydrationMeta marks compact payload incomplete when expandable bindings remain', () => {
+it('attachUnityHydrationMeta marks compact payload incomplete when expandable bindings remain', () => {
   const payload = projectUnityBindings([
     {
       relationType: 'UNITY_RESOURCE_SUMMARY',
@@ -281,7 +281,7 @@ test('attachUnityHydrationMeta marks compact payload incomplete when expandable 
     hasExpandableBindings: true,
   });
 
-  assert.equal(out.hydrationMeta?.isComplete, false);
-  assert.equal(out.hydrationMeta?.needsParityRetry, true);
-  assert.equal(out.hydrationMeta?.completenessReason.includes('mode_compact'), true);
+  expect(out.hydrationMeta?.isComplete).toBe(false);
+  expect(out.hydrationMeta?.needsParityRetry).toBe(true);
+  expect(out.hydrationMeta?.completenessReason.includes('mode_compact')).toBe(true);
 });

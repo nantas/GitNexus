@@ -1,11 +1,11 @@
-import assert from 'node:assert/strict';
+
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { test } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { RuleRegistryLoadError, loadRuleRegistry } from './runtime-claim-rule-registry.js';
 
-test('loads active runtime claim rules from project catalog', async () => {
+it('loads active runtime claim rules from project catalog', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-claim-rules-'));
   const repoPath = path.join(tempRoot, 'repo');
   const rulesRoot = path.join(repoPath, '.gitnexus', 'rules');
@@ -46,14 +46,14 @@ test('loads active runtime claim rules from project catalog', async () => {
 
   try {
     const registry = await loadRuleRegistry(repoPath);
-    assert.equal(registry.activeRules[0].id, 'demo.reload.rule.v1');
-    assert.equal(registry.activeRules[0].version, '1.2.3');
+    expect(registry.activeRules[0].id).toBe('demo.reload.rule.v1');
+    expect(registry.activeRules[0].version).toBe('1.2.3');
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
-test('throws rule_catalog_missing when target repo has no catalog (no ancestor fallback)', async () => {
+it('throws rule_catalog_missing when target repo has no catalog (no ancestor fallback)', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-claim-rules-'));
   const workspaceRoot = path.join(tempRoot, 'workspace');
   const nestedCwd = path.join(workspaceRoot, 'packages', 'app');
@@ -84,41 +84,31 @@ test('throws rule_catalog_missing when target repo has no catalog (no ancestor f
   const originalCwd = process.cwd();
   process.chdir(nestedCwd);
   try {
-    await assert.rejects(
-      () => loadRuleRegistry(path.join(tempRoot, 'does-not-exist')),
-      (error: any) => {
-        assert.ok(error instanceof RuleRegistryLoadError);
-        assert.equal(error.code, 'rule_catalog_missing');
-        assert.match(String(error.message || ''), /catalog not found/i);
-        return true;
-      },
-    );
+    const loadError = await loadRuleRegistry(path.join(tempRoot, 'does-not-exist')).catch(e => e);
+    expect(loadError).toBeInstanceOf(RuleRegistryLoadError);
+    expect(loadError.code).toBe('rule_catalog_missing');
+    expect(String(loadError.message || '')).toMatch(/catalog not found/i);
   } finally {
     process.chdir(originalCwd);
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
-test('throws rule_catalog_missing when rulesRoot exists but catalog.json is missing', async () => {
+it('throws rule_catalog_missing when rulesRoot exists but catalog.json is missing', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-claim-rules-'));
   const repoPath = path.join(tempRoot, 'repo');
   const rulesRoot = path.join(repoPath, '.gitnexus', 'rules');
   await fs.mkdir(path.join(rulesRoot, 'approved'), { recursive: true });
   try {
-    await assert.rejects(
-      () => loadRuleRegistry(repoPath),
-      (error: any) => {
-        assert.ok(error instanceof RuleRegistryLoadError);
-        assert.equal(error.code, 'rule_catalog_missing');
-        return true;
-      },
-    );
+    const loadError = await loadRuleRegistry(repoPath).catch(e => e);
+    expect(loadError).toBeInstanceOf(RuleRegistryLoadError);
+    expect(loadError.code).toBe('rule_catalog_missing');
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
-test('throws rule_file_missing when catalog entry points to missing yaml file', async () => {
+it('throws rule_file_missing when catalog entry points to missing yaml file', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-claim-rules-'));
   const repoPath = path.join(tempRoot, 'repo');
   const rulesRoot = path.join(repoPath, '.gitnexus', 'rules');
@@ -137,21 +127,16 @@ test('throws rule_file_missing when catalog entry points to missing yaml file', 
     'utf-8',
   );
   try {
-    await assert.rejects(
-      () => loadRuleRegistry(repoPath),
-      (error: any) => {
-        assert.ok(error instanceof RuleRegistryLoadError);
-        assert.equal(error.code, 'rule_file_missing');
-        assert.match(String(error.message || ''), /rule file not found/i);
-        return true;
-      },
-    );
+    const loadError = await loadRuleRegistry(repoPath).catch(e => e);
+    expect(loadError).toBeInstanceOf(RuleRegistryLoadError);
+    expect(loadError.code).toBe('rule_file_missing');
+    expect(String(loadError.message || '')).toMatch(/rule file not found/i);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
-test('parses scalar/list values with spaces, quotes, and escapes without truncation', async () => {
+it('parses scalar/list values with spaces, quotes, and escapes without truncation', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-claim-rules-'));
   const repoPath = path.join(tempRoot, 'repo');
   const rulesRoot = path.join(repoPath, '.gitnexus', 'rules');
@@ -195,20 +180,17 @@ test('parses scalar/list values with spaces, quotes, and escapes without truncat
   try {
     const registry = await loadRuleRegistry(repoPath);
     const rule = registry.activeRules[0];
-    assert.equal(rule.id, 'demo.scalar-parser.v1');
-    assert.deepEqual(rule.resource_types, ['asset ref', 'prefab ref']);
-    assert.deepEqual(rule.guarantees, ['guarantee with spaces']);
-    assert.deepEqual(rule.non_guarantees, ['double-quote "inside"', "single-quote 'inside'"]);
-    assert.equal(
-      rule.next_action,
-      'node gitnexus/dist/cli/index.js query --runtime-chain-verify on-demand "Reload NEON.Game.Graph.Nodes.Reloads"',
-    );
+    expect(rule.id).toBe('demo.scalar-parser.v1');
+    expect(rule.resource_types).toEqual(['asset ref', 'prefab ref']);
+    expect(rule.guarantees).toEqual(['guarantee with spaces']);
+    expect(rule.non_guarantees).toEqual(['double-quote "inside"', "single-quote 'inside'"]);
+    expect(rule.next_action).toBe('node gitnexus/dist/cli/index.js query --runtime-chain-verify on-demand "Reload NEON.Game.Graph.Nodes.Reloads"',);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
-test('rejects rule yaml when topology/closure/claims are missing', async () => {
+it('rejects rule yaml when topology/closure/claims are missing', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-claim-rules-'));
   const repoPath = path.join(tempRoot, 'repo');
   const rulesRoot = path.join(repoPath, '.gitnexus', 'rules');
@@ -247,16 +229,14 @@ test('rejects rule yaml when topology/closure/claims are missing', async () => {
   );
 
   try {
-    await assert.rejects(
-      () => loadRuleRegistry(repoPath),
-      /topology|closure|claims/i,
-    );
+    const loadError = await loadRuleRegistry(repoPath).catch(e => e);
+    expect(String(loadError.message || '')).toMatch(/topology|closure|claims/i);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
 
-test('loads v2 verification bundle from explicit compiled path without catalog fallback', async () => {
+it('loads v2 verification bundle from explicit compiled path without catalog fallback', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-runtime-claim-rules-'));
   const repoPath = path.join(tempRoot, 'repo');
   const compiledRoot = path.join(repoPath, '.gitnexus', 'rules', 'compiled');
@@ -300,9 +280,9 @@ test('loads v2 verification bundle from explicit compiled path without catalog f
 
   try {
     const registry = await loadRuleRegistry(repoPath);
-    assert.equal(registry.activeRules[0].id, 'demo.bundle.rule.v2');
-    assert.equal(registry.activeRules[0].version, '2.0.0');
-    assert.deepEqual(registry.activeRules[0].required_hops, ['resource', 'code_runtime']);
+    expect(registry.activeRules[0].id).toBe('demo.bundle.rule.v2');
+    expect(registry.activeRules[0].version).toBe('2.0.0');
+    expect(registry.activeRules[0].required_hops).toEqual(['resource', 'code_runtime']);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

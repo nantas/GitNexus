@@ -1,25 +1,25 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { buildAnalyzeArgs, parseAnalyzeSummary } from './analyze-runner.js';
 
-test('parseAnalyzeSummary extracts nodes/edges/time', () => {
+it('parseAnalyzeSummary extracts nodes/edges/time', () => {
   const sample = `
 Repository indexed successfully (42.3s)
 51,172 nodes | 108,578 edges | 2,545 clusters | 300 flows
 `;
   const parsed = parseAnalyzeSummary(sample);
-  assert.equal(parsed.totalSeconds, 42.3);
-  assert.equal(parsed.nodes, 51172);
-  assert.equal(parsed.edges, 108578);
+  expect(parsed.totalSeconds).toBe(42.3);
+  expect(parsed.nodes).toBe(51172);
+  expect(parsed.edges).toBe(108578);
 });
 
-test('buildAnalyzeArgs forwards alias and options', () => {
+it('buildAnalyzeArgs forwards alias and options', () => {
   const args = buildAnalyzeArgs('/repo/path', {
     extensions: '.cs,.ts',
     repoAlias: 'neonspark-v1-subset',
   });
 
-  assert.deepEqual(args, [
+  expect(args).toEqual([
     'dist/cli/index.js',
     'analyze',
     '--force',
@@ -31,10 +31,10 @@ test('buildAnalyzeArgs forwards alias and options', () => {
   ]);
 });
 
-test('buildAnalyzeArgs omits --extensions when not explicitly provided', () => {
+it('buildAnalyzeArgs omits --extensions when not explicitly provided', () => {
   const args = buildAnalyzeArgs('/repo/path', {
     repoAlias: 'neonspark-v1-subset',
   });
 
-  assert.equal(args.includes('--extensions'), false);
+  expect(args.includes('--extensions')).toBe(false);
 });

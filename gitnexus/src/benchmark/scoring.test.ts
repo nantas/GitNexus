@@ -1,14 +1,14 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { computePR, computeF1, evaluateGates } from './scoring.js';
 
-test('computePR returns precision and recall', () => {
+it('computePR returns precision and recall', () => {
   const pr = computePR(9, 10, 12);
-  assert.equal(pr.precision.toFixed(2), '0.90');
-  assert.equal(pr.recall.toFixed(2), '0.75');
+  expect(pr.precision.toFixed(2)).toBe('0.90');
+  expect(pr.recall.toFixed(2)).toBe('0.75');
 });
 
-test('evaluateGates fails when one hard threshold fails', () => {
+it('evaluateGates fails when one hard threshold fails', () => {
   const result = evaluateGates(
     {
       queryPrecision: 0.9,
@@ -24,6 +24,6 @@ test('evaluateGates fails when one hard threshold fails', () => {
       performance: { analyzeTimeRegressionMaxPct: 15 },
     },
   );
-  assert.equal(result.pass, false);
-  assert.ok(result.failures.includes('query.recall'));
+  expect(result.pass).toBe(false);
+  expect(result.failures.includes('query.recall')).toBeTruthy();
 });

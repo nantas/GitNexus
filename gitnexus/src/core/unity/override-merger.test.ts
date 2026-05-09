@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { mergeOverrideChain, type UnityObjectLayer } from './override-merger.js';
 
-test('mergeOverrideChain applies base -> variant -> nested -> scene order', () => {
+it('mergeOverrideChain applies base -> variant -> nested -> scene order', () => {
   const baseComponent: UnityObjectLayer = {
     sourceLayer: 'base',
     scalarFields: {
@@ -43,11 +43,11 @@ test('mergeOverrideChain applies base -> variant -> nested -> scene order', () =
 
   const merged = mergeOverrideChain(baseComponent, variantComponent, nestedComponent, sceneOverride);
 
-  assert.equal(merged.scalarFields.needPause.value, '1');
-  assert.equal(merged.scalarFields.needPause.sourceLayer, 'scene');
-  assert.equal(merged.scalarFields.title.value, 'Variant');
-  assert.equal(merged.scalarFields.title.sourceLayer, 'variant');
-  assert.equal(merged.scalarFields.subtitle.value, 'Nested');
-  assert.equal(merged.referenceFields.mainUIDocument.fileId, '11400000');
-  assert.equal(merged.referenceFields.mainUIDocument.sourceLayer, 'scene');
+  expect(merged.scalarFields.needPause.value).toBe('1');
+  expect(merged.scalarFields.needPause.sourceLayer).toBe('scene');
+  expect(merged.scalarFields.title.value).toBe('Variant');
+  expect(merged.scalarFields.title.sourceLayer).toBe('variant');
+  expect(merged.scalarFields.subtitle.value).toBe('Nested');
+  expect(merged.referenceFields.mainUIDocument.fileId).toBe('11400000');
+  expect(merged.referenceFields.mainUIDocument.sourceLayer).toBe('scene');
 });

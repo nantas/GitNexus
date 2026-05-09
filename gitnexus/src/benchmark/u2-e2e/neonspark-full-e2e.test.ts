@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { extractSingleCountFromCypherResult, runE2E } from './neonspark-full-e2e.js';
 
-test('runE2E stops on first gate failure and writes checkpoint', async () => {
+it('runE2E stops on first gate failure and writes checkpoint', async () => {
   const checkpoints: Array<{ reportDir: string; payload: any }> = [];
 
   const out = await runE2E({
@@ -24,22 +24,22 @@ test('runE2E stops on first gate failure and writes checkpoint', async () => {
     },
   });
 
-  assert.equal(out.status, 'failed');
-  assert.equal(out.failedGate, 'build');
-  assert.equal(checkpoints.length, 1);
-  assert.equal(checkpoints[0].reportDir, '/tmp/u2-e2e-unit');
-  assert.equal(checkpoints[0].payload.failedGate, 'build');
+  expect(out.status).toBe('failed');
+  expect(out.failedGate).toBe('build');
+  expect(checkpoints.length).toBe(1);
+  expect(checkpoints[0].reportDir).toBe('/tmp/u2-e2e-unit');
+  expect(checkpoints[0].payload.failedGate).toBe('build');
 });
 
-test('extractSingleCountFromCypherResult parses markdown-formatted cypher output', () => {
+it('extractSingleCountFromCypherResult parses markdown-formatted cypher output', () => {
   const count = extractSingleCountFromCypherResult({
     markdown: '| serializedTypeEdgeCount |\n| --- |\n| 3791 |',
     row_count: 1,
   });
-  assert.equal(count, 3791);
+  expect(count).toBe(3791);
 });
 
-test('extractSingleCountFromCypherResult parses raw row output', () => {
+it('extractSingleCountFromCypherResult parses raw row output', () => {
   const count = extractSingleCountFromCypherResult([{ serializedTypeEdgeCount: 42 }]);
-  assert.equal(count, 42);
+  expect(count).toBe(42);
 });

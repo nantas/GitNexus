@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const gitnexusRoot = path.resolve(here, '../../..');
 const repoRoot = path.resolve(gitnexusRoot, '..');
 
-test('scan-context carrier contract matches code and docs', async () => {
+it('scan-context carrier contract matches code and docs', async () => {
   const bindingDoc = await fs.readFile(path.join(repoRoot, 'UNITY_RESOURCE_BINDING.md'), 'utf-8');
   const ssot = await fs.readFile(
     path.join(repoRoot, 'docs/unity-runtime-process-source-of-truth.md'),
@@ -38,24 +38,22 @@ test('scan-context carrier contract matches code and docs', async () => {
     'utf-8',
   );
 
-  assert.match(bindingDoc, /scan-context.*承载器|resource signal carrier|scan-context.*carrier/i);
-  assert.match(bindingDoc, /streaming delivery|incremental consumption/i);
-  assert.match(ssot, /As-Built[\s\S]*Design Direction/i);
-  assert.match(ssot, /scan-context[\s\S]*does not write graph/i);
-  assert.match(ssot, /统一消费点契约/i);
-  assert.match(design, /scan-context[\s\S]*(统一消费|unified consumer)/i);
-  assert.match(scanContextCode, /streamPrefabSourceRefs/);
-  assert.match(processorCode, /streamPrefabSourceRefs\(/);
-  assert.match(processorCode, /emitPrefabSourceGuidRefsFromScanContext/);
-  assert.doesNotMatch(processorCode, /emitPrefabSourceGuidRefs\(/);
-  assert.doesNotMatch(scanContextCode, /addRelationship\(/);
+  expect(bindingDoc).toMatch(/scan-context.*承载器|resource signal carrier|scan-context.*carrier/i);
+  expect(bindingDoc).toMatch(/streaming delivery|incremental consumption/i);
+  expect(ssot).toMatch(/As-Built[\s\S]*Design Direction/i);
+  expect(ssot).toMatch(/scan-context[\s\S]*does not write graph/i);
+  expect(ssot).toMatch(/统一消费点契约/i);
+  expect(design).toMatch(/scan-context[\s\S]*(统一消费|unified consumer)/i);
+  expect(scanContextCode).toMatch(/streamPrefabSourceRefs/);
+  expect(processorCode).toMatch(/streamPrefabSourceRefs\(/);
+  expect(processorCode).toMatch(/emitPrefabSourceGuidRefsFromScanContext/);
+  expect(processorCode).not.toMatch(/emitPrefabSourceGuidRefs\(/);
+  expect(scanContextCode).not.toMatch(/addRelationship\(/);
   // processUnityResources is called inside unityScanPhase (which runs before processesPhase).
   // applyUnityLifecycleSyntheticCalls is called inside processesPhase.
-  assert.ok(unityScanPhaseCode.indexOf('processUnityResources(') >= 0);
-  assert.ok(
-    pipelineCode.indexOf('phases.push(unityScanPhase)') >= 0 &&
+  expect(unityScanPhaseCode.indexOf('processUnityResources(') >= 0).toBeTruthy();
+  expect(pipelineCode.indexOf('phases.push(unityScanPhase)') >= 0 &&
       pipelineCode.indexOf('phases.push(processesPhase)') >= 0 &&
       pipelineCode.indexOf('phases.push(unityScanPhase)') <
-        pipelineCode.indexOf('phases.push(processesPhase)'),
-  );
+        pipelineCode.indexOf('phases.push(processesPhase)')).toBeTruthy();
 });

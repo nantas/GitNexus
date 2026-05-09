@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { runAgentSafeQueryContextBenchmark } from './report.js';
 import type { AgentSafeBenchmarkSuite } from './types.js';
 
@@ -56,7 +56,7 @@ const fakeSuite: AgentSafeBenchmarkSuite = {
   },
 };
 
-test('benchmark report includes explicit benchmark tracks', async () => {
+it('benchmark report includes explicit benchmark tracks', async () => {
   const report = await runAgentSafeQueryContextBenchmark(fakeSuite, {
     repo: 'neonspark-core',
     subagentRunsDir: '/tmp/subagent-runs',
@@ -127,27 +127,25 @@ test('benchmark report includes explicit benchmark tracks', async () => {
     }),
   });
 
-  assert.equal(report.cases.weapon_powerup.semantic_tuple_pass, true);
-  assert.ok(report.same_script.tool_plan.weapon_powerup);
-  assert.ok(report.subagent_live.reload.steps);
-  assert.ok(report.token_summary.weapon_powerup);
-  assert.ok(report.call_summary.reload);
-  assert.ok(report.workflow_replay_full.weapon_powerup);
-  assert.ok(report.workflow_replay_slim.weapon_powerup);
-  assert.ok(report.same_script_full.reload);
-  assert.ok(report.same_script_slim.reload);
-  assert.ok(report.subagent_live.weapon_powerup);
-  assert.equal(report.workflow_replay_slim.weapon_powerup.semantic_tuple_pass, true);
-  assert.equal(typeof report.workflow_replay_slim.weapon_powerup.anchor_top1_pass, 'boolean');
-  assert.equal(typeof report.workflow_replay_slim.weapon_powerup.recommended_follow_up_hit, 'boolean');
-  assert.equal(typeof report.workflow_replay_slim.weapon_powerup.post_narrowing_anchor_pass, 'boolean');
-  assert.equal(typeof report.workflow_replay_slim.weapon_powerup.post_narrowing_follow_up_hit, 'boolean');
-  assert.equal(typeof report.workflow_replay_slim.weapon_powerup.ambiguity_detour_count, 'number');
-  assert.equal(report.workflow_replay_slim.reload.guid_invariance_pass, true);
-  assert.equal(report.workflow_replay_slim.weapon_powerup.live_tool_evidence_pass, true);
-  assert.equal(
-    report.acceptance.pass,
-    report.workflow_replay_slim.weapon_powerup.semantic_tuple_pass
+  expect(report.cases.weapon_powerup.semantic_tuple_pass).toBe(true);
+  expect(report.same_script.tool_plan.weapon_powerup).toBeTruthy();
+  expect(report.subagent_live.reload.steps).toBeTruthy();
+  expect(report.token_summary.weapon_powerup).toBeTruthy();
+  expect(report.call_summary.reload).toBeTruthy();
+  expect(report.workflow_replay_full.weapon_powerup).toBeTruthy();
+  expect(report.workflow_replay_slim.weapon_powerup).toBeTruthy();
+  expect(report.same_script_full.reload).toBeTruthy();
+  expect(report.same_script_slim.reload).toBeTruthy();
+  expect(report.subagent_live.weapon_powerup).toBeTruthy();
+  expect(report.workflow_replay_slim.weapon_powerup.semantic_tuple_pass).toBe(true);
+  expect(typeof report.workflow_replay_slim.weapon_powerup.anchor_top1_pass).toBe('boolean');
+  expect(typeof report.workflow_replay_slim.weapon_powerup.recommended_follow_up_hit).toBe('boolean');
+  expect(typeof report.workflow_replay_slim.weapon_powerup.post_narrowing_anchor_pass).toBe('boolean');
+  expect(typeof report.workflow_replay_slim.weapon_powerup.post_narrowing_follow_up_hit).toBe('boolean');
+  expect(typeof report.workflow_replay_slim.weapon_powerup.ambiguity_detour_count).toBe('number');
+  expect(report.workflow_replay_slim.reload.guid_invariance_pass).toBe(true);
+  expect(report.workflow_replay_slim.weapon_powerup.live_tool_evidence_pass).toBe(true);
+  expect(report.acceptance.pass).toBe(report.workflow_replay_slim.weapon_powerup.semantic_tuple_pass
       && report.workflow_replay_slim.weapon_powerup.post_narrowing_anchor_pass
       && report.workflow_replay_slim.weapon_powerup.post_narrowing_follow_up_hit
       && report.workflow_replay_slim.weapon_powerup.guid_invariance_pass
@@ -170,12 +168,11 @@ test('benchmark report includes explicit benchmark tracks', async () => {
       && report.workflow_replay_slim.reload.tier_envelope.clues_present
       && report.workflow_replay_slim.reload.tier_envelope.semantic_order_pass
       && !report.workflow_replay_slim.reload.placeholder_leak_detected
-      && !report.workflow_replay_slim.reload.heuristic_top_summary_detected,
-  );
-  assert.equal(report.pass, report.acceptance.pass);
+      && !report.workflow_replay_slim.reload.heuristic_top_summary_detected,);
+  expect(report.pass).toBe(report.acceptance.pass);
 });
 
-test('benchmark report enforces track split, acceptance source, prompt secrecy, and live scoring taxonomy', async () => {
+it('benchmark report enforces track split, acceptance source, prompt secrecy, and live scoring taxonomy', async () => {
   const report = await runAgentSafeQueryContextBenchmark(fakeSuite, {
     repo: 'neonspark-core',
     subagentRunsDir: '/tmp/subagent-runs',
@@ -246,13 +243,13 @@ test('benchmark report enforces track split, acceptance source, prompt secrecy, 
     }),
   });
 
-  assert.equal(Object.keys(report.workflow_replay_full).length > 0, true);
-  assert.equal(Object.keys(report.workflow_replay_slim).length > 0, true);
-  assert.equal(Object.keys(report.same_script_full).length > 0, true);
-  assert.equal(Object.keys(report.same_script_slim).length > 0, true);
-  assert.equal(Object.keys(report.subagent_live).length > 0, true);
+  expect(Object.keys(report.workflow_replay_full).length > 0).toBe(true);
+  expect(Object.keys(report.workflow_replay_slim).length > 0).toBe(true);
+  expect(Object.keys(report.same_script_full).length > 0).toBe(true);
+  expect(Object.keys(report.same_script_slim).length > 0).toBe(true);
+  expect(Object.keys(report.subagent_live).length > 0).toBe(true);
 
-  assert.deepEqual(report.acceptance.cases, {
+  expect(report.acceptance.cases).toEqual({
     weapon_powerup:
       report.workflow_replay_slim.weapon_powerup.semantic_tuple_pass
       && report.workflow_replay_slim.weapon_powerup.post_narrowing_anchor_pass
@@ -281,19 +278,19 @@ test('benchmark report enforces track split, acceptance source, prompt secrecy, 
       && !report.workflow_replay_slim.reload.heuristic_top_summary_detected,
   });
 
-  assert.equal(report.subagent_live.weapon_powerup.prompt.includes('HoldPickup -> WeaponPowerUp.PickItUp'), false);
-  assert.equal(report.subagent_live.reload.prompt.includes('ReloadBase.GetValue -> ReloadBase.CheckReload'), false);
+  expect(report.subagent_live.weapon_powerup.prompt.includes('HoldPickup -> WeaponPowerUp.PickItUp')).toBe(false);
+  expect(report.subagent_live.reload.prompt.includes('ReloadBase.GetValue -> ReloadBase.CheckReload')).toBe(false);
 
   for (const row of Object.values(report.subagent_live)) {
-    assert.equal(typeof row.normalized_tuple_pass, 'boolean');
-    assert.equal(typeof row.evidence_validation_pass, 'boolean');
+    expect(typeof row.normalized_tuple_pass).toBe('boolean');
+    expect(typeof row.evidence_validation_pass).toBe('boolean');
     if (!row.semantic_tuple_pass) {
-      assert.ok(row.failure_class);
+      expect(row.failure_class).toBeTruthy();
     }
   }
 });
 
-test('acceptance fails when semantic tuple passes but placeholder leakage is detected', async () => {
+it('acceptance fails when semantic tuple passes but placeholder leakage is detected', async () => {
   const report = await runAgentSafeQueryContextBenchmark(fakeSuite, {
     repo: 'neonspark-core',
     subagentRunsDir: '/tmp/subagent-runs',
@@ -374,8 +371,8 @@ test('acceptance fails when semantic tuple passes but placeholder leakage is det
     }),
   });
 
-  assert.equal(report.workflow_replay_slim.weapon_powerup.semantic_tuple_pass, true);
-  assert.equal(report.workflow_replay_slim.weapon_powerup.placeholder_leak_detected, true);
-  assert.equal(report.acceptance.cases.weapon_powerup, false);
-  assert.equal(report.acceptance.pass, false);
+  expect(report.workflow_replay_slim.weapon_powerup.semantic_tuple_pass).toBe(true);
+  expect(report.workflow_replay_slim.weapon_powerup.placeholder_leak_detected).toBe(true);
+  expect(report.acceptance.cases.weapon_powerup).toBe(false);
+  expect(report.acceptance.pass).toBe(false);
 });

@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { validateLiveEvidenceRows } from './live-evidence-validator.js';
 
-test('validateLiveEvidenceRows fails when required authenticity fields are missing', () => {
+it('validateLiveEvidenceRows fails when required authenticity fields are missing', () => {
   const result = validateLiveEvidenceRows([
     {
       timestamp: '2026-04-01T10:00:00.000Z',
@@ -15,11 +15,11 @@ test('validateLiveEvidenceRows fails when required authenticity fields are missi
     } as any,
   ]);
 
-  assert.equal(result.valid, false);
-  assert.ok(result.errors.some((row) => /hop_anchor/i.test(row)));
+  expect(result.valid).toBe(false);
+  expect(result.errors.some((row) => /hop_anchor/i.test(row))).toBeTruthy();
 });
 
-test('validateLiveEvidenceRows passes when authenticity schema is complete', () => {
+it('validateLiveEvidenceRows passes when authenticity schema is complete', () => {
   const result = validateLiveEvidenceRows([
     {
       timestamp: '2026-04-01T10:00:00.000Z',
@@ -32,6 +32,6 @@ test('validateLiveEvidenceRows passes when authenticity schema is complete', () 
     },
   ]);
 
-  assert.equal(result.valid, true);
-  assert.equal(result.errors.length, 0);
+  expect(result.valid).toBe(true);
+  expect(result.errors.length).toBe(0);
 });

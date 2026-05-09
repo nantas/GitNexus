@@ -1,13 +1,10 @@
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { containsPlaceholderLeak, runSymbolScenario, summarizePhase5ConfidenceCalibration } from './retrieval-runner.js';
 import { loadE2EConfig } from './config.js';
 
-const { test: rawTest } = process.env.VITEST
-  ? await import('vitest')
-  : await import('node:test');
-const test: any = rawTest;
 
-test('runSymbolScenario executes context off/on + deepDive and records metrics', async () => {
+it('runSymbolScenario executes context off/on + deepDive and records metrics', async () => {
   const mockToolRunner = {
     context: async (input: any) => {
       if (input.unity_resources === 'on') {
@@ -42,13 +39,13 @@ test('runSymbolScenario executes context off/on + deepDive and records metrics',
     deepDivePlan: [{ tool: 'query', input: { query: 'MainUIManager' } }],
   });
 
-  assert.equal(out.steps.length, 3);
-  assert.ok(out.steps.every((s) => s.durationMs >= 0));
-  assert.ok(out.steps.every((s) => s.totalTokensEst >= 0));
-  assert.equal(out.assertions.pass, true);
+  expect(out.steps.length).toBe(3);
+  expect(out.steps.every((s) => s.durationMs >= 0)).toBeTruthy();
+  expect(out.steps.every((s) => s.totalTokensEst >= 0)).toBeTruthy();
+  expect(out.assertions.pass).toBe(true);
 });
 
-test('runSymbolScenario injects response_profile=full for legacy context/query steps', async () => {
+it('runSymbolScenario injects response_profile=full for legacy context/query steps', async () => {
   const seen: Array<{ tool: string; input: Record<string, unknown> }> = [];
   const runner = {
     context: async (input: Record<string, unknown>) => {
@@ -93,11 +90,11 @@ test('runSymbolScenario injects response_profile=full for legacy context/query s
 
   const contextCalls = seen.filter((entry) => entry.tool === 'context');
   const queryCalls = seen.filter((entry) => entry.tool === 'query');
-  assert.equal(contextCalls.every((entry) => entry.input.response_profile === 'full'), true);
-  assert.equal(queryCalls.every((entry) => entry.input.response_profile === 'full'), true);
+  expect(contextCalls.every((entry) => entry.input.response_profile === 'full')).toBe(true);
+  expect(queryCalls.every((entry) => entry.input.response_profile === 'full')).toBe(true);
 });
 
-test('AssetRef requires context(on) resourceBindings after serializable-class coverage', async () => {
+it('AssetRef requires context(on) resourceBindings after serializable-class coverage', async () => {
   const noEvidenceRunner = {
     context: async () => ({
       status: 'found',
@@ -116,11 +113,11 @@ test('AssetRef requires context(on) resourceBindings after serializable-class co
     deepDivePlan: [{ tool: 'query', input: { query: 'AssetRef usage' } }],
   });
 
-  assert.equal(out.assertions.pass, false);
-  assert.ok(out.assertions.failures.some((f) => f.includes('context(on) must include resourceBindings')));
+  expect(out.assertions.pass).toBe(false);
+  expect(out.assertions.failures.some((f) => f.includes('context(on) must include resourceBindings'))).toBeTruthy();
 });
 
-test('AssetRef requires deep-dive evidence even when context(on) has resourceBindings', async () => {
+it('AssetRef requires deep-dive evidence even when context(on) has resourceBindings', async () => {
   const noDeepDiveEvidenceRunner = {
     context: async () => ({
       status: 'found',
@@ -139,11 +136,11 @@ test('AssetRef requires deep-dive evidence even when context(on) has resourceBin
     deepDivePlan: [{ tool: 'query', input: { query: 'AssetRef usage' } }],
   });
 
-  assert.equal(out.assertions.pass, false);
-  assert.ok(out.assertions.failures.some((f) => f.includes('deep-dive must provide usage/dependency evidence')));
+  expect(out.assertions.pass).toBe(false);
+  expect(out.assertions.failures.some((f) => f.includes('deep-dive must provide usage/dependency evidence'))).toBeTruthy();
 });
 
-test('AssetRef passes when context(on) bindings and deep-dive evidence are both present', async () => {
+it('AssetRef passes when context(on) bindings and deep-dive evidence are both present', async () => {
   const satisfiedRunner = {
     context: async () => ({
       status: 'found',
@@ -162,19 +159,19 @@ test('AssetRef passes when context(on) bindings and deep-dive evidence are both 
     deepDivePlan: [{ tool: 'query', input: { query: 'AssetRef usage' } }],
   });
 
-  assert.equal(out.assertions.pass, true);
-  assert.equal(out.assertions.failures.length, 0);
+  expect(out.assertions.pass).toBe(true);
+  expect(out.assertions.failures.length).toBe(0);
 });
 
-test('PlayerActor scenario uses context file hint and valid context deep-dive input', async () => {
+it('PlayerActor scenario uses context file hint and valid context deep-dive input', async () => {
   const config = await loadE2EConfig('benchmarks/u2-e2e/neonspark-full-u2-e2e.config.json');
   const player = config.symbolScenarios.find((s) => s.symbol === 'PlayerActor');
-  assert.equal(player?.contextFileHint, 'Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.cs');
-  assert.equal(player?.deepDivePlan[0]?.tool, 'context');
-  assert.equal(player?.deepDivePlan[0]?.input?.name, 'PlayerActor');
+  expect(player?.contextFileHint).toBe('Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.cs');
+  expect(player?.deepDivePlan[0]?.tool).toBe('context');
+  expect(player?.deepDivePlan[0]?.input?.name).toBe('PlayerActor');
 });
 
-test('runSymbolScenario retries context with file hint when response is ambiguous', async () => {
+it('runSymbolScenario retries context with file hint when response is ambiguous', async () => {
   const hint = 'Assets/NEON/Code/Game/Actors/PlayerActor/PlayerActor.cs';
   const contextCalls: Record<string, unknown>[] = [];
   const runner = {
@@ -225,13 +222,13 @@ test('runSymbolScenario retries context with file hint when response is ambiguou
     deepDivePlan: [{ tool: 'query', input: { query: 'PlayerActor resource binding' } }],
   });
 
-  assert.equal(contextCalls.length, 3);
-  assert.equal(contextCalls[2]?.file_path, hint);
-  assert.equal(out.steps[1]?.output?.status, 'found');
-  assert.equal(out.assertions.pass, true);
+  expect(contextCalls.length).toBe(3);
+  expect(contextCalls[2]?.file_path).toBe(hint);
+  expect(out.steps[1]?.output?.status).toBe('found');
+  expect(out.assertions.pass).toBe(true);
 });
 
-test('runSymbolScenario fails when compact context hydrationMeta.needsParityRetry is missing', async () => {
+it('runSymbolScenario fails when compact context hydrationMeta.needsParityRetry is missing', async () => {
   const runner = {
     context: async (input: Record<string, unknown>) => {
       if (input.unity_resources === 'on') {
@@ -255,11 +252,11 @@ test('runSymbolScenario fails when compact context hydrationMeta.needsParityRetr
     deepDivePlan: [{ tool: 'query', input: { query: 'MainUIManager' } }],
   });
 
-  assert.equal(out.assertions.pass, false);
-  assert.ok(out.assertions.failures.some((f) => f.includes('hydrationMeta.needsParityRetry')));
+  expect(out.assertions.pass).toBe(false);
+  expect(out.assertions.failures.some((f) => f.includes('hydrationMeta.needsParityRetry'))).toBeTruthy();
 });
 
-test('runSymbolScenario fails when query(on) has no unity serialized/resource evidence', async () => {
+it('runSymbolScenario fails when query(on) has no unity serialized/resource evidence', async () => {
   const runner = {
     context: async (input: Record<string, unknown>) => {
       if (input.unity_resources === 'on') {
@@ -289,13 +286,11 @@ test('runSymbolScenario fails when query(on) has no unity serialized/resource ev
     deepDivePlan: [{ tool: 'query', input: { query: 'MainUIManager', unity_resources: 'on' } }],
   });
 
-  assert.equal(out.assertions.pass, false);
-  assert.ok(
-    out.assertions.failures.some((f) => f.includes('query(on) must include unity serialized/resource evidence')),
-  );
+  expect(out.assertions.pass).toBe(false);
+  expect(out.assertions.failures.some((f) => f.includes('query(on) must include unity serialized/resource evidence'))).toBeTruthy();
 });
 
-test('phase5 confidence calibration fails when low confidence process is missing verification_hint', async () => {
+it('phase5 confidence calibration fails when low confidence process is missing verification_hint', async () => {
   const runner = {
     context: async (input: Record<string, unknown>) => {
       if (input.unity_resources === 'on') {
@@ -327,11 +322,11 @@ test('phase5 confidence calibration fails when low confidence process is missing
     deepDivePlan: [{ tool: 'query', input: { query: 'MainUIManager', unity_resources: 'on' } }],
   });
 
-  assert.equal(out.assertions.pass, false);
-  assert.ok(out.assertions.failures.some((f) => /verification_hint/i.test(f)));
+  expect(out.assertions.pass).toBe(false);
+  expect(out.assertions.failures.some((f) => /verification_hint/i.test(f))).toBeTruthy();
 });
 
-test('phase5 confidence calibration fails when empty process result with unity evidence has no fallback clue', async () => {
+it('phase5 confidence calibration fails when empty process result with unity evidence has no fallback clue', async () => {
   const runner = {
     context: async (input: Record<string, unknown>) => {
       if (input.unity_resources === 'on') {
@@ -363,11 +358,11 @@ test('phase5 confidence calibration fails when empty process result with unity e
     deepDivePlan: [{ tool: 'query', input: { query: 'MainUIManager', unity_resources: 'on' } }],
   });
 
-  assert.equal(out.assertions.pass, false);
-  assert.ok(out.assertions.failures.some((f) => /fallback|empty process/i.test(f)));
+  expect(out.assertions.pass).toBe(false);
+  expect(out.assertions.failures.some((f) => /fallback|empty process/i.test(f))).toBeTruthy();
 });
 
-test('phase5 confidence calibration fails when direct static chain is not high confidence', async () => {
+it('phase5 confidence calibration fails when direct static chain is not high confidence', async () => {
   const runner = {
     context: async (input: Record<string, unknown>) => {
       if (input.unity_resources === 'on') {
@@ -404,12 +399,12 @@ test('phase5 confidence calibration fails when direct static chain is not high c
     deepDivePlan: [{ tool: 'query', input: { query: 'MainUIManager', unity_resources: 'on' } }],
   });
 
-  assert.equal(out.assertions.pass, false);
-  assert.ok(out.assertions.failures.some((f) => /direct.*static.*high/i.test(f)));
+  expect(out.assertions.pass).toBe(false);
+  expect(out.assertions.failures.some((f) => /direct.*static.*high/i.test(f))).toBeTruthy();
 });
 
-test('phase5 confidence calibration summary requires baseline provenance fields', async () => {
-  assert.throws(() => summarizePhase5ConfidenceCalibration({
+it('phase5 confidence calibration summary requires baseline provenance fields', async () => {
+  expect(() => summarizePhase5ConfidenceCalibration({
     current: {
       totalEvaluated: 4,
       falseNegativeCount: 1,
@@ -423,10 +418,10 @@ test('phase5 confidence calibration summary requires baseline provenance fields'
       falseNegativeCount: 2,
       falseConfidenceCount: 2,
     } as any,
-  }), /baseline provenance/i);
+  })).toThrow(/baseline provenance/i);
 });
 
-test('phase5 confidence calibration detects placeholder leakage in next_command', async () => {
-  assert.equal(containsPlaceholderLeak('Inspect <symbol-or-query> later'), true);
-  assert.equal(containsPlaceholderLeak('gitnexus query --unity-resources on'), false);
+it('phase5 confidence calibration detects placeholder leakage in next_command', async () => {
+  expect(containsPlaceholderLeak('Inspect <symbol-or-query> later')).toBe(true);
+  expect(containsPlaceholderLeak('gitnexus query --unity-resources on')).toBe(false);
 });

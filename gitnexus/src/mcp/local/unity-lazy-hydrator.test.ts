@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { hydrateLazyBindings } from './unity-lazy-hydrator.js';
 
-test('hydrateLazyBindings processes pending paths in bounded chunks', async () => {
+it('hydrateLazyBindings processes pending paths in bounded chunks', async () => {
   const calls: string[][] = [];
   await hydrateLazyBindings({
     pendingPaths: ['a', 'b', 'c', 'd', 'e'],
@@ -13,10 +13,10 @@ test('hydrateLazyBindings processes pending paths in bounded chunks', async () =
     },
   });
 
-  assert.deepEqual(calls, [['a', 'b'], ['c', 'd']]);
+  expect(calls).toEqual([['a', 'b'], ['c', 'd']]);
 });
 
-test('parallel requests dedupe same hydration work', async () => {
+it('parallel requests dedupe same hydration work', async () => {
   let resolveCalls = 0;
   const sharedInput = {
     pendingPaths: ['Assets/A.prefab'],
@@ -34,10 +34,10 @@ test('parallel requests dedupe same hydration work', async () => {
     hydrateLazyBindings(sharedInput),
   ]);
 
-  assert.equal(resolveCalls, 1);
+  expect(resolveCalls).toBe(1);
 });
 
-test('context lazy hydration returns partial results when budget exceeded and reports diagnostics', async () => {
+it('context lazy hydration returns partial results when budget exceeded and reports diagnostics', async () => {
   const out = await hydrateLazyBindings({
     pendingPaths: ['a', 'b', 'c', 'd'],
     config: { lazyMaxPaths: 4, lazyBatchSize: 2, lazyMaxMs: 1 },
@@ -47,11 +47,11 @@ test('context lazy hydration returns partial results when budget exceeded and re
     },
   });
 
-  assert.equal(out.resolvedByPath.size, 2);
-  assert.match(((out as any).diagnostics || []).join('\n'), /budget exceeded/i);
+  expect(out.resolvedByPath.size).toBe(2);
+  expect(((out as any).diagnostics || []).join('\n')).toMatch(/budget exceeded/i);
 });
 
-test('summary-only Unity analyze persistence still returns full bindings after lazy hydration', async () => {
+it('summary-only Unity analyze persistence still returns full bindings after lazy hydration', async () => {
   const out = await hydrateLazyBindings({
     pendingPaths: ['Assets/Doors/Door.prefab'],
     config: { lazyMaxPaths: 10, lazyBatchSize: 5, lazyMaxMs: 5000 },
@@ -70,8 +70,5 @@ test('summary-only Unity analyze persistence still returns full bindings after l
       } as any]],
     ]),
   });
-  assert.equal(
-    out.resolvedByPath.get('Assets/Doors/Door.prefab')?.[0]?.serializedFields.scalarFields[0]?.name,
-    'Shows',
-  );
+  expect(out.resolvedByPath.get('Assets/Doors/Door.prefab')?.[0]?.serializedFields.scalarFields[0]?.name).toBe('Shows',);
 });

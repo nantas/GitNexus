@@ -1,9 +1,9 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { scoreLiveTuple, semanticTuplePass } from './semantic-tuple.js';
 import type { SemanticTuple } from './types.js';
 
-test('semanticTuplePass returns true for identical tuples', () => {
+it('semanticTuplePass returns true for identical tuples', () => {
   const tuple: SemanticTuple = {
     resource_anchor: 'Assets/NEON/DataAssets/Powerups/1_newWeapon/0_pick/法器_Orb/1_weapon_orb_key.asset',
     symbol_anchor: 'WeaponPowerUp',
@@ -14,10 +14,10 @@ test('semanticTuplePass returns true for identical tuples', () => {
     closure_status: 'not_verified_full',
   };
 
-  assert.equal(semanticTuplePass(tuple, tuple), true);
+  expect(semanticTuplePass(tuple, tuple)).toBe(true);
 });
 
-test('semanticTuplePass returns false when any tuple field differs', () => {
+it('semanticTuplePass returns false when any tuple field differs', () => {
   const left: SemanticTuple = {
     resource_anchor: 'Assets/NEON/Graphs/PlayerGun/Gungraph_use/1_weapon_orb_key.asset',
     symbol_anchor: 'ReloadBase',
@@ -29,10 +29,10 @@ test('semanticTuplePass returns false when any tuple field differs', () => {
     proof_edge: 'ReloadBase.GetValue -> ReloadBase.ReloadRoutine',
   };
 
-  assert.equal(semanticTuplePass(left, right), false);
+  expect(semanticTuplePass(left, right)).toBe(false);
 });
 
-test('scoreLiveTuple normalizes fully-qualified symbol identity to canonical anchor', () => {
+it('scoreLiveTuple normalizes fully-qualified symbol identity to canonical anchor', () => {
   const expected: SemanticTuple = {
     resource_anchor: 'Assets/NEON/Graphs/PlayerGun/Gungraph_use/1_weapon_orb_key.asset',
     symbol_anchor: 'ReloadBase',
@@ -55,12 +55,12 @@ test('scoreLiveTuple normalizes fully-qualified symbol identity to canonical anc
     ],
   );
 
-  assert.equal(score.normalized_tuple.symbol_anchor, 'ReloadBase');
-  assert.equal(score.normalized_tuple_pass, true);
-  assert.equal(score.evidence_validation_pass, true);
+  expect(score.normalized_tuple.symbol_anchor).toBe('ReloadBase');
+  expect(score.normalized_tuple_pass).toBe(true);
+  expect(score.evidence_validation_pass).toBe(true);
 });
 
-test('scoreLiveTuple normalizes caller/callee objects to canonical proof edges', () => {
+it('scoreLiveTuple normalizes caller/callee objects to canonical proof edges', () => {
   const expected: SemanticTuple = {
     resource_anchor: 'Assets/NEON/DataAssets/Powerups/1_newWeapon/0_pick/法器_Orb/1_weapon_orb_key.asset',
     symbol_anchor: 'WeaponPowerUp',
@@ -90,11 +90,11 @@ test('scoreLiveTuple normalizes caller/callee objects to canonical proof edges',
     ],
   );
 
-  assert.equal(score.normalized_tuple_pass, true);
-  assert.equal(score.evidence_validation_pass, true);
+  expect(score.normalized_tuple_pass).toBe(true);
+  expect(score.evidence_validation_pass).toBe(true);
 });
 
-test('scoreLiveTuple classifies evidence_missing when normalized tuple passes without telemetry evidence', () => {
+it('scoreLiveTuple classifies evidence_missing when normalized tuple passes without telemetry evidence', () => {
   const expected: SemanticTuple = {
     resource_anchor: 'Assets/NEON/Graphs/PlayerGun/Gungraph_use/1_weapon_orb_key.asset',
     symbol_anchor: 'ReloadBase',
@@ -113,12 +113,12 @@ test('scoreLiveTuple classifies evidence_missing when normalized tuple passes wi
     [{ output: 'no reload edge evidence here' }],
   );
 
-  assert.equal(score.normalized_tuple_pass, true);
-  assert.equal(score.evidence_validation_pass, false);
-  assert.equal(score.failure_class, 'evidence_missing');
+  expect(score.normalized_tuple_pass).toBe(true);
+  expect(score.evidence_validation_pass).toBe(false);
+  expect(score.failure_class).toBe('evidence_missing');
 });
 
-test('scoreLiveTuple emits semantic_drift, expression_mismatch, and over_investigated failure classes', () => {
+it('scoreLiveTuple emits semantic_drift, expression_mismatch, and over_investigated failure classes', () => {
   const expected: SemanticTuple = {
     resource_anchor: 'Assets/NEON/DataAssets/Powerups/1_newWeapon/0_pick/法器_Orb/1_weapon_orb_key.asset',
     symbol_anchor: 'WeaponPowerUp',
@@ -138,7 +138,7 @@ test('scoreLiveTuple emits semantic_drift, expression_mismatch, and over_investi
     },
     [],
   );
-  assert.equal(semanticDrift.failure_class, 'semantic_drift');
+  expect(semanticDrift.failure_class).toBe('semantic_drift');
 
   const expressionMismatch = scoreLiveTuple(
     expected,
@@ -149,7 +149,7 @@ test('scoreLiveTuple emits semantic_drift, expression_mismatch, and over_investi
     },
     [],
   );
-  assert.equal(expressionMismatch.failure_class, 'expression_mismatch');
+  expect(expressionMismatch.failure_class).toBe('expression_mismatch');
 
   const overInvestigated = scoreLiveTuple(
     expected,
@@ -161,5 +161,5 @@ test('scoreLiveTuple emits semantic_drift, expression_mismatch, and over_investi
     [],
     { toolCalls: 8, overInvestigatedThreshold: 6 },
   );
-  assert.equal(overInvestigated.failure_class, 'over_investigated');
+  expect(overInvestigated.failure_class).toBe('over_investigated');
 });

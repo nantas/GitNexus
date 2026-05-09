@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { runUnityLazyContextSampler } from './unity-lazy-context-sampler.js';
 
-test('sampler emits cold/warm latency and rss metrics with threshold verdict', async () => {
+it('sampler emits cold/warm latency and rss metrics with threshold verdict', async () => {
   const fakeRunner = async ({ warm }: { warm: boolean }) => ({
     durationMs: warm ? 420 : 6200,
     maxRssBytes: warm ? 650 * 1024 * 1024 : 1700 * 1024 * 1024,
@@ -27,13 +27,13 @@ test('sampler emits cold/warm latency and rss metrics with threshold verdict', a
     },
   });
 
-  assert.ok(report.metrics.coldMs > 0);
-  assert.equal(typeof report.hydrationMetaSummary.compactNeedsRetryRate, 'number');
-  assert.equal(typeof report.hydrationMetaSummary.parityCompleteRate, 'number');
-  assert.equal(typeof report.sizeLatency.summarySizeReductionPct, 'number');
-  assert.equal(typeof report.sizeLatency.queryContextP95DeltaPct, 'number');
-  assert.equal(report.sizeLatency.summarySizeReductionPct >= 60, true);
-  assert.equal(report.sizeLatency.queryContextP95DeltaPct <= 15, true);
-  assert.ok(typeof report.thresholdVerdict.pass === 'boolean');
-  assert.equal(report.thresholdVerdict.pass, true);
+  expect(report.metrics.coldMs > 0).toBeTruthy();
+  expect(typeof report.hydrationMetaSummary.compactNeedsRetryRate).toBe('number');
+  expect(typeof report.hydrationMetaSummary.parityCompleteRate).toBe('number');
+  expect(typeof report.sizeLatency.summarySizeReductionPct).toBe('number');
+  expect(typeof report.sizeLatency.queryContextP95DeltaPct).toBe('number');
+  expect(report.sizeLatency.summarySizeReductionPct >= 60).toBe(true);
+  expect(report.sizeLatency.queryContextP95DeltaPct <= 15).toBe(true);
+  expect(typeof report.thresholdVerdict.pass === 'boolean').toBeTruthy();
+  expect(report.thresholdVerdict.pass).toBe(true);
 });

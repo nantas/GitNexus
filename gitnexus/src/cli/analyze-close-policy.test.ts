@@ -1,15 +1,15 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest'
+
 import { shouldCloseKuzuOnAnalyzeExit } from './analyze-close-policy.js';
 
-test('shouldCloseKuzuOnAnalyzeExit skips close on darwin by default', () => {
-  assert.equal(shouldCloseKuzuOnAnalyzeExit('darwin', undefined), false);
+it('shouldCloseKuzuOnAnalyzeExit skips close on darwin by default', () => {
+  expect(shouldCloseKuzuOnAnalyzeExit('darwin', undefined)).toBe(false);
 });
 
-test('shouldCloseKuzuOnAnalyzeExit closes on non-darwin platforms', () => {
-  assert.equal(shouldCloseKuzuOnAnalyzeExit('linux', undefined), true);
+it('shouldCloseKuzuOnAnalyzeExit closes on non-darwin platforms', () => {
+  expect(shouldCloseKuzuOnAnalyzeExit('linux', undefined)).toBe(true);
 });
 
-test('shouldCloseKuzuOnAnalyzeExit can be force-enabled on darwin', () => {
-  assert.equal(shouldCloseKuzuOnAnalyzeExit('darwin', '1'), true);
+it('shouldCloseKuzuOnAnalyzeExit can be force-enabled on darwin', () => {
+  expect(shouldCloseKuzuOnAnalyzeExit('darwin', '1')).toBe(true);
 });

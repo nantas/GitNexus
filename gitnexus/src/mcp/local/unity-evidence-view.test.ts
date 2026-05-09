@@ -1,8 +1,8 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, expect } from 'vitest';
+
 import { buildUnityEvidenceView } from './unity-evidence-view.js';
 
-test('unity evidence view emits truncation metadata and fetch hint', () => {
+it('unity evidence view emits truncation metadata and fetch hint', () => {
   const out = buildUnityEvidenceView({
     resourceBindings: [
       {
@@ -35,13 +35,13 @@ test('unity evidence view emits truncation metadata and fetch hint', () => {
     maxReferenceFields: 1,
   } as any);
 
-  assert.equal(out.evidence_meta.truncated, true);
-  assert.ok(out.evidence_meta.omitted_count > 0);
-  assert.match(out.evidence_meta.next_fetch_hint || '', /unity_evidence_mode=full/i);
-  assert.equal(out.serializedFields, undefined);
+  expect(out.evidence_meta.truncated).toBe(true);
+  expect(out.evidence_meta.omitted_count > 0).toBeTruthy();
+  expect(out.evidence_meta.next_fetch_hint || '').toMatch(/unity_evidence_mode=full/i);
+  expect(out.serializedFields).toBe(undefined);
 });
 
-test('unity evidence view keeps serialized fields in full mode', () => {
+it('unity evidence view keeps serialized fields in full mode', () => {
   const out = buildUnityEvidenceView({
     resourceBindings: [
       {
@@ -60,6 +60,6 @@ test('unity evidence view keeps serialized fields in full mode', () => {
     mode: 'full',
   } as any);
 
-  assert.equal(out.serializedFields?.scalarFields.length, 1);
-  assert.equal(out.serializedFields?.referenceFields.length, 1);
+  expect(out.serializedFields?.scalarFields.length).toBe(1);
+  expect(out.serializedFields?.referenceFields.length).toBe(1);
 });
