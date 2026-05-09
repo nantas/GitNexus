@@ -33,6 +33,7 @@ export interface E2ERunSuccess {
   runId: string;
   reportDir: string;
   completedGates: E2EGateName[];
+  failedGate?: never;
   gateOutputs: Partial<Record<E2EGateName, unknown>>;
 }
 

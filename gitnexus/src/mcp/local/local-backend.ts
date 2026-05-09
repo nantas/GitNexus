@@ -46,6 +46,13 @@ import type { UnityEvidenceViewResult } from './unity-evidence-view.js';
 import { runUnityUiTrace, type UnityUiTraceGoal, type UnityUiTraceOutput } from '../../core/unity/ui-trace.js';
 import { checkStalenessAsync, checkCwdMatch } from '../../core/git-staleness.js';
 import { logger } from '../../core/logger.js';
+import type { ResolvedUnityBinding } from '../../core/unity/resolver.js';
+import type { VerificationHint } from './process-confidence.js';
+import { analyzeRuleLabSlice } from '../../rule-lab/analyze.js';
+import { buildReviewPack } from '../../rule-lab/review-pack.js';
+import { curateRuleLabSlice } from '../../rule-lab/curate.js';
+import { promoteCuratedRules } from '../../rule-lab/promote.js';
+import { runRuleLabRegress } from '../../rule-lab/regress.js';
 // AI context generation is CLI-only (gitnexus analyze)
 // import { generateAIContextFiles } from '../../cli/ai-context.js';
 
@@ -72,6 +79,432 @@ export function isTestFilePath(filePath: string): boolean {
     p.includes('/test_') ||
     p.includes('/conftest.')
   );
+}
+
+// ─── Unity helper types / constants ──────────────────────────────
+
+interface NextHopPayload {
+  kind: 'resource' | 'symbol' | 'process' | 'verify';
+  target: string;
+  why: string;
+  next_command: string;
+}
+
+interface RetrievalRuleHint {
+  id: string;
+  next_action: string;
+  host_base_type?: string[];
+}
+
+type QueryScopePreset = 'unity-gameplay' | 'unity-all';
+
+export interface ExpandedSymbolCandidate {
+  id: string;
+  name: string;
+  type: string;
+  filePath: string;
+  startLine?: number;
+  endLine?: number;
+}
+
+const UNITY_GAMEPLAY_INCLUDE_PREFIXES = ['assets/'];
+const UNITY_GAMEPLAY_EXCLUDE_PREFIXES = [
+  'assets/plugins/',
+  'packages/',
+  'library/',
+  'projectsettings/',
+  'usersettings/',
+  'temp/',
+];
+const UNITY_PLUGIN_INTENT_TOKENS = new Set(['plugin', 'plugins', 'fmod', 'steam', 'crash', 'sdk', 'package']);
+const QUERY_STOP_WORDS = new Set([
+  'the', 'and', 'for', 'from', 'with', 'that', 'this', 'into',
+  'using', 'use', 'in', 'on', 'of', 'to', 'a', 'an',
+]);
+
+function normalizePath(filePath: string): string {
+  return String(filePath || '').replace(/\\/g, '/');
+}
+
+function isUnityResourcePathLike(value: string): boolean {
+  return /\.(asset|prefab|meta)$/i.test(String(value || '').trim());
+}
+
+function isUnityResourcePath(value: string): boolean {
+  return /\.(asset|prefab|unity)$/i.test(value.trim());
+}
+
+function tokenizeQuery(query: string): string[] {
+  const normalized = String(query || '').toLowerCase();
+  return normalized
+    .split(/[^a-z0-9_]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2 && !QUERY_STOP_WORDS.has(token));
+}
+
+function matchesAnyPrefix(pathLower: string, prefixes: string[]): boolean {
+  return prefixes.some((prefix) => pathLower.startsWith(prefix));
+}
+
+function isUnityPluginPath(filePath: string): boolean {
+  const p = normalizePath(filePath).toLowerCase();
+  return p.startsWith('assets/plugins/') || p.startsWith('packages/') || p.startsWith('library/packagecache/');
+}
+
+function isUnityGameplayPath(filePath: string): boolean {
+  const p = normalizePath(filePath).toLowerCase();
+  return p.startsWith('assets/') && !isUnityPluginPath(p);
+}
+
+function resolveQueryScopePreset(scopePreset?: string): QueryScopePreset | undefined {
+  if (!scopePreset) return undefined;
+  const normalized = String(scopePreset).trim().toLowerCase();
+  if (normalized === 'unity-gameplay' || normalized === 'unity-all') {
+    return normalized as QueryScopePreset;
+  }
+  return undefined;
+}
+
+function scoreResourcePathNoise(resourcePath: string): number {
+  const haystack = normalizePath(String(resourcePath || '').trim()).toLowerCase();
+  let penalty = 0;
+  if (!haystack) return penalty;
+  if (haystack.includes('/test') || haystack.includes('testgraphs')) penalty += 5;
+  if (haystack.includes('debug')) penalty += 4;
+  if (haystack.includes('测试')) penalty += 6;
+  if (haystack.includes('标记')) penalty += 6;
+  return penalty;
+}
+
+function rankCandidateResources(candidates: Array<{ target: string; bucket: number }>): string[] {
+  const deduped = new Map<string, { target: string; bucket: number; noisePenalty: number }>();
+  for (const candidate of candidates) {
+    const target = normalizePath(String(candidate.target || '').trim());
+    if (!target) continue;
+    const next = {
+      target,
+      bucket: candidate.bucket,
+      noisePenalty: scoreResourcePathNoise(target),
+    };
+    const existing = deduped.get(target);
+    if (!existing) {
+      deduped.set(target, next);
+      continue;
+    }
+    if (next.bucket < existing.bucket) existing.bucket = next.bucket;
+    if (next.noisePenalty < existing.noisePenalty) existing.noisePenalty = next.noisePenalty;
+  }
+
+  return [...deduped.values()]
+    .sort((a, b) => {
+      const bucketDiff = a.bucket - b.bucket;
+      if (bucketDiff !== 0) return bucketDiff;
+      const noiseDiff = a.noisePenalty - b.noisePenalty;
+      if (noiseDiff !== 0) return noiseDiff;
+      return a.target.localeCompare(b.target);
+    })
+    .map((entry) => entry.target);
+}
+
+// ─── Exported Unity helpers ──────────────────────────────────────
+
+export function computeVerifierMinimumEvidenceSatisfied(input: {
+  evidenceMetaRows: Array<{
+    verifier_minimum_evidence_satisfied?: boolean;
+    minimum_evidence_satisfied?: boolean;
+    truncated?: boolean;
+    filter_exhausted?: boolean;
+  }>;
+  truncated: boolean;
+  filterExhausted: boolean;
+}): boolean {
+  if (input.truncated || input.filterExhausted) return false;
+  if (!Array.isArray(input.evidenceMetaRows) || input.evidenceMetaRows.length === 0) return false;
+  return input.evidenceMetaRows.every((row) => (
+    row?.truncated !== true
+    && row?.filter_exhausted !== true
+    && row?.minimum_evidence_satisfied !== false
+    && row?.verifier_minimum_evidence_satisfied !== false
+  ));
+}
+
+export function pickVerifierSymbolAnchor(input: {
+  queryText?: string;
+  processSymbols: any[];
+  definitions: any[];
+}): { symbolName?: string; symbolFilePath?: string } {
+  const rows = [
+    ...input.processSymbols,
+    ...input.definitions,
+  ];
+  const evidenceModeRank = (row: any): number => {
+    const mode = String(row?.process_evidence_mode || row?.evidence_mode || '').trim().toLowerCase();
+    if (mode === 'direct_step') return 3;
+    if (mode === 'method_projected') return 2;
+    if (mode === 'resource_heuristic') return 1;
+    return 0;
+  };
+  const confidenceRank = (row: any): number => {
+    const confidence = String(row?.process_confidence || row?.confidence || '').trim().toLowerCase();
+    if (confidence === 'high') return 3;
+    if (confidence === 'medium') return 2;
+    if (confidence === 'low') return 1;
+    return 0;
+  };
+  const preferredStructuredSymbol = rows
+    .map((row: any, index: number) => ({ row, index }))
+    .filter(({ row }) => evidenceModeRank(row) >= 2 && confidenceRank(row) >= 2)
+    .sort((a, b) => {
+      const modeDiff = evidenceModeRank(b.row) - evidenceModeRank(a.row);
+      if (modeDiff !== 0) return modeDiff;
+      const confidenceDiff = confidenceRank(b.row) - confidenceRank(a.row);
+      if (confidenceDiff !== 0) return confidenceDiff;
+      return a.index - b.index;
+    })[0]?.row;
+  const resourceAnchoredSymbol = rows.find(
+    (row: any) => Array.isArray(row?.resourceBindings) && row.resourceBindings.length > 0,
+  );
+  const lowerQuery = String(input.queryText || '').toLowerCase();
+  const firstMatchInQuery = rows.find((row: any) => lowerQuery.includes(String(row?.name || '').toLowerCase()));
+  const anchor = preferredStructuredSymbol || resourceAnchoredSymbol || input.processSymbols[0] || firstMatchInQuery || input.definitions[0];
+  const symbolName = String(anchor?.name || '').trim();
+  const symbolFilePath = normalizePath(String(anchor?.filePath || '').trim());
+  return {
+    ...(symbolName ? { symbolName } : {}),
+    ...(symbolFilePath ? { symbolFilePath } : {}),
+  };
+}
+
+export function buildNextHops(input: {
+  seedPath?: string;
+  mappedSeedTargets: string[];
+  resourceBindings: ResolvedUnityBinding[];
+  verificationHint?: VerificationHint;
+  retrievalRule?: RetrievalRuleHint;
+  repoName?: string;
+  symbolName: string;
+  queryForSymbol: string;
+}): NextHopPayload[] {
+  const hops: NextHopPayload[] = [];
+  const seen = new Set<string>();
+  const addHop = (hop: NextHopPayload) => {
+    const key = `${hop.kind}:${hop.target}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    hops.push(hop);
+  };
+
+  const bindingPaths = input.resourceBindings.map((binding) => normalizePath(String(binding.resourcePath || '').trim())).filter(Boolean);
+  const bindingSet = new Set(bindingPaths);
+  const mappedIntersectBindings = input.mappedSeedTargets
+    .map((value) => normalizePath(value))
+    .filter((value) => value && bindingSet.has(value));
+  const mappedRemainder = input.mappedSeedTargets
+    .map((value) => normalizePath(value))
+    .filter((value) => value && !bindingSet.has(value));
+
+  const retrievalHostScope = (input.retrievalRule?.host_base_type || [])
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+  const currentSymbolMatchesRetrievalScope = retrievalHostScope.length === 0
+    || retrievalHostScope.includes(String(input.symbolName || '').trim().toLowerCase());
+  const shouldSuppressRawResourceHops = !input.seedPath
+    && mappedIntersectBindings.length === 0
+    && currentSymbolMatchesRetrievalScope === false;
+
+  const candidateResources = shouldSuppressRawResourceHops ? [] : rankCandidateResources([
+    ...(input.seedPath ? [{ target: normalizePath(input.seedPath), bucket: 0 }] : []),
+    ...mappedIntersectBindings.map((target) => ({ target, bucket: 1 })),
+    ...mappedRemainder.map((target) => ({ target, bucket: 2 })),
+    ...bindingPaths.map((target) => ({ target, bucket: 3 })),
+  ]);
+  const repoArg = input.repoName ? ` --repo "${input.repoName}"` : '';
+  const withRepoInCommand = (command: string): string => {
+    const trimmed = String(command || '').trim();
+    if (!trimmed || !input.repoName) return trimmed;
+    if (!/^gitnexus\s+(query|context)\b/i.test(trimmed)) return trimmed;
+    if (/\s--repo(?:\s|=)/i.test(trimmed)) return trimmed;
+    return trimmed.replace(/^gitnexus\s+(query|context)\b/i, `gitnexus $1 --repo "${input.repoName}"`);
+  };
+
+  for (const target of candidateResources.slice(0, 3)) {
+    addHop({
+      kind: 'resource',
+      target,
+      why: 'Unity resource evidence suggests this is the next deterministic hop.',
+      next_command: `gitnexus query${repoArg} --unity-resources on --unity-hydration compact --resource-path-prefix "${target}" "${input.queryForSymbol}"`,
+    });
+  }
+
+  if (input.retrievalRule?.next_action) {
+    addHop({
+      kind: 'verify',
+      target: input.seedPath || input.symbolName,
+      why: `Retrieval rule ${input.retrievalRule.id} configured this follow-up action.`,
+      next_command: withRepoInCommand(input.retrievalRule.next_action),
+    });
+  }
+
+  if (
+    input.verificationHint?.target
+    && !(shouldSuppressRawResourceHops && isUnityResourcePathLike(String(input.verificationHint.target)))
+  ) {
+    addHop({
+      kind: 'verify',
+      target: String(input.verificationHint.target),
+      why: 'Low-confidence evidence requires a verification follow-up.',
+      next_command: withRepoInCommand(input.verificationHint.next_command),
+    });
+  }
+
+  addHop({
+    kind: 'symbol',
+    target: input.symbolName,
+    why: 'Inspect symbol-level context to continue tracing.',
+    next_command: `gitnexus context${repoArg} --unity-resources on --unity-hydration compact "${input.symbolName}"`,
+  });
+
+  return hops.slice(0, 5);
+}
+
+export function pickRetrievalRuleHintFromBundle(input: {
+  queryText?: string;
+  symbolName?: string;
+  seedPath?: string;
+  rules: Array<{
+    id: string;
+    trigger_tokens?: string[];
+    host_base_type?: string[];
+    resource_types?: string[];
+    next_action: string;
+  }>;
+}): RetrievalRuleHint | undefined {
+  const haystack = [
+    String(input.queryText || ''),
+    String(input.symbolName || ''),
+    String(input.seedPath || ''),
+  ].join(' ').toLowerCase();
+
+  const rank = (rule: {
+    trigger_tokens?: string[];
+    host_base_type?: string[];
+    resource_types?: string[];
+  }): number => {
+    let score = 0;
+    let matchedTrigger = false;
+    let matchedEvidence = false;
+    for (const token of rule.trigger_tokens || []) {
+      const normalized = String(token || '').trim().toLowerCase();
+      if (!normalized) continue;
+      if (haystack.includes(normalized)) {
+        matchedTrigger = true;
+        matchedEvidence = true;
+        score += 10 + normalized.length;
+      }
+    }
+    for (const token of rule.host_base_type || []) {
+      const normalized = String(token || '').trim().toLowerCase();
+      if (normalized && haystack.includes(normalized)) {
+        matchedEvidence = true;
+        score += 20 + normalized.length;
+      }
+    }
+    for (const token of rule.resource_types || []) {
+      const normalized = String(token || '').trim().toLowerCase();
+      if (normalized && haystack.includes(normalized)) {
+        matchedEvidence = true;
+        score += 4 + normalized.length;
+      }
+    }
+    if (!matchedEvidence) return Number.NEGATIVE_INFINITY;
+    if (!matchedTrigger) score -= 3;
+    return score;
+  };
+
+  const matched = [...input.rules]
+    .map((rule) => ({ rule, score: rank(rule) }))
+    .filter((entry) => Number.isFinite(entry.score))
+    .sort((a, b) => (b.score - a.score) || a.rule.id.localeCompare(b.rule.id))[0]?.rule;
+  if (!matched || !String(matched.next_action || '').trim()) return undefined;
+  return {
+    id: matched.id,
+    next_action: matched.next_action,
+    host_base_type: matched.host_base_type,
+  };
+}
+
+export function filterBm25ResultsByScopePreset<T extends { filePath?: string }>(
+  rows: T[],
+  scopePreset?: string,
+): T[] {
+  const preset = resolveQueryScopePreset(scopePreset);
+  if (!preset || preset === 'unity-all') return rows;
+
+  if (preset === 'unity-gameplay') {
+    return rows.filter((row) => {
+      const p = normalizePath(row.filePath || '').toLowerCase();
+      if (!p) return false;
+      if (!matchesAnyPrefix(p, UNITY_GAMEPLAY_INCLUDE_PREFIXES)) return false;
+      if (matchesAnyPrefix(p, UNITY_GAMEPLAY_EXCLUDE_PREFIXES)) return false;
+      return true;
+    });
+  }
+
+  return rows;
+}
+
+function scoreExpandedSymbolForQuery(
+  symbol: ExpandedSymbolCandidate,
+  queryTokens: string[],
+  scopePreset?: string,
+): number {
+  const name = String(symbol.name || '').toLowerCase();
+  const filePath = normalizePath(symbol.filePath || '').toLowerCase();
+  const pathText = filePath.replace(/[^a-z0-9_]+/g, ' ');
+  const hasPluginIntent = queryTokens.some((token) => UNITY_PLUGIN_INTENT_TOKENS.has(token));
+  let score = 0;
+
+  for (const token of queryTokens) {
+    if (name === token) score += 8;
+    else if (name.includes(token)) score += 3;
+    if (pathText.includes(token)) score += 1;
+  }
+
+  if (queryTokens.length > 0) {
+    const fileName = filePath.split('/').pop() || '';
+    const fileNameNoExt = fileName.replace(/\.[a-z0-9]+$/i, '');
+    if (queryTokens.includes(fileNameNoExt)) {
+      score += 2;
+    }
+  }
+
+  if (isUnityPluginPath(filePath) && !hasPluginIntent) {
+    score -= scopePreset === 'unity-gameplay' ? 10 : 4;
+  } else if (scopePreset === 'unity-gameplay' && isUnityGameplayPath(filePath)) {
+    score += 2;
+  }
+
+  return score;
+}
+
+export function rankExpandedSymbolsForQuery(
+  symbols: ExpandedSymbolCandidate[],
+  query: string,
+  limit: number = 3,
+  scopePreset?: string,
+): ExpandedSymbolCandidate[] {
+  const queryTokens = tokenizeQuery(query);
+  return [...symbols]
+    .sort((a, b) => {
+      const scoreDelta = scoreExpandedSymbolForQuery(b, queryTokens, scopePreset)
+        - scoreExpandedSymbolForQuery(a, queryTokens, scopePreset);
+      if (scoreDelta !== 0) return scoreDelta;
+      const aLine = a.startLine ?? Number.MAX_SAFE_INTEGER;
+      const bLine = b.startLine ?? Number.MAX_SAFE_INTEGER;
+      if (aLine !== bLine) return aLine - bLine;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    })
+    .slice(0, Math.max(1, limit));
 }
 
 /** Valid LadybugDB node labels for safe Cypher query construction */
@@ -705,6 +1138,16 @@ export class LocalBackend {
         return this.apiImpact(repo, params);
       case 'unity_ui_trace':
         return this.unityUiTrace(repo, params);
+      case 'rule_lab_analyze':
+        return this.ruleLabAnalyze(repo, params);
+      case 'rule_lab_review_pack':
+        return this.ruleLabReviewPack(repo, params);
+      case 'rule_lab_curate':
+        return this.ruleLabCurate(repo, params);
+      case 'rule_lab_promote':
+        return this.ruleLabPromote(repo, params);
+      case 'rule_lab_regress':
+        return this.ruleLabRegress(repo, params);
       default:
         throw new Error(`Unknown tool: ${method}`);
     }
@@ -4226,6 +4669,169 @@ export class LocalBackend {
       goal,
       selectorMode,
     });
+  }
+
+  private async ruleLabAnalyze(repo: RepoHandle, params: {
+    run_id?: string;
+    runId?: string;
+    slice_id?: string;
+    sliceId?: string;
+  }): Promise<any> {
+    const runId = String(params?.run_id || params?.runId || '').trim();
+    const sliceId = String(params?.slice_id || params?.sliceId || '').trim();
+    if (!runId || !sliceId) {
+      return { error: 'run_id and slice_id are required for rule_lab_analyze' };
+    }
+    try {
+      const out = await analyzeRuleLabSlice({
+        repoPath: repo.repoPath,
+        runId,
+        sliceId,
+      });
+      return {
+        ...out,
+        artifact_paths: {
+          candidates: out.paths.candidatesPath,
+        },
+      };
+    } catch (err: any) {
+      return { error: err?.message || 'rule_lab_analyze failed' };
+    }
+  }
+
+  private async ruleLabReviewPack(repo: RepoHandle, params: {
+    run_id?: string;
+    runId?: string;
+    slice_id?: string;
+    sliceId?: string;
+    max_tokens?: number;
+    maxTokens?: number;
+  }): Promise<any> {
+    const runId = String(params?.run_id || params?.runId || '').trim();
+    const sliceId = String(params?.slice_id || params?.sliceId || '').trim();
+    if (!runId || !sliceId) {
+      return { error: 'run_id and slice_id are required for rule_lab_review_pack' };
+    }
+    const maxTokens = Number.isFinite(Number(params?.max_tokens ?? params?.maxTokens))
+      ? Number(params?.max_tokens ?? params?.maxTokens)
+      : 6000;
+    try {
+      const out = await buildReviewPack({
+        repoPath: repo.repoPath,
+        runId,
+        sliceId,
+        maxTokens,
+      });
+      return {
+        ...out,
+        artifact_paths: {
+          review_pack: out.paths.reviewCardsPath,
+        },
+      };
+    } catch (err: any) {
+      return { error: err?.message || 'rule_lab_review_pack failed' };
+    }
+  }
+
+  private async ruleLabCurate(repo: RepoHandle, params: {
+    run_id?: string;
+    runId?: string;
+    slice_id?: string;
+    sliceId?: string;
+    input_path?: string;
+    inputPath?: string;
+  }): Promise<any> {
+    const runId = String(params?.run_id || params?.runId || '').trim();
+    const sliceId = String(params?.slice_id || params?.sliceId || '').trim();
+    const inputPath = String(params?.input_path || params?.inputPath || '').trim();
+    if (!runId || !sliceId || !inputPath) {
+      return { error: 'run_id, slice_id, and input_path are required for rule_lab_curate' };
+    }
+    try {
+      const out = await curateRuleLabSlice({
+        repoPath: repo.repoPath,
+        runId,
+        sliceId,
+        inputPath,
+      });
+      return {
+        ...out,
+        artifact_paths: {
+          curated: out.paths.curatedPath,
+        },
+      };
+    } catch (err: any) {
+      return { error: err?.message || 'rule_lab_curate failed' };
+    }
+  }
+
+  private async ruleLabPromote(repo: RepoHandle, params: {
+    run_id?: string;
+    runId?: string;
+    slice_id?: string;
+    sliceId?: string;
+    version?: string;
+  }): Promise<any> {
+    const runId = String(params?.run_id || params?.runId || '').trim();
+    const sliceId = String(params?.slice_id || params?.sliceId || '').trim();
+    if (!runId || !sliceId) {
+      return { error: 'run_id and slice_id are required for rule_lab_promote' };
+    }
+    try {
+      const out = await promoteCuratedRules({
+        repoPath: repo.repoPath,
+        runId,
+        sliceId,
+        version: typeof params?.version === 'string' ? params.version : undefined,
+      });
+      return {
+        ...out,
+        artifact_paths: {
+          catalog: path.join(out.paths.rulesRoot, 'catalog.json'),
+          promoted_files: out.promotedFiles,
+          compiled_bundles: out.compiledPaths,
+        },
+      };
+    } catch (err: any) {
+      return { error: err?.message || 'rule_lab_promote failed' };
+    }
+  }
+
+  private async ruleLabRegress(repo: RepoHandle, params: {
+    precision?: number;
+    coverage?: number;
+    probes?: Array<any>;
+    probes_path?: string;
+    probesPath?: string;
+    run_id?: string;
+    runId?: string;
+  }): Promise<any> {
+    const precision = Number(params?.precision);
+    const coverage = Number(params?.coverage);
+    if (!Number.isFinite(precision) || !Number.isFinite(coverage)) {
+      return { error: 'precision and coverage are required numeric fields for rule_lab_regress' };
+    }
+    try {
+      let probes = Array.isArray(params?.probes) ? params.probes : undefined;
+      const probesPath = String(params?.probes_path || params?.probesPath || '').trim();
+      if (!probes && probesPath) {
+        const raw = await fs.readFile(path.isAbsolute(probesPath) ? probesPath : path.join(repo.repoPath, probesPath), 'utf-8');
+        probes = JSON.parse(raw) as Array<any>;
+      }
+      const out = await runRuleLabRegress({
+        precision,
+        coverage,
+        probes,
+        repoPath: repo.repoPath,
+        runId: String(params?.run_id || params?.runId || '').trim() || undefined,
+      });
+      return {
+        ...out,
+        artifact_paths: out.reportPath ? { report: out.reportPath } : {},
+      };
+    } catch (err: any) {
+      return { error: err?.message || 'rule_lab_regress failed' };
+    }
   }
 
 

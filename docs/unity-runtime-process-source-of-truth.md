@@ -97,6 +97,13 @@ Phase 6:     processProcesses (沿所有 CALLS 边追踪，生成 Process)
      - 调用 `hydrateUnityForSymbol()` 与 `buildUnityEvidenceView()` 构建 evidence
      - 当查询匹配已知 runtime process（Reload/Update/Awake 等）时，通过 `buildWorkflowResponse()` 执行 `verifyRuntimeChainOnDemand()` 返回实时 chain evidence
      - 返回 `evidence`、`confidence`（`verifier-core` + `policy-adjusted`）、`hydrationMeta`、`workflows`
+   - **Unity Query/Context 辅助函数**（2026-05-09 恢复）：
+     - `buildNextHops(input)`：`local-backend.ts` — 生成 next-hops 命令模板，支持 repoName 注入、retrieval rule 配置、verification hint。输入含 `seedPath`, `mappedSeedTargets`, `resourceBindings`, `retrievalRule`, `repoName`, `symbolName`, `queryForSymbol`；输出 `NextHopPayload[]`（kind: resource|symbol|verify）。
+     - `pickVerifierSymbolAnchor(input)`：`local-backend.ts` — 优先选择结构化符号锚点。按 `process_evidence_mode`（direct_step=3 > method_projected=2 > resource_heuristic=1）和 `process_confidence`（high=3 > medium=2 > low=1）排序，返回 `{ symbolName?, symbolFilePath? }`。
+     - `pickRetrievalRuleHintFromBundle(input)`：`local-backend.ts` — 从规则 bundle 匹配最高信号规则。评分：host_base_type(20+len) > trigger_tokens(10+len) > resource_types(4+len)；无 matchedEvidence 则丢弃；无 matchedTrigger 扣 3 分。
+     - `computeVerifierMinimumEvidenceSatisfied(input)`：`local-backend.ts` — evidence gate 核心。若 `truncated=true` 或 `filterExhausted=true` 直接返回 false；否则要求所有 `evidenceMetaRows` 的 `minimum_evidence_satisfied` 和 `verifier_minimum_evidence_satisfied` 均不为 false。
+     - `filterBm25ResultsByScopePreset(rows, scopePreset)`：`local-backend.ts` — scope 预设过滤。`unity-gameplay` 保留 `assets/` 开头且排除 `assets/plugins/`, `packages/`, `library/` 等前缀的结果。
+     - `rankExpandedSymbolsForQuery(symbols, query, limit, scopePreset)`：`local-backend.ts` — 查询感知排序。 gameplay 路径加分，plugin 路径减分（无 plugin intent token 时）；按 score、startLine、name 排序后取前 limit。
 
 ### 2.3 On-Demand 强验证（Graph-Only Closure）
 
