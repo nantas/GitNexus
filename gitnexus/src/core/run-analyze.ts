@@ -101,6 +101,8 @@ export interface AnalyzeOptions {
   scopeRules?: string[];
   /** Fork: path to C# .csproj for conditional compilation defines */
   csharpDefineCsproj?: string;
+  /** Fork: restrict analysis to specific file extensions */
+  includeExtensions?: string[];
 }
 
 export interface AnalyzeResult {
@@ -281,12 +283,15 @@ export async function runFullAnalysis(
     (p) => {
       const phaseLabel = PHASE_LABELS[p.phase] || p.phase;
       const scaled = Math.round(p.percent * 0.6);
-      const message = p.detail ? `${p.message || phaseLabel} (${p.detail})` : p.message || phaseLabel;
+      const message = p.detail
+        ? `${p.message || phaseLabel} (${p.detail})`
+        : p.message || phaseLabel;
       progress(p.phase, scaled, message);
     },
     {
       scopeRules: options.scopeRules,
       csharpDefineCsproj: options.csharpDefineCsproj,
+      includeExtensions: options.includeExtensions,
     },
   );
 
@@ -310,11 +315,16 @@ export async function runFullAnalysis(
     // must be released to avoid blocking subsequent invocations.
 
     let lbugMsgCount = 0;
-    const lbugResult = await loadGraphToLbug(pipelineResult.graph, pipelineResult.repoPath, storagePath, (msg) => {
-      lbugMsgCount++;
-      const pct = Math.min(84, 60 + Math.round((lbugMsgCount / (lbugMsgCount + 10)) * 24));
-      progress('lbug', pct, msg);
-    });
+    const lbugResult = await loadGraphToLbug(
+      pipelineResult.graph,
+      pipelineResult.repoPath,
+      storagePath,
+      (msg) => {
+        lbugMsgCount++;
+        const pct = Math.min(84, 60 + Math.round((lbugMsgCount / (lbugMsgCount + 10)) * 24));
+        progress('lbug', pct, msg);
+      },
+    );
 
     // ── Phase 3: FTS (85–90%) ─────────────────────────────────────────
     progress('fts', 85, 'Creating search indexes...');
@@ -503,6 +513,7 @@ export async function runFullAnalysis(
         repoAlias: options.registryName,
         embeddings: options.embeddings,
         csharpDefineCsproj: options.csharpDefineCsproj,
+        includeExtensions: options.includeExtensions,
       },
     };
     await saveMeta(storagePath, meta);

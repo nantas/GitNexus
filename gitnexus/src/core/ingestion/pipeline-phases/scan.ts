@@ -30,20 +30,24 @@ export const scanPhase: PipelinePhase<ScanOutput> = {
       message: 'Scanning repository...',
     });
 
-    const scannedFiles = await walkRepositoryPaths(ctx.repoPath, (current, total, filePath) => {
-      const scanProgress = Math.round((current / total) * 15);
-      ctx.onProgress({
-        phase: 'extracting',
-        percent: scanProgress,
-        message: 'Scanning repository...',
-        detail: filePath,
-        stats: {
-          filesProcessed: current,
-          totalFiles: total,
-          nodesCreated: ctx.graph.nodeCount,
-        },
-      });
-    });
+    const scannedFiles = await walkRepositoryPaths(
+      ctx.repoPath,
+      (current, total, filePath) => {
+        const scanProgress = Math.round((current / total) * 15);
+        ctx.onProgress({
+          phase: 'extracting',
+          percent: scanProgress,
+          message: 'Scanning repository...',
+          detail: filePath,
+          stats: {
+            filesProcessed: current,
+            totalFiles: total,
+            nodesCreated: ctx.graph.nodeCount,
+          },
+        });
+      },
+      ctx.options?.includeExtensions,
+    );
 
     const totalFiles = scannedFiles.length;
     const allPaths = scannedFiles.map((f) => f.path);
