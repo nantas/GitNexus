@@ -1,7 +1,7 @@
-<!-- version: 1.8.0 -->
-<!-- Last updated: 2026-05-09 -->
+<!-- version: 1.9.0 -->
+<!-- Last updated: 2026-05-10 -->
 
-Last reviewed: 2026-05-09
+Last reviewed: 2026-05-10
 
 **Project:** GitNexus · **Environment:** dev · **Maintainer:** repository maintainers (see GitHub)
 
@@ -24,13 +24,13 @@ Last reviewed: 2026-05-09
 For multi-step work, state up front:
 1. Which rules in this file and **[GUARDRAILS.md](GUARDRAILS.md)** apply (and any relevant Signs).
 2. Current **Scope** boundaries.
-3. Which **validation commands** you will run (`cd gitnexus && npm test`, `npx tsc --noEmit`).
+3. Which **validation commands** you will run (`cd gitnexus && npm test`, `cd gitnexus && npm run test:all`, `npx tsc --noEmit`).
 
 On long threads, *"Remember: apply all AGENTS.md rules"* re-weights these instructions against context dilution.
 
 ## Claude Code hooks
 
-**PreToolUse** hooks can block tools (e.g. `git_commit`) until checks pass. Adapt to this repo: `cd gitnexus && npm test` before commit.
+**PreToolUse** hooks can block tools (e.g. `git_commit`) until checks pass. Adapt to this repo: `cd gitnexus && npm test` (default pool, quick) before commit. Use `cd gitnexus && npm run test:all` when full CI-quality gate is needed.
 
 ## Context budget
 
@@ -49,6 +49,7 @@ Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.
 | Date | Version | Change |
 |------|---------|--------|
 | 2026-05-09 | 1.8.0 | Added Unity benchmark & E2E test guidance; added upstream merge guide with dependency conflict resolution rules; restored `@ladybugdb/core` to ^0.16.1 (was downgraded to 0.15.x during upstream merge, causing SIGSEGV). |
+| 2026-05-10 | 1.9.0 | Split npm test into default-pool-only (`npm test`) vs full suite (`npm run test:all`); increased hookTimeout to 300s and added lbug-db pool testTimeout 300s; updated AGENTS.md test workflow to reflect three-pool structure. |
 | 2026-04-23 | 1.7.0 | TypeScript added to `MIGRATED_LANGUAGES` (registry-primary call resolution by default). |
 | 2026-04-20 | 1.6.0 | Added scope-resolution pipeline pointer (RFC #909 Ring 3); Python migrated to registry-primary. |
 | 2026-04-19 | 1.5.0 | Cross-repo impact (#794): `impact`/`query`/`context` accept `repo: "@<group>"` + `service`. Removed `group_query`/`group_contracts`/`group_status` MCP tools; added `gitnexus://group/{name}/contracts` and `gitnexus://group/{name}/status` resources. |
@@ -200,33 +201,54 @@ Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.
 
 ## 测试开发与验证强制流程
 
-### 背景
+### 三 Pool 分池结构
 
-`gitnexus/vitest.config.ts` 的 `include` 现已覆盖 `src/` 下的所有测试目录：
-- `test/**/*.test.ts`
-- `src/benchmark/**/*.test.ts`
-- `src/cli/**/*.test.ts`
-- `src/core/**/*.test.ts`
-- `src/mcp/local/**/*.test.ts`
+`gitnexus/vitest.config.ts` 配置了三个 vitest pool，每次 `vitest run` 按以下方式执行：
 
-**所有 `src/**/*.test.ts` 文件现已统一纳入 vitest 管理。**`test:src:node` 脚本已移除，不再支持 `node:test` + `node:assert/strict` 双框架并存模式。
+| Pool | 模式 | 内容 | 预期耗时 |
+|------|------|------|---------|
+| `default` | 并行 fork 池 | 单元测试 + 非集成测试（395+ 文件） | ~30-40s |
+| `lbug-db` | 串行 (`fileParallelism: false`)，`testTimeout: 300s` | LadybugDB 集成测试（17+ 文件） | ~5-8 min |
+| `cli-e2e` | 串行 | `skills-e2e.test.ts`（1 文件） | ~30s |
 
-> 迁移记录：`openspec/changes/archive/2026-05-09-migrate-node-test-to-vitest`
+**分池理由**：LadybugDB 的 N-API mmap addon 在并行 fork 中产生文件锁冲突，`lbug-db` pool 强制串行执行。每文件在独立 fork 中运行，fork 退出时 N-API 析构 segfault 被 `dangerouslyIgnoreUnhandledErrors` 捕获。
+
+### 命令分层
+
+| 命令 | 范围 | 用途 |
+|------|------|------|
+| `npm test` | default pool 仅 (`--project default`) | **开发者快速反馈**，~30-40s |
+| `npm run test:all` | 全部三 pool | **CI 质量门**，可能 >5 min |
+| `npm run test:unit` | 仅 `test/unit/` | 快速单元测试子集 |
+| `npm run test:integration` | 集成测试（需先 build） | 集成回归 |
+
+> ⚠️ `npm test` 在 2026-05-10 变更：原 `vitest run`（全量）改为 `vitest run --project default`（仅 default pool）。需要全量覆盖时使用 `npm run test:all`。
+
+### 超时配置
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| `hookTimeout`（顶层） | 300000（5 min） | 为 globalSetup LadybugDB schema DDL 提供充足时间 |
+| `testTimeout`（顶层） | 30000（30 s） | default pool 快速杀死 hung 测试 |
+| `testTimeout`（lbug-db pool） | 300000（5 min） | 适应串行集成测试的累积执行时间 |
 
 ### 编写新测试时必须遵守
 
 1. **文件位置**：新测试文件必须放在 `test/unit/`（或 `test/integration/`）目录下，**禁止**放在 `src/` 子目录中，除非该路径已在 `vitest.config.ts` 的 `include` 中显式列出。
 2. **测试框架**：必须使用 **vitest API**，即 `import { describe, it, expect } from 'vitest';`，**禁止使用** `node:test` + `node:assert/strict`。
 3. **命名规范**：测试文件以 `.test.ts` 结尾。
-4. **运行前检查**：执行 `npm test` 后，必须对比输出中的 **Tests** 数量是否增加，确认新测试真正被包含在运行套件中。
-   - 正确示例：`Tests  1718 passed`（比修改前 +20）
+4. **运行前检查**：执行 `npm test`（默认 pool）后，必须对比输出中的 **Tests** 数量是否增加，确认新测试被 default pool 包含。若测试属于 `lbug-db` pool（集成测试），需同时用 `npm run test:all` 验证。
+   - 正确示例：`Tests  8141 passed`（比修改前 +20）
    - 错误示例：测试数量未变化，说明新测试文件未被 vitest 发现
+
+> 迁移记录：`openspec/changes/archive/2026-05-09-migrate-node-test-to-vitest`
 
 ### 验证清单（提交前必须完成）
 
 - [ ] 新测试文件位于 `test/unit/`（或已列入 `vitest.config.ts` `include` 的路径）
 - [ ] 使用 `import { describe, it, expect } from 'vitest'` 而非 `node:test`
-- [ ] `npm test` 输出中，测试总数增加了新写入的用例数
+- [ ] `npm test`（default pool）输出中，测试总数增加了新写入的用例数
+- [ ] 若新测试属于集成测试（`lbug-db` pool），运行 `npm run test:all` 确认包含
 - [ ] `npx tsc --noEmit` 无编译错误
 - [ ] 旧测试无回归失败
 
