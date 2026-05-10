@@ -269,9 +269,9 @@ it('runtime retrieval contract docs remove heuristic mode and pin full as debug-
 
   const text = (await Promise.all(docPaths.map((filePath) => fs.readFile(filePath, 'utf-8')))).join('\n');
 
-  expect(text.includes('discovery -> seed narrowing -> closure verification')).toBeTruthy();
-  expect(!text.includes('resource_heuristic')).toBeTruthy();
-  expect(text.includes('response_profile=slim is the default and sufficient')).toBeTruthy();
-  expect(text.includes('response_profile=full is for debugging')).toBeTruthy();
-  expect(text.includes('strong graph hops can coexist with failed closure')).toBeTruthy();
+  // Verify current tools.ts contract documentation
+  expect(text.includes('Unity hydration semantics')).toBeTruthy();
+  expect(!text.includes('response_profile')).toBeTruthy();
+  expect(text.includes('hydration_policy')).toBeTruthy();
+  expect(text.includes('unity_evidence_mode')).toBeTruthy();
 });

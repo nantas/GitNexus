@@ -552,7 +552,18 @@ const verifyConstructorBindings = (
 ): Map<string, string> => {
   const verified = new Map<string, string>();
 
-  for (const { scope, varName, calleeName, receiverClassName } of bindings) {
+  for (const { scope, varName, calleeName, receiverClassName, inferredTypeName } of bindings) {
+    if (inferredTypeName) {
+      const inferred = ctx.resolve(inferredTypeName, filePath);
+      const isReceivableType = inferred?.candidates.some(def =>
+        def.type === 'Class' || def.type === 'Interface' || def.type === 'Struct' || def.type === 'Enum',
+      ) ?? false;
+      if (isReceivableType) {
+        verified.set(receiverKey(scope, varName), inferredTypeName);
+        continue;
+      }
+    }
+
     const tiered = ctx.resolve(calleeName, filePath);
     const isClass = tiered?.candidates.some((def) => def.type === 'Class') ?? false;
 

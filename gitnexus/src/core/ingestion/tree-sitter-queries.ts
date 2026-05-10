@@ -1481,6 +1481,59 @@ export const DART_QUERIES = `
       (type_identifier) @heritage.trait))) @heritage
 `;
 
+// GDScript queries - works with tree-sitter-gdscript
+export const GDSCRIPT_QUERIES = `
+; ── Class Name (file-level class) ───────────────────────────────────────────
+(class_name_statement
+  (name) @name) @definition.class
+
+; ── Inner Class Definition ──────────────────────────────────────────────────
+(class_definition
+  name: (name) @name) @definition.class
+
+; ── Functions & Methods ─────────────────────────────────────────────────────
+(function_definition
+  name: (name) @name) @definition.function
+
+; ── Constructor (_init) ─────────────────────────────────────────────────────
+(constructor_definition) @definition.constructor
+
+; ── Signals ─────────────────────────────────────────────────────────────────
+(signal_statement
+  name: (name) @name) @definition.signal
+
+; ── Enums ───────────────────────────────────────────────────────────────────
+(enum_definition
+  name: (name) @name) @definition.enum
+
+; ── Constants ───────────────────────────────────────────────────────────────
+(const_statement
+  (name) @name) @definition.const
+
+; ── Extends (inheritance) ───────────────────────────────────────────────────
+(extends_statement
+  (identifier) @heritage.extends) @heritage
+
+; ── Class with extends ──────────────────────────────────────────────────────
+(class_definition
+  name: (name) @heritage.class
+  (extends_statement
+    (identifier) @heritage.extends)) @heritage
+
+; ── Preload/Load (imports) ──────────────────────────────────────────────────
+(call
+  (identifier) @import.source
+  (#any-of? @import.source "preload" "load")) @import
+
+; ── Function Calls ──────────────────────────────────────────────────────────
+(call
+  (identifier) @call.name) @call
+
+; ── Method Calls ────────────────────────────────────────────────────────────
+(attribute_call
+  (identifier) @call.name) @call
+`;
+
 import { SupportedLanguages } from 'gitnexus-shared';
 
 export const LANGUAGE_QUERIES: Record<SupportedLanguages, string> = {
@@ -1500,4 +1553,5 @@ export const LANGUAGE_QUERIES: Record<SupportedLanguages, string> = {
   [SupportedLanguages.Dart]: DART_QUERIES,
   [SupportedLanguages.Vue]: TYPESCRIPT_QUERIES, // Vue <script> blocks are parsed as TypeScript
   [SupportedLanguages.Cobol]: '', // Standalone regex processor — no tree-sitter queries
+  [SupportedLanguages.GDScript]: GDSCRIPT_QUERIES,
 };

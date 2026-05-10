@@ -16,6 +16,7 @@ export enum SupportedLanguages {
   Ruby = 'ruby',
   Rust = 'rust',
   PHP = 'php',
+  GDScript = 'gdscript',
   Kotlin = 'kotlin',
   Swift = 'swift',
   Dart = 'dart',

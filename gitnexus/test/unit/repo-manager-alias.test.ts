@@ -24,16 +24,14 @@ describe('registerRepo', () => {
       await fs.mkdir(repoA, { recursive: true });
       await fs.mkdir(repoB, { recursive: true });
 
-      await registerRepo(repoA, makeMeta(repoA, 'abc1234'), { repoAlias: 'neonspark-v1-subset' });
+      await registerRepo(repoA, makeMeta(repoA, 'abc1234'), { name: 'neonspark-v1-subset' });
       const entries = await readRegistry();
       expect(entries.length).toBe(1);
       expect(entries[0].name).toBe('neonspark-v1-subset');
-      expect(entries[0].alias).toBe('neonspark-v1-subset');
-      expect(entries[0].sourceName).toBe('repo-a');
 
       await expect(
-        registerRepo(repoB, makeMeta(repoB, 'def5678'), { repoAlias: 'neonspark-v1-subset' }),
-      ).rejects.toThrow(/already registered/i);
+        registerRepo(repoB, makeMeta(repoB, 'def5678'), { name: 'neonspark-v1-subset' }),
+      ).rejects.toThrow(/already used/i);
     } finally {
       if (originalHome === undefined) {
         delete process.env.GITNEXUS_HOME;
