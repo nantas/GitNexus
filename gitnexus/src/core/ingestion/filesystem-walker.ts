@@ -35,16 +35,23 @@ const UNITY_RESOURCE_GLOBS = ['**/*.prefab', '**/*.unity', '**/*.asset'];
 export const walkRepositoryPaths = async (
   repoPath: string,
   onProgress?: (current: number, total: number, filePath: string) => void,
+  includeExtensions?: string[],
 ): Promise<ScannedFile[]> => {
   const ignoreFilter = await createIgnoreFilter(repoPath);
   const maxFileSizeBytes = getMaxFileSizeBytes();
 
-  const filtered = await glob('**/*', {
+  let filtered = await glob('**/*', {
     cwd: repoPath,
     nodir: true,
     dot: false,
     ignore: ignoreFilter,
   });
+
+  // Apply extension filter before batch stat (avoids unnecessary I/O)
+  if (includeExtensions !== undefined && includeExtensions.length > 0) {
+    filtered = filtered.filter((p) => includeExtensions.some((ext) => p.endsWith(ext)));
+  }
+
   const entries: ScannedFile[] = [];
   let processed = 0;
   let skippedLarge = 0;
@@ -103,8 +110,8 @@ export const walkUnityResourcePaths = async (repoPath: string): Promise<string[]
   });
 
   return files
-    .filter(file => !shouldIgnorePath(file))
-    .map(file => file.replace(/\\/g, '/'))
+    .filter((file) => !shouldIgnorePath(file))
+    .map((file) => file.replace(/\\/g, '/'))
     .sort((left, right) => left.localeCompare(right));
 };
 

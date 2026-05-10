@@ -28,10 +28,7 @@ import { glob } from 'glob';
 import fs from 'fs/promises';
 import { cliError } from './cli-message.js';
 import { isHfDownloadFailure } from '../core/embeddings/hf-env.js';
-import {
-  resolveEffectiveAnalyzeOptions,
-  validateStoredOptions,
-} from './analyze-options.js';
+import { resolveEffectiveAnalyzeOptions, validateStoredOptions } from './analyze-options.js';
 import { formatDiagnosticsSummary } from './analyze-diagnostics.js';
 import { loadMeta } from '../storage/repo-manager.js';
 
@@ -477,6 +474,7 @@ export const analyzeCommand = async (inputPath?: string, options?: AnalyzeOption
         // cost of a full pipeline re-index. See #829 review round 2.
         allowDuplicateName: options?.allowDuplicateName,
         scopeRules: effective.scopeRules,
+        includeExtensions: effective.includeExtensions,
         csharpDefineCsproj: effective.csharpDefineCsproj,
       },
       {
