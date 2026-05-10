@@ -42,7 +42,7 @@ describe('generateAIContextFiles', () => {
     const content = await fs.readFile(claudeMdPath, 'utf-8');
     expect(content).toContain('gitnexus:start');
     expect(content).toContain('gitnexus:end');
-    expect(content).not.toContain('This project is indexed by GitNexus as');
+    expect(content).toContain('TestProject');
   });
 
   it('keeps the load-bearing repo-specific sections in the CLAUDE.md block (#856)', async () => {

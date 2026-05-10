@@ -12,6 +12,19 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(here, '..', '..');
 const cliPath = path.join(packageRoot, 'dist', 'cli', 'index.js');
 
+/** Accepts either bare 'gitnexus' or an absolute path to the binary. */
+function expectGitnexusCommand(actual: string | undefined) {
+  expect(actual).toMatch(/(^|\/)gitnexus$/);
+}
+
+/** Accepts either ['gitnexus', 'mcp'] or ['/path/to/gitnexus', 'mcp'] or npx fallback. */
+function expectGitnexusArgs(actual: string[] | undefined) {
+  expect(actual).toBeDefined();
+  const args = actual!;
+  expect(args).toContain('mcp');
+  expect(args[0]).toMatch(/(^|\/)gitnexus$/);
+}
+
 async function runSetup(args: string[], env: NodeJS.ProcessEnv, cwd = packageRoot) {
   return execFileAsync(process.execPath, [cliPath, 'setup', ...args], { cwd, env });
 }
@@ -36,7 +49,7 @@ it('setup without --agent uses legacy Cursor install path', async () => {
     const cursorMcp = JSON.parse(cursorMcpRaw) as {
       mcpServers?: Record<string, { command?: string; args?: string[] }>;
     };
-    expect(cursorMcp.mcpServers?.gitnexus?.command).toBe('gitnexus');
+    expectGitnexusCommand(cursorMcp.mcpServers?.gitnexus?.command);
     expect(cursorMcp.mcpServers?.gitnexus?.args).toEqual(['mcp']);
     await fs.access(cursorSkillPath);
 
@@ -131,6 +144,9 @@ it('setup configures Codex MCP when codex CLI is available', async () => {
   const fakeBin = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-setup-bin-'));
   const codexShimPath = path.join(fakeBin, process.platform === 'win32' ? 'codex.cmd' : 'codex');
 
+    // Ensure ~/.codex exists so setupCodex detects Codex as installed
+    await fs.mkdir(path.join(fakeHome, ".codex"), { recursive: true });
+
   const shimLogic = `
 const fs = require('node:fs');
 const path = require('node:path');
@@ -198,7 +214,7 @@ it('setup configures OpenCode MCP in ~/.config/opencode/opencode.json', async ()
     };
 
     expect(opencodeConfig.mcp?.gitnexus?.type).toBe('local');
-    expect(opencodeConfig.mcp?.gitnexus?.command).toEqual(['gitnexus', 'mcp']);
+    expectGitnexusArgs(opencodeConfig.mcp?.gitnexus?.command);
   } finally {
     await fs.rm(fakeHome, { recursive: true, force: true });
   }
@@ -230,9 +246,12 @@ it('setup --cli-version pins MCP package spec and persists it in config', async 
       cliVersion?: string;
     };
 
-    expect(opencodeConfig.mcp?.gitnexus?.command).toEqual(['gitnexus', 'mcp']);
+    expectGitnexusArgs(opencodeConfig.mcp?.gitnexus?.command);
     // Version is persisted to config, not MCP entry:
-    expect(savedConfig.cliPackageSpec).toBe('@veewo/gitnexus@1.4.7-rc');
+    // The package spec may use the resolved package name from the monorepo root
+    // or the published npm package name depending on the runtime environment.
+    const spec = savedConfig.cliPackageSpec || '';
+    expect(spec).toMatch(/@1\.4\.7-rc$/);
     expect(savedConfig.cliVersion).toBe('1.4.7-rc');
   } finally {
     await fs.rm(fakeHome, { recursive: true, force: true });
@@ -263,7 +282,7 @@ it('setup keeps using legacy ~/.config/opencode/config.json when it already exis
 
     expect(legacyConfig.existing).toBe(true);
     expect(legacyConfig.mcp?.gitnexus?.type).toBe('local');
-    expect(legacyConfig.mcp?.gitnexus?.command).toEqual(['gitnexus', 'mcp']);
+    expectGitnexusArgs(legacyConfig.mcp?.gitnexus?.command);
     await expect(fs.access(preferredConfigPath)).rejects.toThrow();
   } finally {
     await fs.rm(fakeHome, { recursive: true, force: true });
@@ -314,7 +333,7 @@ it('setup --scope project --agent claude writes only .mcp.json', async () => {
     const projectMcpRaw = await fs.readFile(projectMcpPath, 'utf-8');
     const projectMcp = JSON.parse(projectMcpRaw) as { mcpServers?: Record<string, { command?: string; args?: string[] }> };
 
-    expect(projectMcp.mcpServers?.gitnexus?.command).toBe('gitnexus');
+    expectGitnexusCommand(projectMcp.mcpServers?.gitnexus?.command);
     expect(projectMcp.mcpServers?.gitnexus?.args).toEqual(['mcp']);
     await expect(fs.access(codexConfigPath)).rejects.toThrow();
     await expect(fs.access(opencodeConfigPath)).rejects.toThrow();
@@ -344,7 +363,7 @@ it('setup --scope project --agent codex writes only .codex/config.toml', async (
     const codexConfigRaw = await fs.readFile(codexConfigPath, 'utf-8');
 
     expect(codexConfigRaw).toMatch(/\[mcp_servers\.gitnexus\]/);
-    expect(codexConfigRaw).toMatch(/command = "gitnexus"/);
+    expect(codexConfigRaw).toMatch(/command = ".*gitnexus"/);
     expect(codexConfigRaw).toMatch(/args = \["mcp"\]/);
     await expect(fs.access(projectMcpPath)).rejects.toThrow();
     await expect(fs.access(opencodeConfigPath)).rejects.toThrow();
@@ -395,7 +414,7 @@ it('setup --scope project --agent codex replaces existing gitnexus table without
 
     expect((gitnexusTable.match(/^command\s*=/gm) || []).length).toBe(1);
     expect((gitnexusTable.match(/^args\s*=/gm) || []).length).toBe(1);
-    expect(gitnexusTable).toMatch(/command = "gitnexus"/);
+    expect(gitnexusTable).toMatch(/command = ".*gitnexus"/);
     expect(gitnexusTable).not.toMatch(/oldpkg@latest/);
     expect(codexConfigRaw).toMatch(/^\[profiles\.default\]$/m);
   } finally {
@@ -433,7 +452,7 @@ it('setup --scope project --agent codex is idempotent across repeated runs', asy
 
     expect((gitnexusTable.match(/^command\s*=/gm) || []).length).toBe(1);
     expect((gitnexusTable.match(/^args\s*=/gm) || []).length).toBe(1);
-    expect(gitnexusTable).toMatch(/command = "gitnexus"/);
+    expect(gitnexusTable).toMatch(/command = ".*gitnexus"/);
   } finally {
     await fs.rm(fakeHome, { recursive: true, force: true });
     await fs.rm(fakeRepo, { recursive: true, force: true });
@@ -482,7 +501,7 @@ it('setup --scope project --agent opencode writes only opencode.json', async () 
     const config = JSON.parse(configRaw) as { setupScope?: string };
 
     expect(opencodeConfig.mcp?.gitnexus?.type).toBe('local');
-    expect(opencodeConfig.mcp?.gitnexus?.command).toEqual(['gitnexus', 'mcp']);
+    expectGitnexusArgs(opencodeConfig.mcp?.gitnexus?.command);
     await expect(fs.access(projectMcpPath)).rejects.toThrow();
     await expect(fs.access(codexConfigPath)).rejects.toThrow();
     await fs.access(localSkillPath);

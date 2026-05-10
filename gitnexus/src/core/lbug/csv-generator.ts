@@ -70,7 +70,20 @@ export const isBinaryContent = (content: string): boolean => {
  * symbol defined in it. Sized generously so most files stay cached during
  * the single-pass node iteration.
  */
-class FileContentCache {
+export async function toCodeElementCsvRow(node: { id: string; label: string; properties: Record<string, any> }): Promise<string> {
+  return [
+    escapeCSVField(node.id),
+    escapeCSVField(node.properties.name || ''),
+    escapeCSVField(node.properties.filePath || ''),
+    escapeCSVNumber(node.properties.startLine, -1),
+    escapeCSVNumber(node.properties.endLine, -1),
+    '""',
+    '""',
+    '"' + (node.properties.description || '') + '"',
+  ].join(',');
+}
+
+export class FileContentCache {
   private cache = new Map<string, string>();
   private accessOrder: string[] = [];
   private maxSize: number;
@@ -79,6 +92,15 @@ class FileContentCache {
   constructor(repoPath: string, maxSize: number = 3000) {
     this.repoPath = repoPath;
     this.maxSize = maxSize;
+  }
+
+  /** Test helpers for direct cache manipulation */
+  setForTest(key: string, value: string): void {
+    this.set(key, value);
+  }
+
+  hasForTest(key: string): boolean {
+    return this.cache.has(key);
   }
 
   async get(relativePath: string): Promise<string> {
