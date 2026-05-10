@@ -66,6 +66,16 @@ Run from the project root. This parses all source files, builds the knowledge gr
 | `--no-reuse-options` | Do not reuse stored analyze options from previous index |
 | `--embeddings` | Enable embedding generation (off by default) |
 | `--extensions <ext>` | Comma-separated file extensions |
+
+**Unity 项目推荐:** 对 Unity 项目使用 `--extensions .cs` 配合 `--csharp-define-csproj <path>` 以获得最佳分析性能：
+
+```bash
+$GN analyze --extensions .cs --csharp-define-csproj /path/to/Assembly-CSharp.csproj
+```
+
+- Unity 资源绑定（`UNITY_COMPONENT_INSTANCE`、`UNITY_SERIALIZED_TYPE_IN` 等）和 lifecycle 合成边由内部 Unity Scan 阶段通过独立 glob 自动加载，无需在 `--extensions` 中包含 `.meta/.prefab/.unity/.asset`
+- 纳入 `.meta` 会建立约 15 倍的 File 节点且对 Unity 绑定无益（`.meta` 由 `meta-index.ts` 独立处理）
+- 性能影响：neonspark 规模项目从约 22 分钟降至 3–5 分钟
 | `--repo-alias <name>` | Override indexed repository name |
 | `--csharp-define-csproj <path>` | Load C# `DefineConstants` from `.csproj` for `#if` normalization |
 | `--skills` | Generate repo-specific skill files from detected communities |

@@ -1,7 +1,7 @@
 /**
  * Phase: unity-scan
  *
- * Scans Unity-specific files (.prefab, .unity, .asset, .uxml, .uss, .meta)
+ * Scans Unity-specific files (.prefab, .unity, .asset, .uxml, .uss)
  * and produces synthetic UNITY_* edges in the knowledge graph.
  *
  * Only activates when the repository contains Unity file extensions.
@@ -16,7 +16,7 @@ import type { PipelinePhase, PipelineContext, PhaseResult } from './types.js';
 import type { ParseOutput } from './parse.js';
 import { processUnityResources } from '../unity-resource-processor.js';
 
-const UNITY_EXTENSIONS = new Set(['.prefab', '.unity', '.asset', '.uxml', '.uss', '.meta']);
+const UNITY_EXTENSIONS = new Set(['.prefab', '.unity', '.asset', '.uxml', '.uss']);
 
 export interface UnityScanOutput {
   unityFileCount: number;
@@ -54,11 +54,22 @@ export const unityScanPhase: PipelinePhase<UnityScanOutput> = {
       return UNITY_EXTENSIONS.has(ext);
     });
 
-    if (unityFiles.length === 0) {
+    // Fast path: Unity resource extensions found in allPaths
+    const hasUnityExtensions = unityFiles.length > 0;
+
+    // Fallback: check for C# Class nodes in graph (covers --extensions .cs only)
+    // Only runs when fast path fails — zero overhead in the common case
+    const hasCsClasses = hasUnityExtensions
+      ? true
+      : [...ctx.graph.iterNodes()].some(
+          (n: any) => n.label === 'Class' && String(n.properties?.filePath || '').endsWith('.cs'),
+        );
+
+    if (!hasCsClasses) {
       ctx.onProgress({
         phase: 'unity-scan' as any,
         percent: 100,
-        message: 'Unity scan: no Unity files detected — skipping',
+        message: 'Unity scan: no Unity files or C# classes detected — skipping',
       });
       return { unityFileCount: 0, edgesProduced: 0, hasUnityFiles: false };
     }
