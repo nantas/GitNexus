@@ -22,4 +22,4 @@
 - [x] 3.2 确认 `npm run test:all` 在 10 分钟内完成（或至少不因配置错误而立即失败）
   - 全量测试因 LadybugDB 串行 N-API 开销仍需 >5 分钟，但配置变更后不再因错误配置立即失败
 - [x] 3.3 运行 `npx tsc --noEmit` 确认无编译错误
-- [ ] 3.4 提交 commit，信息为 `"fix: split npm test scripts and increase vitest timeouts to prevent CI timeout"`
+- [x] 3.4 提交 commit，信息为 `"fix: split npm test scripts and increase vitest timeouts to prevent CI timeout"`
