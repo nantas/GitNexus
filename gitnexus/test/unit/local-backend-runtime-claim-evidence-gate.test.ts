@@ -4,23 +4,10 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { verifyRuntimeClaimOnDemand } from '../../src/mcp/local/runtime-chain-verify.js';
 import { computeVerifierMinimumEvidenceSatisfied } from '../../src/mcp/local/local-backend.js';
-import { writeCompiledRuleBundle } from '../../src/rule-lab/compiled-bundles.js';
 
 function makeClosedChainExecutor() {
   return async (query: string) => {
     const q = String(query || '');
-
-    if (q.includes("r.reason CONTAINS $ruleId") && q.includes("r.reason STARTS WITH 'unity-rule-'")) {
-      return [{
-        sourceName: 'GunGraph',
-        sourceFilePath: 'Assets/NEON/Code/Game/Graph/Graphs/GunGraph.cs',
-        sourceStartLine: 1,
-        targetName: 'RegisterEvents',
-        targetFilePath: 'Assets/NEON/Code/Game/Graph/Graphs/GunGraph.cs',
-        targetStartLine: 40,
-        reason: 'unity-rule-demo.reload.evidence-gate.v2',
-      }];
-    }
 
     if (q.includes('WHERE n.name IN $symbolNames')) {
       return [{
@@ -84,63 +71,6 @@ describe('runtime claim evidence gate', () => {
     const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'runtime-claim-evidence-gate-'));
     const graphAsset = 'Assets/NEON/Graphs/PlayerGun/Gungraph_use/1_weapon_orb_key.asset';
     try {
-      await fs.mkdir(path.join(repoRoot, 'Assets/NEON/Graphs/PlayerGun/Gungraph_use'), { recursive: true });
-      await fs.writeFile(path.join(repoRoot, graphAsset), 'guid: 7289942075c31ab458d5214b4adc38a1\n', 'utf-8');
-      await fs.writeFile(path.join(repoRoot, `${graphAsset}.meta`), 'fileFormatVersion: 2\nguid: 7289942075c31ab458d5214b4adc38a1\n', 'utf-8');
-      await writeCompiledRuleBundle(
-        path.join(repoRoot, '.gitnexus', 'rules'),
-        'verification_rules',
-        [
-          {
-            id: 'demo.reload.evidence-gate.v2',
-            version: '2.0.0',
-            trigger_family: 'reload',
-            trigger_tokens: ['reload', 'gungraph'],
-            resource_types: ['asset'],
-            host_base_type: ['GunGraph'],
-            required_hops: ['resource', 'guid_map', 'code_loader', 'code_runtime'],
-            guarantees: ['topology_chain_closed'],
-            non_guarantees: ['does_not_prove_runtime_execution'],
-            next_action: 'gitnexus query "Reload NEON.Game.Graph.Nodes.Reloads"',
-            file_path: 'approved/demo.reload.evidence-gate.v2.yaml',
-            match: {
-              trigger_tokens: ['reload', 'gungraph'],
-              symbol_kind: [],
-              module_scope: [],
-              resource_types: ['asset'],
-              host_base_type: ['GunGraph'],
-            },
-            topology: [
-              { hop: 'resource', from: { entity: 'resource' }, to: { entity: 'script' }, edge: { kind: 'binds_script' } },
-              { hop: 'guid_map', from: { entity: 'resource' }, to: { entity: 'resource' }, edge: { kind: 'maps_guid' } },
-              {
-                hop: 'code_loader',
-                from: { entity: 'script' },
-                to: { entity: 'script' },
-                edge: { kind: 'calls' },
-                constraints: { targetName: 'RegisterEvents' },
-              },
-              {
-                hop: 'code_runtime',
-                from: { entity: 'script' },
-                to: { entity: 'runtime' },
-                edge: { kind: 'calls' },
-                constraints: { sourceName: 'RegisterEvents', targetName: 'StartRoutineWithEvents' },
-              },
-            ],
-            closure: {
-              required_hops: ['resource', 'guid_map', 'code_loader', 'code_runtime'],
-              failure_map: { missing_evidence: 'rule_matched_but_evidence_missing' },
-            },
-            claims: {
-              guarantees: ['topology_chain_closed'],
-              non_guarantees: ['does_not_prove_runtime_execution'],
-              next_action: 'gitnexus query "Reload NEON.Game.Graph.Nodes.Reloads"',
-            },
-          },
-        ],
-      );
-
       const out = await verifyRuntimeClaimOnDemand({
         repoPath: repoRoot,
         queryText: 'unrelated prompt text',

@@ -561,10 +561,9 @@ export async function runFullAnalysis(
 
     // Assemble diagnostics context from pipeline result
     const diagnostics: DiagnosticsContext | undefined =
-      pipelineResult.csharpPreprocDiagnostics || pipelineResult.unityRuleBindingResult || lbugResult.fallbackInsertStats
+      pipelineResult.csharpPreprocDiagnostics || lbugResult.fallbackInsertStats
         ? {
             csharpPreproc: pipelineResult.csharpPreprocDiagnostics,
-            unityBinding: pipelineResult.unityRuleBindingResult,
             fallbackWarnings: lbugResult.warnings,
             fallbackStats: lbugResult.fallbackInsertStats,
           }

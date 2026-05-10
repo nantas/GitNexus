@@ -8,7 +8,6 @@ it('toPipelineRuntimeSummary drops graph reference and preserves reporting field
     communityResult: { stats: { totalCommunities: 3 } },
     processResult: { stats: { totalProcesses: 2 } },
     unityResult: { diagnostics: ['scanContext: scripts=1'] },
-    unityRuleBindingResult: { edgesInjected: 1, ruleResults: [], diagnostics: { summary: [] } },
     csharpPreprocDiagnostics: {
       enabled: true,
       defineSymbolCount: 2,
@@ -23,6 +22,5 @@ it('toPipelineRuntimeSummary drops graph reference and preserves reporting field
   expect('graph' in out).toBe(false);
   expect(out.totalFileCount).toBe(12);
   expect(out.communityResult?.stats.totalCommunities).toBe(3);
-  expect(out.unityRuleBindingResult?.edgesInjected).toBe(1);
   expect(out.csharpPreprocDiagnostics?.normalizedFiles).toBe(1);
 });

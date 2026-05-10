@@ -219,22 +219,6 @@ fi
 }
 ```
 
-### 1.5 编译规则
-
-将 approved YAML 编译为 compiled bundle：
-
-```bash
-$GITNEXUS_CLI rule-lab compile --repo-path "$TARGET_REPO"
-```
-
-### 1.6 验证规则可加载
-
-```bash
-$GITNEXUS_CLI rule-lab discover --repo-path "$TARGET_REPO" --scope full
-```
-
-如果输出包含新规则的 slice，说明规则已正确加载。如果报错，检查 YAML 格式和 catalog.json 结构。
-
 ---
 
 ## Phase 2: 执行 analyze
@@ -355,5 +339,5 @@ mcp__gitnexus__cypher:
 - 设计文档：`docs/plans/2026-04-03-unity-runtime-process-rule-driven-design.md`
 - 实现手册：`docs/unity-runtime-process-rule-driven-implementation.md`
 - SSOT：`docs/unity-runtime-process-source-of-truth.md`
-- 规则类型定义：`gitnexus/src/rule-lab/types.ts:90-114`
+- 规则类型定义：`gitnexus/src/mcp/local/runtime-claim-rule-registry.ts`
 - 注入逻辑：`gitnexus/src/core/ingestion/unity-runtime-binding-rules.ts`

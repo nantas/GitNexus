@@ -1,7 +1,24 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
-import { loadCompiledRuleBundle } from '../../rule-lab/compiled-bundles.js';
-import type { UnityResourceBinding, LifecycleOverrides } from '../../rule-lab/types.js';
+
+export interface UnityResourceBinding {
+  kind: 'asset_ref_loads_components' | 'method_triggers_field_load' | 'method_triggers_scene_load' | 'method_triggers_method';
+  description?: string;
+  ref_field_pattern?: string;
+  target_entry_points?: string[];
+  host_class_pattern?: string;
+  field_name?: string;
+  loader_methods?: string[];
+  scene_name?: string;
+  source_class_pattern?: string;
+  source_method?: string;
+  target_class_pattern?: string;
+  target_method?: string;
+}
+
+export interface LifecycleOverrides {
+  additional_entry_points?: string[];
+  scope?: string;
+}
 
 export interface RuntimeClaimRuleCatalogEntry {
   id: string;
@@ -278,117 +295,4 @@ export function parseRuleYaml(raw: string, filePath: string): RuntimeClaimRule {
     lifecycle_overrides,
     file_path: filePath,
   };
-}
-
-/**
- * Runtime claim rule registry remains the source for analyze-time synthetic-edge production
- * and offline governance/report workflows. Query-time runtime closure verification is graph-only.
- */
-export async function loadRuleRegistry(repoPath: string, rulesRoot?: string): Promise<RuntimeClaimRuleRegistry> {
-  const normalizedRepoPath = path.resolve(repoPath);
-  const root = rulesRoot
-    ? path.resolve(rulesRoot)
-    : path.join(normalizedRepoPath, '.gitnexus', 'rules');
-  const compiledVerificationBundle = await loadCompiledRuleBundle(normalizedRepoPath, 'verification_rules', root);
-  if (compiledVerificationBundle && compiledVerificationBundle.rules.length > 0) {
-    return {
-      repoPath: normalizedRepoPath,
-      rulesRoot: root,
-      catalogPath: path.join(root, 'compiled', 'verification_rules.v2.json'),
-      activeRules: compiledVerificationBundle.rules.map((rule) => ({
-        id: rule.id,
-        version: rule.version,
-        trigger_family: rule.trigger_family,
-        resource_types: rule.resource_types,
-        host_base_type: rule.host_base_type,
-        match: rule.match,
-        required_hops: rule.required_hops,
-        guarantees: rule.guarantees,
-        non_guarantees: rule.non_guarantees,
-        next_action: rule.next_action,
-        file_path: rule.file_path,
-        topology: rule.topology,
-        closure: rule.closure,
-        claims: rule.claims,
-      })),
-    };
-  }
-  const catalogPath = path.join(root, 'catalog.json');
-  let catalogRaw: string;
-  try {
-    catalogRaw = await fs.readFile(catalogPath, 'utf-8');
-  } catch (error: any) {
-    if (error?.code === 'ENOENT') {
-      throw new RuleRegistryLoadError(
-        'rule_catalog_missing',
-        `Runtime claim rule catalog not found: ${catalogPath}`,
-        { repoPath: normalizedRepoPath, rulesRoot: root, catalogPath },
-      );
-    }
-    throw error;
-  }
-
-  let catalog: { rules?: RuntimeClaimRuleCatalogEntry[] };
-  try {
-    catalog = JSON.parse(catalogRaw) as { rules?: RuntimeClaimRuleCatalogEntry[] };
-  } catch {
-    throw new RuleRegistryLoadError(
-      'rule_catalog_invalid',
-      `Runtime claim rule catalog is invalid JSON: ${catalogPath}`,
-      { repoPath: normalizedRepoPath, rulesRoot: root, catalogPath },
-    );
-  }
-  const catalogRules = Array.isArray(catalog.rules) ? catalog.rules : [];
-
-  const activeRules: RuntimeClaimRule[] = [];
-  for (const entry of catalogRules) {
-    if (entry.enabled === false) continue;
-    const relativeRulePath = String(entry.file || path.join('approved', `${entry.id}.yaml`));
-    const rulePath = path.join(root, relativeRulePath);
-    let raw: string;
-    try {
-      raw = await fs.readFile(rulePath, 'utf-8');
-    } catch (error: any) {
-      if (error?.code === 'ENOENT') {
-        throw new RuleRegistryLoadError(
-          'rule_file_missing',
-          `Runtime claim rule file not found: ${rulePath}`,
-          { repoPath: normalizedRepoPath, rulesRoot: root, catalogPath, rulePath, ruleId: entry.id },
-        );
-      }
-      throw error;
-    }
-    const parsed = parseRuleYaml(raw, rulePath);
-    if (parsed.id !== entry.id) {
-      throw new Error(`Rule id mismatch between catalog and yaml: ${entry.id} vs ${parsed.id}`);
-    }
-    activeRules.push({
-      ...parsed,
-      version: entry.version || parsed.version,
-      family: entry.family || parsed.family || 'verification_rules',
-    });
-  }
-
-  return {
-    repoPath: normalizedRepoPath,
-    rulesRoot: root,
-    catalogPath,
-    activeRules,
-  };
-}
-
-export async function loadAnalyzeRules(repoPath: string, rulesRoot?: string): Promise<RuntimeClaimRule[]> {
-  const normalizedRepoPath = path.resolve(repoPath);
-  const root = rulesRoot
-    ? path.resolve(rulesRoot)
-    : path.join(normalizedRepoPath, '.gitnexus', 'rules');
-  const analyzeBundle = await loadCompiledRuleBundle(normalizedRepoPath, 'analyze_rules', root);
-  if (analyzeBundle && analyzeBundle.rules.length > 0) {
-    return analyzeBundle.rules.map((rule) => ({
-      ...rule,
-      family: 'analyze_rules' as const,
-    }));
-  }
-  const registry = await loadRuleRegistry(repoPath, rulesRoot);
-  return registry.activeRules.filter((r) => r.family === 'analyze_rules');
 }

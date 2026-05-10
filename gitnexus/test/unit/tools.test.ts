@@ -13,8 +13,6 @@ import { GITNEXUS_TOOLS } from '../../src/mcp/tools.js';
 const GROUP_TOOLS = new Set([
   'group_list', 'group_sync',
   'unity_ui_trace',
-  'rule_lab_analyze', 'rule_lab_review_pack', 'rule_lab_curate',
-  'rule_lab_promote', 'rule_lab_regress',
 ]);
 const MUTATING_TOOLS = new Set(['rename', 'group_sync']);
 // Read-only tools that legitimately reach external systems. Add a tool name
@@ -22,8 +20,8 @@ const MUTATING_TOOLS = new Set(['rename', 'group_sync']);
 const OPEN_WORLD_READ_ONLY_TOOLS = new Set(['query']);
 
 describe('GITNEXUS_TOOLS', () => {
-  it('exports exactly 19 tools', () => {
-    expect(GITNEXUS_TOOLS).toHaveLength(19);
+  it('exports exactly 14 tools', () => {
+    expect(GITNEXUS_TOOLS).toHaveLength(14);
   });
 
   it('contains all expected tool names', () => {
@@ -32,8 +30,6 @@ describe('GITNEXUS_TOOLS', () => {
       expect.arrayContaining([
         'list_repos', 'query', 'cypher', 'context',
         'detect_changes', 'rename', 'impact', 'unity_ui_trace',
-        'rule_lab_analyze', 'rule_lab_review_pack',
-        'rule_lab_curate', 'rule_lab_promote', 'rule_lab_regress',
       ])
     );
   });
@@ -194,18 +190,6 @@ describe('GITNEXUS_TOOLS', () => {
     const traceTool = GITNEXUS_TOOLS.find(t => t.name === 'unity_ui_trace')!;
     expect(traceTool.inputSchema.required).toContain('target');
     expect(traceTool.inputSchema.required).toContain('goal');
-  });
-
-  it('rule_lab_analyze requires run_id and slice_id', () => {
-    const tool = GITNEXUS_TOOLS.find(t => t.name === 'rule_lab_analyze')!;
-    expect(tool.inputSchema.required).toContain('run_id');
-    expect(tool.inputSchema.required).toContain('slice_id');
-  });
-
-  it('rule_lab_regress requires precision and coverage', () => {
-    const tool = GITNEXUS_TOOLS.find(t => t.name === 'rule_lab_regress')!;
-    expect(tool.inputSchema.required).toContain('precision');
-    expect(tool.inputSchema.required).toContain('coverage');
   });
 
   it('query tool exposes phase3 evidence and hydration controls', () => {

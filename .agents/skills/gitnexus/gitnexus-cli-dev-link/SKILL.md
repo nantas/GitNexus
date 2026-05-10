@@ -25,9 +25,19 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 CLI_PKG_DIR="$REPO_ROOT/gitnexus"
 
 cd "$CLI_PKG_DIR"
+
+# Step 1: Sync dependencies to match package.json declarations
+#    This is critical — stale node_modules (e.g. @ladybugdb/core 0.15.x
+#    when ^0.16.1 is declared) can cause SIGSEGV at runtime.
+npm install
+
+# Step 2: Build from source (clean + tsc)
 npm run build
+
+# Step 3: Create global symlink
 npm link
 
+# Step 4: Verify
 echo "gitnexus path: $(command -v gitnexus)"
 ls -l "$(command -v gitnexus)"
 
@@ -40,6 +50,15 @@ fi
 
 gitnexus --version
 ```
+
+### Why `npm install` before build?
+
+`npm link` reuses the local `node_modules/`. If installed versions drift
+from `package.json` declarations (common after git merge/rebase), the
+built CLI will link against wrong native modules at runtime. Known
+failure mode: `@ladybugdb/core` 0.15.x (SIGSEGV on 8GB heap) vs the
+declared `^0.16.1` (fixed). Running `npm install` first ensures
+`node_modules/` matches declarations.
 
 Expected result:
 

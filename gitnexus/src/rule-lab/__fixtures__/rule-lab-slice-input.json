@@ -1,7 +1,0 @@
-{
-  "id": "slice-a",
-  "trigger_family": "reload",
-  "resource_types": ["prefab"],
-  "host_base_type": ["ReloadBase"],
-  "required_hops": ["resource", "code_runtime"]
-}

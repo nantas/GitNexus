@@ -6,7 +6,6 @@
 import { Command } from 'commander';
 import { createRequire } from 'node:module';
 import { createLazyAction } from './lazy-action.js';
-import { attachRuleLabCommands } from './rule-lab.js';
 import { registerGroupCommands } from './group.js';
 
 const _require = createRequire(import.meta.url);
@@ -75,9 +74,6 @@ program
   .option('--all', 'Clean all indexed repos')
   .action(createLazyAction(() => import('./clean.js'), 'cleanCommand'));
 
-attachRuleLabCommands(program, (handlerName) =>
-  createLazyAction(() => import('./rule-lab.js'), handlerName),
-);
 registerGroupCommands(program);
 
 program

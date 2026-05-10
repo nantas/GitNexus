@@ -40,72 +40,8 @@ it('formatUnityDiagnosticsSummary truncates output after max preview items', () 
   ]);
 });
 
-it('formatUnityRuleBindingSummary renders diagnostics and agent report status', () => {
-  const lines = formatUnityRuleBindingSummary({
-    edgesInjected: 3,
-    ruleResults: [{ ruleId: 'unity.global-init', edgesInjected: 3 }],
-    diagnostics: {
-      rulesEvaluated: 1,
-      bindingsEvaluated: 1,
-      bindingsByKind: { method_triggers_scene_load: 1 },
-      methodLookupCalls: 5,
-      methodLookupCacheHits: 4,
-      sceneRuntimeTraversalCalls: 3,
-      sceneRuntimeTraversalCacheHits: 2,
-      sceneRuntimeResourcesVisited: 6,
-      anomalies: [],
-      shouldAgentReport: false,
-      agentReportReason: 'no anomalies detected',
-      summary: [
-        'rule_binding.summary: rules=1, bindings=1, edges=3',
-        'rule_binding.lookup: method_calls=5, cache_hits=4',
-        'rule_binding.agent_report: should_report=false reason="no anomalies detected"',
-      ],
-    },
-  } as any);
-
-  expect(lines).toEqual([
-    'Unity Rule Binding Diagnostics:',
-    '- rule_binding.summary: rules=1, bindings=1, edges=3',
-    '- rule_binding.lookup: method_calls=5, cache_hits=4',
-    '- rule_binding.agent_report: should_report=false reason="no anomalies detected"',
-  ]);
-});
-
-it('formatUnityRuleBindingSummary renders anomaly preview', () => {
-  const lines = formatUnityRuleBindingSummary({
-    edgesInjected: 0,
-    ruleResults: [],
-    diagnostics: {
-      rulesEvaluated: 1,
-      bindingsEvaluated: 1,
-      bindingsByKind: { method_triggers_scene_load: 1 },
-      methodLookupCalls: 0,
-      methodLookupCacheHits: 0,
-      sceneRuntimeTraversalCalls: 0,
-      sceneRuntimeTraversalCacheHits: 0,
-      sceneRuntimeResourcesVisited: 0,
-      anomalies: [
-        'rule=unity.global-init: scene "Global" not found in File(.unity) index',
-        'rule=unity.global-init: method_triggers_scene_load missing host_class_pattern, loader_methods, or scene_name',
-      ],
-      shouldAgentReport: true,
-      agentReportReason: 'rule-binding anomalies detected',
-      summary: [
-        'rule_binding.summary: rules=1, bindings=1, edges=0',
-        'rule_binding.agent_report: should_report=true reason="rule-binding anomalies detected"',
-      ],
-    },
-  } as any, 1);
-
-  expect(lines).toEqual([
-    'Unity Rule Binding Diagnostics:',
-    '- rule_binding.summary: rules=1, bindings=1, edges=0',
-    '- rule_binding.agent_report: should_report=true reason="rule-binding anomalies detected"',
-    '- rule_binding.anomalies: count=2',
-    '- rule_binding.anomaly: rule=unity.global-init: scene "Global" not found in File(.unity) index',
-    '- rule_binding.anomaly: ... 1 more',
-  ]);
+it('formatUnityRuleBindingSummary returns empty (functionality removed)', () => {
+  expect(formatUnityRuleBindingSummary(undefined)).toEqual([]);
 });
 
 it('formatFallbackSummary returns empty when no warnings exist', () => {

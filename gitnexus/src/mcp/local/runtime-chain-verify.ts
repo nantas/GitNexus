@@ -2,7 +2,6 @@ import type { RuntimeChainEvidenceLevel } from './runtime-chain-evidence.js';
 import { type RuntimeClaim } from './runtime-claim.js';
 import { extractRuntimeGraphCandidates } from './runtime-chain-graph-candidates.js';
 import { evaluateRuntimeClosure } from './runtime-chain-closure-evaluator.js';
-import type { RuntimeClaimRule } from './runtime-claim-rule-registry.js';
 
 export type RuntimeChainVerifyMode = 'off' | 'on-demand';
 export type RuntimeChainStatus = 'pending' | 'verified_partial' | 'verified_full' | 'failed';
@@ -46,7 +45,6 @@ interface VerifyRuntimeChainInput {
   symbolFilePath?: string;
   resourceBindings?: Array<{ resourcePath?: string }>;
   requiredHops?: string[];
-  rule?: RuntimeClaimRule;
 }
 interface VerifyRuntimeClaimInput extends VerifyRuntimeChainInput {
   rulesRoot?: string;
@@ -136,89 +134,40 @@ function buildDefaultVerifyNextCommand(input: {
   return `node gitnexus/dist/cli/index.js query --unity-resources on --unity-hydration parity --runtime-chain-verify on-demand "${escapedQuery}"`;
 }
 
-async function verifyRuleDrivenRuntimeChain(input: VerifyRuntimeChainInput): Promise<RuntimeChainResult> {
-  const ruleId = input.rule?.id;
-  if (!ruleId) {
-    return { status: 'failed', evidence_level: 'none', evidence_source: 'analyze_time', hops: [], gaps: [] };
-  }
-  try {
-    const rows = await input.executeParameterized(`
-      MATCH (s)-[r:CodeRelation {type: 'CALLS'}]->(t)
-      WHERE r.reason CONTAINS $ruleId
-        AND r.reason STARTS WITH 'unity-rule-'
-      RETURN s.name AS sourceName, s.filePath AS sourceFilePath, s.startLine AS sourceStartLine,
-             t.name AS targetName, t.filePath AS targetFilePath, t.startLine AS targetStartLine,
-             r.reason AS reason
-      LIMIT 20
-    `, { ruleId });
-    if (rows.length > 0) {
-      const hops: RuntimeChainHop[] = rows.map((row) => ({
-        hop_type: 'code_runtime' as RuntimeChainHopType,
-        anchor: `${row.sourceFilePath}:${row.sourceStartLine || 1}->${row.targetFilePath}:${row.targetStartLine || 1}`,
-        confidence: 'high' as const,
-        note: `Synthetic edge injected at analyze time (${row.reason}).`,
-        snippet: `${row.sourceName} -> ${row.targetName}`,
-      }));
-      return {
-        status: 'verified_full',
-        evidence_level: 'verified_chain',
-        evidence_source: 'analyze_time',
-        hops,
-        gaps: [],
-      };
-    }
-  } catch {
-    // Graph query failed; fall through to no match.
-  }
-  return {
-    status: 'failed',
-    evidence_level: 'none',
-    evidence_source: 'analyze_time',
-    hops: [],
-    gaps: [],
-  };
-}
-
 export async function verifyRuntimeChainOnDemand(
   input: VerifyRuntimeChainInput,
 ): Promise<RuntimeChainResult | undefined> {
-  if (!input.rule) {
-    if (!hasStructuredVerifierAnchors(input) || !String(input.symbolName || '').trim()) return undefined;
-    const candidates = await extractRuntimeGraphCandidates({
-      executeParameterized: input.executeParameterized,
-      symbolName: input.symbolName,
-      symbolFilePath: input.symbolFilePath,
-    });
-    return toGraphOnlyRuntimeChainResult({
-      queryText: input.queryText,
-      symbolName: input.symbolName,
-      resourceSeedPath: input.resourceSeedPath,
-      mappedSeedTargets: input.mappedSeedTargets,
-      resourceBindings: input.resourceBindings,
-      candidates,
-    });
-  }
-  return await verifyRuleDrivenRuntimeChain(input);
+  if (!hasStructuredVerifierAnchors(input) || !String(input.symbolName || '').trim()) return undefined;
+  const candidates = await extractRuntimeGraphCandidates({
+    executeParameterized: input.executeParameterized,
+    symbolName: input.symbolName,
+    symbolFilePath: input.symbolFilePath,
+  });
+  return toGraphOnlyRuntimeChainResult({
+    queryText: input.queryText,
+    symbolName: input.symbolName,
+    resourceSeedPath: input.resourceSeedPath,
+    mappedSeedTargets: input.mappedSeedTargets,
+    resourceBindings: input.resourceBindings,
+    candidates,
+  });
 }
 function buildFailureRuntimeClaim(input: {
   reason: RuntimeClaim['reason'];
   next_action: string;
-  rule?: RuntimeClaimRule;
 }): RuntimeClaim {
   return {
-    rule_id: input.rule?.id || 'none',
-    rule_version: input.rule?.version || '0.0.0',
+    rule_id: 'none',
+    rule_version: '0.0.0',
     scope: {
-      resource_types: input.rule?.resource_types || [],
-      host_base_type: input.rule?.host_base_type || [],
-      trigger_family: input.rule?.trigger_family || 'none',
+      resource_types: [],
+      host_base_type: [],
+      trigger_family: 'none',
     },
     status: 'failed',
     evidence_level: 'none',
     guarantees: [],
-    non_guarantees: input.rule?.non_guarantees?.length
-      ? [...input.rule.non_guarantees]
-      : ['runtime_chain_verification_not_executed'],
+    non_guarantees: ['runtime_chain_verification_not_executed'],
     hops: [],
     gaps: [],
     reason: input.reason,
@@ -304,10 +253,7 @@ export async function verifyRuntimeClaimOnDemand(
     });
   }
 
-  const graphOnlyRuntimeChain = await verifyRuntimeChainOnDemand({
-    ...input,
-    rule: undefined,
-  });
+  const graphOnlyRuntimeChain = await verifyRuntimeChainOnDemand(input);
   if (graphOnlyRuntimeChain) {
     return buildGraphOnlyRuntimeClaim({
       runtimeChain: graphOnlyRuntimeChain,

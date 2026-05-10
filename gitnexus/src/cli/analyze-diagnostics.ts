@@ -1,5 +1,4 @@
 import type { CSharpPreprocDiagnostics } from '../types/pipeline.js';
-import type { UnityRuntimeBindingResult } from '../core/ingestion/unity-runtime-binding-rules.js';
 import {
   formatCSharpPreprocDiagnosticsSummary,
   formatUnityRuleBindingSummary,
@@ -9,7 +8,7 @@ import {
 
 export interface DiagnosticsContext {
   csharpPreproc?: CSharpPreprocDiagnostics;
-  unityBinding?: UnityRuntimeBindingResult;
+  unityBinding?: undefined;
   fallbackWarnings?: string[];
   fallbackStats?: FallbackInsertStats;
 }

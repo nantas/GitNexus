@@ -3,7 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { verifyRuntimeChainOnDemand, verifyRuntimeClaimOnDemand } from './runtime-chain-verify.js';
-import { promoteCuratedRules } from '../../rule-lab/promote.js';
 
 async function makeTempRepo(): Promise<string> {
   const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'runtime-chain-verify-'));
@@ -636,59 +635,4 @@ describe('runtime chain verify', () => {
     await fs.rm(repoPath, { recursive: true, force: true });
   });
 
-  it('phase5 promote artifacts do not alter query-time graph-only rule identity', async () => {
-    const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'runtime-chain-rule-lab-promote-'));
-    const sliceDir = path.join(repoPath, '.gitnexus', 'rules', 'lab', 'runs', 'run-x', 'slices', 'slice-a');
-    await fs.mkdir(sliceDir, { recursive: true });
-    await fs.writeFile(
-      path.join(sliceDir, 'curated.json'),
-      JSON.stringify({
-        run_id: 'run-x',
-        slice_id: 'slice-a',
-        curated: [
-          {
-            id: 'candidate-startup-1',
-            rule_id: 'demo.startup.v1',
-            title: 'startup startup graph',
-            confirmed_chain: {
-              steps: [{ hop_type: 'resource', anchor: 'Assets/Rules/startup.asset:1', snippet: 'Startup Graph Trigger' }],
-            },
-            guarantees: ['startup trigger matching is confirmed'],
-            non_guarantees: ['does not prove full runtime ordering'],
-          },
-        ],
-      }, null, 2),
-      'utf-8',
-    );
-
-    await promoteCuratedRules({ repoPath, runId: 'run-x', sliceId: 'slice-a', version: '1.0.0' });
-
-    const out = await verifyRuntimeClaimOnDemand({
-      repoPath,
-      queryText: 'Startup Graph Trigger',
-      symbolName: 'StartupNode',
-      symbolFilePath: 'Assets/Rules/StartupNode.cs',
-      resourceSeedPath: 'Assets/Rules/startup.asset',
-      executeParameterized: async (query: string) => {
-        if (String(query || '').includes('WHERE n.name IN $symbolNames')) {
-          return [{
-            id: 'Class:Assets/Rules/StartupNode.cs:StartupNode',
-            name: 'StartupNode',
-            type: 'Class',
-            filePath: 'Assets/Rules/StartupNode.cs',
-            startLine: 1,
-          }];
-        }
-        return [];
-      },
-      resourceBindings: [{ resourcePath: 'Assets/Rules/startup.asset' }],
-    });
-
-    expect(out.rule_id).toBe('graph-only.runtime-closure.v1');
-    expect(out.rule_id).not.toBe('demo.startup.v1');
-    expect(out.status).toBe('verified_partial');
-    expect(out.evidence_level).toBe('verified_segment');
-    expect(out.reason).toBeUndefined();
-    await fs.rm(repoPath, { recursive: true, force: true });
-  });
 });

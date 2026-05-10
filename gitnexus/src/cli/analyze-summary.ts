@@ -1,5 +1,4 @@
 import type { CSharpPreprocDiagnostics } from '../types/pipeline.js';
-import type { UnityRuntimeBindingResult } from '../core/ingestion/unity-runtime-binding-rules.js';
 
 export interface FallbackInsertStats {
   attempted: number;
@@ -57,33 +56,10 @@ export function formatUnityDiagnosticsSummary(
 }
 
 export function formatUnityRuleBindingSummary(
-  result: UnityRuntimeBindingResult | undefined,
-  previewLimit: number = 3,
+  _result: undefined,
+  _previewLimit: number = 3,
 ): string[] {
-  if (!result) return [];
-  const diagnostics = result.diagnostics;
-  if (diagnostics.summary.length === 0 && diagnostics.anomalies.length === 0) {
-    return [];
-  }
-  const lines = ['Unity Rule Binding Diagnostics:'];
-  for (const message of diagnostics.summary) {
-    if (!message.startsWith('rule_binding.anomaly:')) {
-      lines.push(`- ${message}`);
-    }
-  }
-  const anomalies = diagnostics.anomalies;
-  if (anomalies.length === 0) {
-    return lines;
-  }
-  lines.push(`- rule_binding.anomalies: count=${anomalies.length}`);
-  const limit = previewLimit > 0 ? previewLimit : anomalies.length;
-  for (const message of anomalies.slice(0, limit)) {
-    lines.push(`- rule_binding.anomaly: ${message}`);
-  }
-  if (anomalies.length > limit) {
-    lines.push(`- rule_binding.anomaly: ... ${anomalies.length - limit} more`);
-  }
-  return lines;
+  return [];
 }
 
 export function formatFallbackSummary(

@@ -12,7 +12,6 @@ import path from 'node:path';
 import { LocalBackend } from '../../src/mcp/local/local-backend.js';
 import { readResource } from '../../src/mcp/resources.js';
 import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
-import { promoteCuratedRules } from '../../src/rule-lab/promote.js';
 import { withTestLbugDB } from '../helpers/test-indexed-db.js';
 import {
   LOCAL_BACKEND_SEED_DATA,
@@ -439,78 +438,6 @@ response_profile: 'full',
       expect(typeof out.runtime_claim.policy_adjusted).toBe('boolean');
     });
 
-    it('phase5 rule-lab promoted rule is loadable', async () => {
-      const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'phase5-rule-lab-calltool-'));
-      const runId = 'run-x';
-      const sliceId = 'slice-a';
-      const sliceDir = path.join(repoPath, '.gitnexus', 'rules', 'lab', 'runs', runId, 'slices', sliceId);
-      await fs.mkdir(sliceDir, { recursive: true });
-      await fs.writeFile(
-        path.join(sliceDir, 'curated.json'),
-        JSON.stringify({
-          run_id: runId,
-          slice_id: sliceId,
-          curated: [
-            {
-              id: 'candidate-startup-1',
-              rule_id: 'demo.startup.v1',
-              title: 'startup startup graph',
-              confirmed_chain: {
-                steps: [{ hop_type: 'code_runtime', anchor: 'Assets/Rules/startup.asset:1', snippet: 'Startup Graph Trigger' }],
-              },
-              guarantees: ['startup trigger matching is confirmed'],
-              non_guarantees: ['does not prove full runtime ordering'],
-            },
-          ],
-        }, null, 2),
-        'utf-8',
-      );
-      await promoteCuratedRules({ repoPath, runId, sliceId, version: '1.0.0' });
-
-      try {
-        vi.mocked(listRegisteredRepos).mockResolvedValue([
-          {
-            name: 'test-repo',
-            path: '/test/repo',
-            storagePath: handle.tmpHandle.dbPath,
-            indexedAt: new Date().toISOString(),
-            lastCommit: 'abc123',
-            stats: { files: 2, nodes: 3, communities: 1, processes: 1 },
-          },
-          {
-            name: 'phase5-rule-lab-repo',
-            path: repoPath,
-            storagePath: handle.tmpHandle.dbPath,
-            indexedAt: new Date().toISOString(),
-            lastCommit: 'abc123',
-            stats: { files: 2, nodes: 3, communities: 1, processes: 1 },
-          },
-        ]);
-
-        const out = await backend.callTool('query', {
-response_profile: 'full',
-          repo: 'phase5-rule-lab-repo',
-          query: 'Startup Graph Trigger',
-          unity_resources: 'on',
-          runtime_chain_verify: 'on-demand',
-        });
-        expect(out.runtime_claim?.rule_id).toBe('graph-only.runtime-closure.v1');
-        expect(out.runtime_claim?.reason).toBeTruthy();
-      } finally {
-        vi.mocked(listRegisteredRepos).mockResolvedValue([
-          {
-            name: 'test-repo',
-            path: '/test/repo',
-            storagePath: handle.tmpHandle.dbPath,
-            indexedAt: new Date().toISOString(),
-            lastCommit: 'abc123',
-            stats: { files: 2, nodes: 3, communities: 1, processes: 1 },
-          },
-        ]);
-        await fs.rm(repoPath, { recursive: true, force: true });
-      }
-    });
-
     it('phase2 failure classifications', async () => {
       const unmatched = await backend.callTool('query', {
 response_profile: 'full',
@@ -806,10 +733,12 @@ response_profile: 'full',});
         target: 'nonexistent_symbol_xyz_999',
         direction: 'upstream',
       });
+      expect(result).toHaveProperty('error');
+      expect(result.error).toMatch(/not found|no.*symbol/i);
+    });
 
-      it('unknown tool throws', async () => {
-        await expect(backend.callTool('nonexistent_tool', {})).rejects.toThrow(/unknown tool/i);
-      });
+    it('unknown tool throws', async () => {
+      await expect(backend.callTool('nonexistent_tool', {})).rejects.toThrow(/unknown tool/i);
     });
 
     describe('impact tool relationTypes filtering', () => {

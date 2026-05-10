@@ -85,7 +85,6 @@ Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.
 | Rename / extract / split / refactor | `.agents/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
 | Tools, resources, schema reference | `.agents/skills/gitnexus/gitnexus-guide/SKILL.md` |
 | Index, status, clean, wiki CLI commands | `.agents/skills/gitnexus/gitnexus-cli/SKILL.md` |
-| Create Unity analyze_rules interactively | `.agents/skills/gitnexus/gitnexus-unity-rule-gen/SKILL.md` |
 
 <!-- gitnexus:end -->
 
@@ -112,7 +111,6 @@ Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.
 | `gitnexus/skills/gitnexus-guide.md` | `.agents/skills/gitnexus/gitnexus-guide/SKILL.md` | 工具、资源、schema 参考 |
 | `gitnexus/skills/gitnexus-cli.md` | `.agents/skills/gitnexus/gitnexus-cli/SKILL.md` | CLI 命令：index / status / clean / wiki |
 | `gitnexus/skills/gitnexus-pr-review.md` | `.agents/skills/gitnexus/gitnexus-pr-review/SKILL.md` | PR 审查工作流 |
-| `gitnexus/skills/gitnexus-unity-rule-gen.md` | `.agents/skills/gitnexus/gitnexus-unity-rule-gen/SKILL.md` | Unity analyze_rules 交互式生成 |
 
 ### Shared Contracts（安装到 `.agents/skills/gitnexus/_shared/`）
 
@@ -121,7 +119,6 @@ Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.
 | `gitnexus/skills/_shared/unity-runtime-process-contract.md` | `.agents/skills/gitnexus/_shared/unity-runtime-process-contract.md` |
 | `gitnexus/skills/_shared/unity-ui-trace-contract.md` | `.agents/skills/gitnexus/_shared/unity-ui-trace-contract.md` |
 | `gitnexus/skills/_shared/unity-hydration-contract.md` | `.agents/skills/gitnexus/_shared/unity-hydration-contract.md` |
-| `gitnexus/skills/_shared/unity-rule-authoring-contract.md` | `.agents/skills/gitnexus/_shared/unity-rule-authoring-contract.md` |
 
 ### Hooks（安装到用户全局 Claude 配置）
 
@@ -143,9 +140,7 @@ Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.
 > - `analyze_rules` 规则格式变更（新增 binding kind、新增字段、修改 YAML schema）
 > - CLI 命令变更（新增子命令、修改参数）
 > - Unity runtime process 架构变更（新增 edge type、新增 process 阶段）
-> - Shared contract 接口变更
 > - `query/context` 默认返回契约或 `response_profile` 升级路径变更
-> - `gitnexus-unity-rule-gen` 的公开工作流或工件契约变更（`approved -> compile -> analyze -> CLI validation`）
 >
 > 检查方式：阅读对应源文件，确认 skill 中的示例、字段说明、工作流步骤与当前实现一致。
 
@@ -153,7 +148,7 @@ Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.
 
 > **每次新增 `UnityResourceBinding` binding kind 或为现有 kind 新增字段时，必须在同一 commit 内完成以下三件事，缺一不可：**
 >
-> 1. **类型定义**：在 `gitnexus/src/rule-lab/types.ts` 的 `UnityResourceBinding` 接口中添加新字段。
+> 1. **类型定义**：在 `gitnexus/src/mcp/local/runtime-claim-rule-registry.ts` 的 `UnityResourceBinding` 接口中添加新字段。
 > 2. **解析器**：在 `gitnexus/src/mcp/local/runtime-claim-rule-registry.ts` 的 `parseRuleYaml()` binding 解析循环中，用 `scalar()` 或 `list()` 提取对应字段。
 > 3. **单元测试**：在 `gitnexus/test/unit/runtime-claim-rule-registry.test.ts` 中添加 `describe('parseRuleYaml – <kind>')` 测试块，断言新字段被正确解析，以及缺失时返回 `undefined`。
 >
@@ -209,8 +204,6 @@ Commands and gotchas live under **Repo reference** below and in **[CONTRIBUTING.
 
 `gitnexus/vitest.config.ts` 的 `include` 现已覆盖 `src/` 下的所有测试目录：
 - `test/**/*.test.ts`
-- `src/cli/rule-lab.test.ts`
-- `src/rule-lab/**/*.test.ts`
 - `src/benchmark/**/*.test.ts`
 - `src/cli/**/*.test.ts`
 - `src/core/**/*.test.ts`

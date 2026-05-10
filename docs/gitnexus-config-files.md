@@ -9,11 +9,7 @@ This document defines the current configuration and state file rules used by Git
 | `lbug` | `analyze` / MCP runtime | LadybugDB graph index data | `gitnexus analyze` rebuilds it | Query tools and MCP backend |
 | `meta.json` | `analyze` | Index metadata and defaults | Saved at end of `analyze` | `status`, hooks, CLI default repo resolution |
 | `unity-parity-seed.json` | `analyze` | Unity parity seed cache payload | Saved during `analyze` finalize | Unity lazy/parity loaders |
-| `rules/catalog.json` | `rule-lab-promote` | Project rule catalog, activation order, rule versions | Written when promoting approved rules | Rule Lab / compile tooling; analyze rule loading fallback |
-| `rules/approved/*.yaml` | `rule-lab-curate` / `rule-lab-promote` | Approved project rule definitions (analyze/retrieval/verification families) | Written during curation/promotion | Rule compiler and analyze/offline governance fallback loaders |
-| `rules/compiled/*.v2.json` | `rule-lab-compile` | Compiled rule bundles by family (`analyze_rules`, `retrieval_rules`, `verification_rules`) | Written by `gitnexus rule-lab compile` | Analyze pipeline (`analyze_rules`), retrieval next-hop hint resolver (`retrieval_rules`), offline governance/report workflows |
-| `rules/lab/runs/**` | `rule-lab-analyze` / `rule-lab-review-pack` / `rule-lab-curate` / `rule-lab-promote` | Reduced Rule Lab artifacts (`manifest.json`, `slice-plan.json`, `slices/*/slice.json`, `candidates.jsonl`, `curation-input.json`, `review-cards.md`, `curated.json`, `dsl-drafts.json`, `dsl-draft.json`) for exact source/target authoring | Written by Rule Lab execution | Rule Lab follow-up commands and promote compiler input |
-| `rules/reports/*.md` | `rule-lab-regress` | Rule quality and regression reports | Written by regression pass | Human review and CI reports |
+
 
 ### `meta.json` schema (current)
 
@@ -89,11 +85,8 @@ Rules:
 ### Runtime Claim Contract (current)
 
 - Query-time `runtime_chain_verify=on-demand` uses graph-only closure from structured anchors.
-- Query-time runtime claim closure does **not** load `verification_rules`/`retrieval_rules` for rule matching.
-- Rule artifacts under `.gitnexus/rules/**` remain authoritative for:
-  - analyze-time synthetic edge injection (`analyze_rules`)
-  - retrieval next-hop hint selection (`retrieval_rules`)
-  - offline governance and reports (`verification_rules`)
+- Query-time runtime claim closure does **not** use rule-catalog matching.
+- Historical `.gitnexus/rules/**` compiled bundles from the deprecated system are not loaded at query time.
 
 ## Global (`~/.gitnexus/`)
 
@@ -117,10 +110,7 @@ Rules:
    1. explicit structured anchors on request (`symbolName`, `resourceSeedPath`, `mappedSeedTargets`, `resourceBindings`)
    2. derived seed path (`resource_path_prefix`, then `filePath`, then resource path extraction from `queryText`)
    3. if structured anchors are insufficient: return explicit `rule_not_matched` (no query-time rule-match fallback)
-4. Retrieval next-hop hint rule loading precedence:
-   1. `<repo>/.gitnexus/rules/compiled/retrieval_rules.v2.json`
-   2. no match or no compiled bundle: no retrieval-rule hint
-5. For npx package spec resolution:
+4. For npx package spec resolution:
    1. explicit setup flags / env
    2. `~/.gitnexus/config.json` (`cliPackageSpec`, then `cliVersion`)
    3. package default dist-tag
@@ -165,20 +155,11 @@ gitnexus analyze --scope-manifest .gitnexus/sync-manifest.txt --no-reuse-options
 
 - `analyze` owns `.gitnexus/meta.json`, `.gitnexus/lbug`, `.gitnexus/unity-parity-seed.json`.
 - `setup` owns global `~/.gitnexus/config.json` and agent MCP wiring.
-- `rule-lab-*` commands own `.gitnexus/rules/**` write paths listed above.
-- Reduced rule-lab authoring contract:
-  - Input is exact source/target pair(s); no exhaustive discovery universe is required by default.
-  - Duplicate-prevention must compare against `rules/approved/*.yaml`.
-  - Binding resolution must fail closed; `UnknownClass` / `UnknownMethod` placeholders are forbidden in `curation-input.json`, `curated.json`, and `approved/*.yaml`.
-  - `curation-input.json` and `curated.json` must keep non-empty proposal evidence (`confirmed_chain.steps` or equivalent) before promote.
-  - Ambiguous anchors require explicit user choice at authoring/skill layer; no auto-guessing.
-- `gitnexus-unity-rule-gen` now points to direct public flow guidance: `approved -> compile -> analyze -> CLI validation`.
 
-## Legacy compatibility note
+## Legacy state
 
-- Historical `.gitnexus/gap-lab/runs/**` artifacts may exist in older repos.
-- They are migration/audit state only and are not part of the active public workflow contract.
+- Historical `.gitnexus/rules/**` artifacts may exist in older repos from the deprecated system.
+- They are migration/audit state only and are not part of the active workflow contract.
 - Default `clean` removes repo-local index artifacts and unregisters from global registry.
 - Default `clean` does **not** remove `.gitnexus/rules/**`.
-- `clean --include-rules-lab` may remove `.gitnexus/rules/lab/runs/**` and `.gitnexus/rules/reports/*.md` only.
 - `clean --include-rules-all` may remove all `.gitnexus/rules/**` artifacts (explicit opt-in only).

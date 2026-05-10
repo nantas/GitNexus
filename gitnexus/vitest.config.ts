@@ -5,8 +5,6 @@ export default defineConfig({
     globalSetup: ['test/global-setup.ts'],
     include: [
       'test/**/*.test.ts',
-      'src/cli/rule-lab.test.ts',
-      'src/rule-lab/**/*.test.ts',
       'src/benchmark/**/*.test.ts',
       'src/cli/**/*.test.ts',
       'src/core/**/*.test.ts',
