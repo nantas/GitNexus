@@ -78,7 +78,7 @@ describe('setupOpenCode — JSONC preservation', () => {
     await fs.writeFile(opencodeJsonPath(), jsonc, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'opencode' });
 
     const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
     expect(raw).toContain('This comment must survive');
@@ -96,7 +96,7 @@ describe('setupOpenCode — JSONC preservation', () => {
     await fs.writeFile(opencodeJsonPath(), jsonc, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'opencode' });
 
     const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
     expect(raw).toContain('block comment');
@@ -114,7 +114,7 @@ describe('setupOpenCode — JSONC preservation', () => {
     await fs.writeFile(opencodeJsonPath(), jsonc, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'opencode' });
 
     const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
     expect(raw).toContain('inline comment');
@@ -130,7 +130,7 @@ describe('setupOpenCode — JSONC preservation', () => {
     await fs.writeFile(opencodeJsonPath(), plain, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'opencode' });
 
     const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
     const config = parseJsonc(raw);
@@ -144,7 +144,7 @@ describe('setupOpenCode — JSONC preservation', () => {
     await fs.rm(opencodeJsonPath(), { force: true });
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'opencode' });
 
     const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
     const config = parseJsonc(raw);
@@ -164,7 +164,7 @@ describe('setupOpenCode — JSONC preservation', () => {
     await fs.writeFile(opencodeJsonPath(), jsonc, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'opencode' });
 
     const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
     expect(raw).toContain('my config');
@@ -192,7 +192,7 @@ describe('setupOpenCode — JSONC preservation', () => {
     await fs.writeFile(opencodeJsonPath(), jsonc, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'opencode' });
 
     const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
     expect(raw).toContain('config comment');
@@ -211,7 +211,7 @@ describe('setupOpenCode — JSONC preservation', () => {
     await fs.writeFile(opencodeJsonPath(), corrupt, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'opencode' });
 
     const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
     expect(raw).toBe(corrupt);
@@ -230,7 +230,7 @@ describe('setupOpenCode — JSONC preservation', () => {
     await fs.writeFile(opencodeJsonPath(), jsonc, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'opencode' });
 
     const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
     const config = parseJsonc(raw);
@@ -246,7 +246,7 @@ describe('setupOpenCode — JSONC preservation', () => {
     await fs.writeFile(opencodeJsonPath(), tabbed, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'opencode' });
 
     const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
     expect(raw).toContain('\t"model"');
@@ -260,7 +260,7 @@ describe('setupOpenCode — JSONC preservation', () => {
     await fs.writeFile(opencodeJsonPath(), fourSpace, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'opencode' });
 
     const raw = await fs.readFile(opencodeJsonPath(), 'utf-8');
     const mcpLine = raw.split('\n').find((l) => l.includes('"gitnexus"'));
@@ -271,7 +271,7 @@ describe('setupOpenCode — JSONC preservation', () => {
     await fs.rm(opencodeDir(), { recursive: true, force: true });
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'opencode' });
 
     await expect(fs.access(opencodeJsonPath())).rejects.toThrow();
   });
@@ -409,7 +409,7 @@ describe('setupClaudeCode — JSONC preservation', () => {
 
   it('creates fresh .claude.json when missing', async () => {
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(mcpPath(), 'utf-8');
     const config = JSON.parse(raw);
@@ -427,7 +427,7 @@ describe('setupClaudeCode — JSONC preservation', () => {
     await fs.writeFile(mcpPath(), jsonc, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(mcpPath(), 'utf-8');
     expect(raw).toContain('my claude config');
@@ -442,7 +442,7 @@ describe('setupClaudeCode — JSONC preservation', () => {
     await fs.writeFile(mcpPath(), corrupt, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(mcpPath(), 'utf-8');
     expect(raw).toBe(corrupt);
@@ -496,7 +496,7 @@ describe('installClaudeCodeHooks — JSONC preservation', () => {
 
   it('creates fresh settings.json with hooks when missing', async () => {
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(settingsPath(), 'utf-8');
     const config = JSON.parse(raw);
@@ -518,7 +518,7 @@ describe('installClaudeCodeHooks — JSONC preservation', () => {
     await fs.writeFile(settingsPath(), jsonc, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(settingsPath(), 'utf-8');
     expect(raw).toContain('my settings');
@@ -554,7 +554,7 @@ describe('installClaudeCodeHooks — JSONC preservation', () => {
     await fs.writeFile(settingsPath(), jsonc, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(settingsPath(), 'utf-8');
     const config = JSON.parse(raw);
@@ -567,7 +567,7 @@ describe('installClaudeCodeHooks — JSONC preservation', () => {
     await fs.writeFile(settingsPath(), corrupt, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(settingsPath(), 'utf-8');
     expect(raw).toBe(corrupt);
@@ -585,7 +585,7 @@ describe('installClaudeCodeHooks — JSONC preservation', () => {
     await fs.writeFile(settingsPath(), jsonc, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(settingsPath(), 'utf-8');
     expect(raw).toContain('settings comment');

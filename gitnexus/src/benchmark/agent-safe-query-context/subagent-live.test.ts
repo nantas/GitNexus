@@ -179,5 +179,5 @@ it('loadSubagentLiveCaseResult rejects non-allowlisted tools', async () => {
     'utf-8',
   );
 
-  await expect(() => loadSubagentLiveCaseResult(runDir, fakeCase)).rejects.toMatch(/non-allowlisted tool/);
+  await expect(() => loadSubagentLiveCaseResult(runDir, fakeCase)).rejects.toThrow(/non-allowlisted tool/);
 });

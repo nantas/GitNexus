@@ -75,7 +75,7 @@ describe('setupClaudeCode', () => {
     setPlatform('win32');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(path.join(tempHome, '.claude.json'), 'utf-8');
     const config = JSON.parse(raw);
@@ -90,7 +90,7 @@ describe('setupClaudeCode', () => {
     setPlatform('darwin');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(path.join(tempHome, '.claude.json'), 'utf-8');
     const config = JSON.parse(raw);
@@ -105,7 +105,7 @@ describe('setupClaudeCode', () => {
     await fs.rm(path.join(tempHome, '.claude'), { recursive: true, force: true });
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     await expect(fs.access(path.join(tempHome, '.claude.json'))).rejects.toThrow();
   });
@@ -120,7 +120,7 @@ describe('setupClaudeCode', () => {
     );
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(path.join(tempHome, '.claude.json'), 'utf-8');
     const config = JSON.parse(raw);
@@ -137,7 +137,7 @@ describe('setupClaudeCode', () => {
     await fs.rm(path.join(tempHome, '.claude.json'), { force: true });
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(path.join(tempHome, '.claude.json'), 'utf-8');
     const config = JSON.parse(raw);
@@ -152,7 +152,7 @@ describe('setupClaudeCode', () => {
     await fs.writeFile(path.join(tempHome, '.claude.json'), corrupt, 'utf-8');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     // mergeJsoncFile leaves corrupt files untouched (safer than overwriting)
     const raw = await fs.readFile(path.join(tempHome, '.claude.json'), 'utf-8');
@@ -164,7 +164,7 @@ describe('setupClaudeCode', () => {
     execFileSyncMock.mockReturnValueOnce('/usr/local/bin/gitnexus\n');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(path.join(tempHome, '.claude.json'), 'utf-8');
     const config = JSON.parse(raw);
@@ -182,7 +182,7 @@ describe('setupClaudeCode', () => {
     });
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(path.join(tempHome, '.claude.json'), 'utf-8');
     const config = JSON.parse(raw);
@@ -201,7 +201,7 @@ describe('setupClaudeCode', () => {
     );
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(path.join(tempHome, '.claude.json'), 'utf-8');
     const config = JSON.parse(raw);
@@ -220,7 +220,7 @@ describe('setupClaudeCode', () => {
     );
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(path.join(tempHome, '.claude.json'), 'utf-8');
     const config = JSON.parse(raw);
@@ -238,7 +238,7 @@ describe('setupClaudeCode', () => {
     );
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(path.join(tempHome, '.claude.json'), 'utf-8');
     const config = JSON.parse(raw);
@@ -256,7 +256,7 @@ describe('setupClaudeCode', () => {
     );
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(path.join(tempHome, '.claude.json'), 'utf-8');
     const config = JSON.parse(raw);
@@ -273,7 +273,7 @@ describe('setupClaudeCode', () => {
     execFileSyncMock.mockReturnValueOnce('C:\\Users\\dev\\AppData\\Roaming\\npm\\gitnexus\n');
 
     const { setupCommand } = await import('../../src/cli/setup.js');
-    await setupCommand();
+    await setupCommand({ agent: 'claude' });
 
     const raw = await fs.readFile(path.join(tempHome, '.claude.json'), 'utf-8');
     const config = JSON.parse(raw);

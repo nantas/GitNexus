@@ -25,6 +25,7 @@ import { swiftProvider } from './swift.js';
 import { dartProvider } from './dart.js';
 import { vueProvider } from './vue.js';
 import { cobolProvider } from './cobol.js';
+import { gdscriptProvider } from './gdscript.js';
 
 export const providers = {
   [SupportedLanguages.JavaScript]: javascriptProvider,
@@ -39,6 +40,7 @@ export const providers = {
   [SupportedLanguages.CPlusPlus]: cppProvider,
   [SupportedLanguages.PHP]: phpProvider,
   [SupportedLanguages.Ruby]: rubyProvider,
+  [SupportedLanguages.GDScript]: gdscriptProvider,
   [SupportedLanguages.Swift]: swiftProvider,
   [SupportedLanguages.Dart]: dartProvider,
   [SupportedLanguages.Vue]: vueProvider,

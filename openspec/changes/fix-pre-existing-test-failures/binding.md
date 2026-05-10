@@ -5,13 +5,15 @@
 - `spec_standard_ref`: 本 change 不涉及外部规范标准变更。测试行为规范遵循 GitNexus 项目现有的测试开发与验证强制流程（见 AGENTS.md § 测试开发与验证强制流程）。
 - `project_page_ref`: 不涉及外部项目页面回写。
 - `additional_context_refs`:
-  - `docs/plans/2026-05-09-pre-existing-test-failures.md` — 已有测试失败基线分析
+  - `openspec/changes/fix-pre-existing-test-failures/` — 本 change 目录
+  - upstream `gitnexus/src/cli/setup.ts` — Phase 1 替换的真源
+  - Commit `dc9f4dd4` — Phase 1 实施记录
 
 ## Source of Truth
 
-- 行为规范真源：`specs/<capability-id>/spec.md`（本 change 不新增 capability）
+- 行为规范真源：upstream `setup.ts`（JSONC 写入、PATH 检测等行为以 upstream 为准）
+- fork 兼容层（`--agent`/`--scope`/`--cli-version`）以本 change 的 `design.md` 决策记录为准
 - 项目页面角色：不适用（纯代码仓库变更，无外部项目页面）
-- 非真源说明：本 change 不涉及 spec delta，变更依据直接来自测试运行结果与代码分析
 
 ## 回写目标
 
@@ -21,13 +23,13 @@
 
 ## 同步约束
 
-- 页面与 spec 不一致时，以 `specs/` 为准：不适用
-- 回写只同步结论、状态、摘要与链接，不复制整份 spec/design/tasks：不适用
-- 若存在未确认引用、未定目标页或权限限制，必须在下方列明：无
+- upstream setup.ts 行为为本 change 的 source of truth，fork 兼容层不得破坏 upstream 已有测试
+- local-backend.ts 的修改（Phase 2）需以 fork 版本为基础，不直接替换
 
 ## 待确认项
 
 - [x] 已确认标准页引用：无需外部标准
 - [x] 已确认项目页引用：纯仓库内变更
 - [x] 已确认回写目标与权限：无外部回写
-- [x] 已确认异常处理与冲突策略：无 spec 冲突风险
+- [x] 已确认 upstream setup.ts 替换策略：完整替换 + 兼容层
+- [ ] Phase 2 local-backend 修复策略待确认（方案 B: 修改测试 vs 方案 A: 替换实现）

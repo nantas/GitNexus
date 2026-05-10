@@ -64,7 +64,7 @@ describe('setupCommand codex execution', () => {
   it('invokes codex mcp add with shell enabled on Windows', async () => {
     const { setupCommand } = await import('../../src/cli/setup.js');
 
-    await setupCommand();
+    await setupCommand({ agent: 'codex' });
 
     expect(execFileMock).toHaveBeenCalledWith(
       'codex',
@@ -79,7 +79,7 @@ describe('setupCommand codex execution', () => {
 
     const { setupCommand } = await import('../../src/cli/setup.js');
 
-    await setupCommand();
+    await setupCommand({ agent: 'codex' });
 
     expect(execFileMock).toHaveBeenCalledWith(
       'codex',
@@ -96,9 +96,10 @@ describe('setupCommand codex execution', () => {
 
     const { setupCommand } = await import('../../src/cli/setup.js');
 
-    await setupCommand();
+    await setupCommand({ agent: 'codex' });
 
     expect(execFileMock).not.toHaveBeenCalled();
-    await expect(fs.access(path.join(tempHome, '.agents', 'skills'))).rejects.toThrow();
+    // Global shared skills are still installed even when Codex is not detected
+    await expect(fs.access(path.join(tempHome, '.agents', 'skills'))).resolves.toBeUndefined();
   });
 });

@@ -47,7 +47,7 @@ it('loadBenchmarkDataset rejects missing required fields', async () => {
       // intentionally omit must_not_hit_uids
     })}\n`, 'utf-8');
 
-    await expect(() => loadBenchmarkDataset(badRoot)).rejects.toMatch(/missing required field/i);
+    await expect(() => loadBenchmarkDataset(badRoot)).rejects.toThrow(/missing required field/i);
   } finally {
     await fs.rm(badRoot, { recursive: true, force: true });
   }

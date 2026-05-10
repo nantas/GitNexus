@@ -1345,4 +1345,6 @@ export interface ConstructorBinding {
   calleeName: string;
   /** Enclosing class name when callee is a method on a known receiver (e.g. $this) */
   receiverClassName?: string;
+  /** Optional direct type hint extracted from safe generic invocation patterns. */
+  inferredTypeName?: string;
 }

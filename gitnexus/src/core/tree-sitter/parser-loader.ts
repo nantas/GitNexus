@@ -112,6 +112,11 @@ const SOURCES: Record<string, GrammarSource> = {
     unavailableNote:
       'Vue parsing piggybacks on `tree-sitter-typescript`. Check the install and native binding.',
   },
+  [SupportedLanguages.GDScript]: {
+    load: () => _require('tree-sitter-gdscript'),
+    unavailableNote:
+      'GDScript parsing requires `tree-sitter-gdscript`. Check the install and native binding.',
+  },
 
   // tree-sitter-c is a required dependency, but its native binding has
   // historically been ABI-incompatible with the bundled tree-sitter@0.21.1

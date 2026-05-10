@@ -35,5 +35,5 @@ it('loadE2EConfig rejects half-configured estimate override', async () => {
       {
         GITNEXUS_U2_E2E_ESTIMATE_LOWER_SEC: '10.5',
       },
-    )).rejects.toMatch(/must be set together/,);
+    )).rejects.toThrow(/must be set together/);
 });

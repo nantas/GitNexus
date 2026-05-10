@@ -5,7 +5,7 @@ import { loadAgentContextDataset } from './io.js';
 
 it('loadAgentContextDataset validates required scenario fields', async () => {
   const invalidRoot = path.resolve('src/benchmark/agent-context/__fixtures__/invalid/missing-checks');
-  await expect(() => loadAgentContextDataset(invalidRoot)).rejects.toMatch(/missing required field/i);
+  await expect(() => loadAgentContextDataset(invalidRoot)).rejects.toThrow(/missing required field/i);
 });
 
 it('loadAgentContextDataset loads valid thresholds and scenarios', async () => {
