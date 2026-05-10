@@ -1,35 +1,59 @@
 # Tasks
 
-## 1. 修复 setup 测试（test-setup）
+## Phase 1: Setup + CSV Generator（已完成 ✅）
 
-- [ ] 1.1 `test/unit/setup.test.ts`: 修改所有 `setupCommand()` 调用为 `setupCommand({ agent: 'claude' })`；更新期望的 MCP 条目格式为 `{ command: 'gitnexus', args: ['mcp'] }`（非 Windows）或 `{ command: 'cmd', args: ['/c', 'gitnexus', 'mcp'] }`（Windows）
-- [ ] 1.2 `test/unit/setup-jsonc.test.ts`: 修改所有 OpenCode 测试调用为 `setupCommand({ agent: 'opencode' })`，所有 Claude Code 测试为 `setupCommand({ agent: 'claude' })`；更新期望的 MCP 条目格式；更新 hooks 测试
-- [ ] 1.3 `test/unit/setup-codex.test.ts`: 修改调用为 `setupCommand({ agent: 'codex' })`
-- [ ] 1.4 运行 `npx vitest run test/unit/setup.test.ts test/unit/setup-jsonc.test.ts test/unit/setup-codex.test.ts` 验证全部通过
+- [x] 1.1 用 upstream `setup.ts` 替换 fork 版本，添加 `--agent`/`--scope`/`--cli-version`/`--cli-spec` 兼容层
+- [x] 1.2 添加 `_shared` 目录复制到 `installSkillsTo`
+- [x] 1.3 修改 `setupOpenCode` 支持 legacy `config.json` 检测
+- [x] 1.4 修改 `upsertCodexConfigToml` 支持已有 section 替换
+- [x] 1.5 修复 `src/cli/setup.test.ts` 集成测试：添加 `expectGitnexusCommand`/`expectGitnexusArgs` helper，放宽 regex
+- [x] 1.6 修复 codex 测试：创建 `~/.codex` 目录使 `setupCodex` 检测到 Codex
+- [x] 1.7 修复 `--cli-version` 测试：保存 `cliVersion` 字段，放宽 package spec regex
+- [x] 1.8 `csv-generator.ts`: export `FileContentCache`，添加 `setForTest`/`hasForTest` 方法，新增 `toCodeElementCsvRow` 函数
+- [x] 1.9 替换 `ai-context.ts` 为 upstream 版本
+- [x] 1.10 运行验证：`npx vitest run test/unit/setup.test.ts test/unit/setup-jsonc.test.ts test/unit/setup-codex.test.ts test/integration/setup-skills.test.ts src/cli/setup.test.ts` → 171 passed
+- [x] 1.11 Commit: `dc9f4dd4 fix: merge upstream setup.ts JSONC writes + fix 37 of 57 pre-existing test failures`
 
-## 2. 修复 AI Context 测试（test-ai-context）
+## Phase 2: 剩余 20 个失败
 
-- [ ] 2.1 `test/unit/ai-context.test.ts`: 将 `"If any GitNexus tool warns the index is stale"` 断言替换为 `"gitnexus:start"`；将 `"## Always Do"` 和 `"## Never Do"` 断言替换为 `"## Always Start Here"` 和技能路由表断言；移除 `skipAgentsMd` 测试中对 skip 条目的依赖
-- [ ] 2.2 `src/cli/ai-context.test.ts`: 将 `expect(agentsContent).toMatch(/~\/\.agents\/skills\/gitnexus\//)` 改为相对路径 `.agents/skills/gitnexus/`
-- [ ] 2.3 运行 `npx vitest run test/unit/ai-context.test.ts src/cli/ai-context.test.ts` 验证全部通过
+### 2.1 benchmark .toMatch() 模式修复（4 个文件，5 个失败）
 
-## 3. 修复 Benchmark Contract 测试（test-benchmark-context）
+- [ ] 2.1.1 `src/benchmark/io.test.ts`: 将 `expect(fn).toThrow(/regex/)` 改为 try/catch + `expect(error.message).toMatch(/regex/)`
+- [ ] 2.1.2 `src/benchmark/agent-safe-query-context/subagent-live.test.ts`: 同上
+- [ ] 2.1.3 `src/benchmark/u2-e2e/config.test.ts`: 同上
+- [ ] 2.1.4 `src/benchmark/agent-context/io.test.ts`: 同上
 
-- [ ] 3.1 `src/cli/benchmark-agent-safe-query-context.test.ts`: 读取 `gitnexus/src/mcp/tools.ts` 当前内容，更新所有硬编码 JSDoc 字符串断言以匹配当前文案
-- [ ] 3.2 运行 `npx vitest run src/cli/benchmark-agent-safe-query-context.test.ts` 验证通过
+### 2.2 cli-e2e remove 命令（1 个文件，3 个失败）
 
-## 4. 修复 CSharp Preproc 测试（test-csharp-preproc）
+- [ ] 2.2.1 确认 `remove` 命令是否应存在于 fork：检查 upstream index.ts 注册方式
+- [ ] 2.2.2 如果保留：在 fork 的 index.ts 中注册 remove 命令
+- [ ] 2.2.3 如果移除：删除或 skip 这 3 个测试用例
 
-- [ ] 4.1 `test/unit/parse-worker-csharp-preproc.test.ts`: 删除整个文件（`symbol-table.ts` 已被移除，无直接替代模块）
-- [ ] 4.2 运行 `npx vitest run test/unit` 确认无该文件导致的 `ERR_MODULE_NOT_FOUND`
+### 2.3 local-backend-calltool（1 个文件，5 个失败）
 
-## 5. 修复 Repo Manager 测试（test-repo-manager）
+- [ ] 2.3.1 逐个分析 5 个失败的 response shape 差异
+- [ ] 2.3.2 确认是测试断言问题还是 API 行为变更
+- [ ] 2.3.3 修改测试断言适配当前 API 行为（避免替换 local-backend.ts）
 
-- [ ] 5.1 `test/unit/repo-manager-alias.test.ts`: 确认 `GITNEXUS_HOME` 设置为临时路径后 `readRegistry()` 是否正确使用该路径；如有 registry fallback 逻辑干扰，修改测试在 `beforeAll` 中创建空 registry 或设置 `GITNEXUS_HOME` 路径
-- [ ] 5.2 运行 `npx vitest run test/unit/repo-manager-alias.test.ts` 验证通过
+### 2.4 ai-context 深层修复（1 个文件，2 个失败）
 
-## 6. 最终验证
+- [ ] 2.4.1 修复 `installSkillsTo` 在临时目录中找不到技能源的问题
+- [ ] 2.4.2 修复模板 regex：`/slim guidance is narrowing-first/` 与当前模板不匹配
 
-- [ ] 6.1 运行 `npx vitest run --project default` 确认 default pool 零失败
-- [ ] 6.2 运行 `npx tsc --noEmit` 确认无编译错误
-- [ ] 6.3 提交 commit，信息为 `"fix: resolve 108 pre-existing test failures after upstream merge"`
+### 2.5 解析器相关（3 个文件，3 个失败）
+
+- [ ] 2.5.1 `test/integration/resolvers/csharp.test.ts`: C# 泛型方法类型参数推断 — 评估是否 skip
+- [ ] 2.5.2 `test/integration/parsing.test.ts`: GDScript `isNodeExported` — 评估是否 skip
+- [ ] 2.5.3 `test/integration/csharp-preproc-pipeline.test.ts`: csproj define 预处理分支过滤
+
+### 2.6 其他（3 个文件，3 个失败）
+
+- [ ] 2.6.1 `test/unit/repo-manager-alias.test.ts`: 别名注册返回值修复
+- [ ] 2.6.2 `test/unit/scoped-cli-commands.test.ts`: guidance 模板 npx 格式修复
+- [ ] 2.6.3 `src/cli/benchmark-agent-safe-query-context.test.ts`: 契约文案断言更新
+
+### 2.7 最终验证
+
+- [ ] 2.7.1 运行 `npx vitest run` 确认全套件通过（或记录剩余 known failures）
+- [ ] 2.7.2 运行 `npx tsc --noEmit` 确认无编译错误
+- [ ] 2.7.3 提交 commit
