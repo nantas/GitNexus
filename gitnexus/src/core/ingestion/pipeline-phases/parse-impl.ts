@@ -42,7 +42,7 @@ import {
 } from '../heritage-processor.js';
 import { createResolutionContext } from '../model/resolution-context.js';
 import { ASTCache, createASTCache } from '../ast-cache.js';
-import { type PipelineProgress, getLanguageFromFilename } from 'gitnexus-shared';
+import { type ParsedFile, type PipelineProgress, getLanguageFromFilename } from 'gitnexus-shared';
 import { readFileContents } from '../filesystem-walker.js';
 import { isLanguageAvailable } from '../../tree-sitter/parser-loader.js';
 import { createWorkerPool } from '../workers/worker-pool.js';
@@ -61,6 +61,7 @@ import type { ExtractedHeritage } from '../model/heritage-map.js';
 import type { KnowledgeGraph } from '../../graph/types.js';
 import type { PipelineOptions } from '../pipeline.js';
 import { extractFetchCallsFromFiles } from '../call-processor.js';
+import { performance } from 'node:perf_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -119,6 +120,12 @@ export async function runChunkedParseAndResolve(
    *  source. See plan
    *  docs/plans/2026-04-20-002-perf-parse-heritage-mro-plan.md (Unit 4). */
   scopeTreeCache: ASTCache;
+  /**
+   * ParsedFile artifacts forwarded from the worker pool to
+   * scope-resolution. `undefined` when worker pool wasn't engaged
+   * or produced zero ParsedFiles.
+   */
+  preExtractedParsedFiles?: readonly ParsedFile[];
 }> {
   const ctx = createResolutionContext();
   const symbolTable = ctx.model.symbols;
@@ -230,6 +237,7 @@ export async function runChunkedParseAndResolve(
 
   let filesParsedSoFar = 0;
 
+  const tParse = isDev ? performance.now() : 0;
   // Two caches with different lifetimes:
   //   - `astCache` (chunk-local, cleared between chunks) — call /
   //     heritage / import processors read it during parse to avoid
@@ -271,6 +279,13 @@ export async function runChunkedParseAndResolve(
   const deferredWorkerHeritage: ExtractedHeritage[] = [];
   const deferredConstructorBindings: FileConstructorBindings[] = [];
   const deferredAssignments: ExtractedAssignment[] = [];
+  /**
+   * Accumulator for ParsedFile artifacts produced by the worker pool.
+   * Forwarded to scope-resolution via ParseOutput.preExtractedParsedFiles,
+   * allowing it to skip re-extraction. Empty when worker pool wasn't engaged
+   * or no provider implements emitScopeCaptures.
+   */
+  const allParsedFiles: ParsedFile[] = [];
 
   try {
     for (let chunkIdx = 0; chunkIdx < numChunks; chunkIdx++) {
@@ -281,6 +296,7 @@ export async function runChunkedParseAndResolve(
         .filter((p) => chunkContents.has(p))
         .map((p) => ({ path: p, content: chunkContents.get(p)! }));
 
+      const t0 = isDev ? performance.now() : 0;
       const chunkWorkerData = await processParsing(
         graph,
         chunkFiles,
@@ -307,7 +323,19 @@ export async function runChunkedParseAndResolve(
 
       const chunkBasePercent = 20 + (filesParsedSoFar / totalParseable) * 62;
 
+      if (isDev) {
+        logger.info(
+          `⏱  Chunk ${chunkIdx + 1}/${numChunks}: processParsing (${chunkFiles.length} files) = ${(performance.now() - t0).toFixed(0)}ms`,
+        );
+      }
+
+      // Accumulate parsedFiles from worker data for scope-resolution bridge.
       if (chunkWorkerData) {
+        // Push parsedFiles from this chunk into the accumulator
+        for (let i = 0; i < chunkWorkerData.parsedFiles.length; i++) {
+          allParsedFiles.push(chunkWorkerData.parsedFiles[i]);
+        }
+
         await processImportsFromExtracted(
           graph,
           allPathObjects,
@@ -428,6 +456,7 @@ export async function runChunkedParseAndResolve(
         : undefined;
 
     if (deferredWorkerCalls.length > 0) {
+      const tCalls = isDev ? performance.now() : 0;
       await processCallsFromExtracted(
         graph,
         deferredWorkerCalls,
@@ -449,6 +478,11 @@ export async function runChunkedParseAndResolve(
         fullWorkerHeritageMap,
         bindingAccumulator,
       );
+      if (isDev) {
+        logger.info(
+          `⏱  Deferred calls (${deferredWorkerCalls.length} records) = ${(performance.now() - tCalls).toFixed(0)}ms`,
+        );
+      }
     }
 
     if (deferredAssignments.length > 0) {
@@ -536,6 +570,7 @@ export async function runChunkedParseAndResolve(
 
     // Log resolution cache stats
     if (isDev) {
+      logger.info(`⏱  Parse total (all chunks) = ${(performance.now() - tParse).toFixed(0)}ms`);
       const rcStats = ctx.getStats();
       const total = rcStats.cacheHits + rcStats.cacheMisses;
       const hitRate = total > 0 ? ((rcStats.cacheHits / total) * 100).toFixed(1) : '0';
@@ -621,5 +656,6 @@ export async function runChunkedParseAndResolve(
     // chunk-local `astCache` above is intentionally NOT exposed
     // because parse-impl clears it between chunks.
     scopeTreeCache,
+    preExtractedParsedFiles: allParsedFiles.length > 0 ? allParsedFiles : undefined,
   };
 }

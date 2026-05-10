@@ -37,6 +37,8 @@ import type { ScopeResolutionIndexes } from '../../model/scope-resolution-indexe
 import { getCsharpParser } from './query.js';
 import { getTreeSitterBufferSize } from '../../constants.js';
 
+import { logger } from '../../../logger.js';
+
 interface CsharpFileStructure {
   /** Declared namespace names in file source order. Empty array means
    *  the file has no `namespace X;` / `namespace X { }` declaration
@@ -47,37 +49,83 @@ interface CsharpFileStructure {
   readonly usingStaticPaths: readonly string[];
 }
 
-/** Build a structural view of a C# file by walking the tree-sitter
- *  AST. Prefers `cachedTree` (handed in via `treeCache`) so we don't
- *  re-parse files the orchestrator already parsed for `extractParsedFile`;
- *  falls back to a fresh parse on cache miss. Parser singleton is
- *  shared across calls. */
-function extractFileStructure(content: string, cachedTree: unknown): CsharpFileStructure {
+/**
+ * Derive the namespace name from a ParsedFile's scope tree.
+ * Returns `true` if the file has a `Namespace` scope (indicating it
+ * declares a named namespace), `false` otherwise.
+ *
+ * The namespace SCOPE EXISTS but does NOT carry the namespace NAME as a
+ * structured field (the name is derived from the AST `name:` child field
+ * of the tree-sitter namespace_declaration / file_scoped_namespace_declaration
+ * node, which the Scope interface doesn't preserve).
+ *
+ * Returns `true` when at least one scope has `kind === 'Namespace'`.
+ * When `false`, the file sits in the global/default namespace.
+ */
+function hasNamespaceScope(parsed: ParsedFile): boolean {
+  return parsed.scopes.some((s) => s.kind === 'Namespace');
+}
+
+/** Build a structural view of a C# file, preferring the cached/fallible
+ *  tree-sitter path. We cannot derive the NAMESPACE NAME STRING from
+ *  ParsedFile scopes alone (the Scope interface does not carry the
+ *  namespace name), so the optimization is limited to: when file contents
+ *  are NOT available, skip tree-sitter and return an empty structure
+ *  (global namespace, no using-static paths).
+ *
+ *  When file contents ARE available, always use tree-sitter for correctness
+ *  (the overhead is minimal since most files hit the scopeTreeCache). */
+function deriveCsharpFileStructure(
+  parsed: ParsedFile,
+  inputs: CsharpSiblingInputs,
+): CsharpFileStructure {
+  const content = inputs.fileContents.get(parsed.filePath);
+  if (content !== undefined) {
+    const cachedTree = inputs.treeCache?.get(parsed.filePath);
+    return extractFileStructureWithFallback(content, cachedTree);
+  }
+
+  // When file contents are not available, check if the file has a
+  // Namespace scope. If yes, we'd need tree-sitter for the name, so
+  // return a sentinel. If no, the file is in the global namespace.
+  if (hasNamespaceScope(parsed)) {
+    // File has a namespace but we can't determine the name without
+    // file contents. Return empty — sibling grouping degrades to
+    // global-namespace grouping for this file.
+    return { namespaces: [], usingStaticPaths: [] };
+  }
+  return { namespaces: [], usingStaticPaths: [] };
+}
+
+/**
+ * Full tree-sitter AST walk for CsharpFileStructure extraction.
+ * Used as fallback when ParsedFile data is insufficient.
+ * Reuses `cachedTree` to avoid re-parsing when possible.
+ */
+function extractFileStructureWithFallback(
+  content: string,
+  cachedTree: unknown,
+  knownNamespaces?: readonly string[],
+): CsharpFileStructure {
   type CsharpTree = ReturnType<ReturnType<typeof getCsharpParser>['parse']>;
   const tree =
     (cachedTree as CsharpTree | undefined) ??
     getCsharpParser().parse(content, undefined, {
       bufferSize: getTreeSitterBufferSize(content),
     });
-  const namespaces: string[] = [];
+  const namespaces: string[] = knownNamespaces ? [...knownNamespaces] : [];
   const usingStaticPaths: string[] = [];
 
   const visit = (node: SyntaxNode): void => {
     if (
-      node.type === 'namespace_declaration' ||
-      node.type === 'file_scoped_namespace_declaration'
+      (node.type === 'namespace_declaration' ||
+        node.type === 'file_scoped_namespace_declaration') &&
+      (knownNamespaces === undefined || knownNamespaces.length === 0)
     ) {
       const nameNode = node.childForFieldName('name');
       if (nameNode !== null) namespaces.push(nameNode.text);
     } else if (node.type === 'using_directive') {
-      // Inspect the directive's own text for the `static` keyword
-      // (tree-sitter-c-sharp does not expose it as a named child).
-      // This is a single-node-scoped text inspection, not a whole-file
-      // regex, so it stays well within AST semantics.
       if (/^\s*(?:global\s+)?using\s+static\s/.test(node.text)) {
-        // Path lives on the `name:` field when the using-directive is
-        // aliased (`using static A = X.Y.Z;`); otherwise it's the
-        // first named child.
         const aliasField = node.childForFieldName('name');
         let pathNode: SyntaxNode | null = null;
         if (aliasField !== null) {
@@ -102,6 +150,14 @@ function extractFileStructure(content: string, cachedTree: unknown): CsharpFileS
   return { namespaces, usingStaticPaths };
 }
 
+/**
+ * Full tree-sitter AST walk for CsharpFileStructure extraction
+ * (legacy path, kept for backward compatibility).
+ */
+function extractFileStructure(content: string, cachedTree: unknown): CsharpFileStructure {
+  return extractFileStructureWithFallback(content, cachedTree);
+}
+
 /** Content + (optional) pre-parsed tree-sitter trees keyed by filePath.
  *  The orchestrator builds `fileContents` from the pipeline's file list;
  *  `treeCache` is the same `scopeTreeCache` already populated by the
@@ -123,15 +179,20 @@ export function populateCsharpNamespaceSiblings(
   inputs: CsharpSiblingInputs,
 ): void {
   // Build a structural view (namespaces + using-static paths) per
-  // file once up-front. Reuses the orchestrator's `treeCache` so
-  // files already parsed by `extractParsedFile` don't get re-parsed
-  // here — single-source-of-truth for the AST.
+  // file once up-front. Derives namespace from ParsedFile scope data
+  // when possible, falling back to tree-sitter AST walk when
+  // ParsedFile lacks namespace info or using-static paths are needed.
   const structureByFile = new Map<string, CsharpFileStructure>();
   for (const parsed of parsedFiles) {
-    const content = inputs.fileContents.get(parsed.filePath);
-    if (content === undefined) continue;
-    const cachedTree = inputs.treeCache?.get(parsed.filePath);
-    structureByFile.set(parsed.filePath, extractFileStructure(content, cachedTree));
+    const struct = deriveCsharpFileStructure(parsed, inputs);
+    // Log fallback to tree-sitter when ParsedFile derivation was
+    // incomplete (no namespace scope found).
+    if (struct.namespaces.length === 0 && !hasNamespaceScope(parsed)) {
+      logger.debug(
+        `[namespace-siblings] No Namespace scope in ParsedFile for ${parsed.filePath} — using tree-sitter for namespace extraction`,
+      );
+    }
+    structureByFile.set(parsed.filePath, struct);
   }
 
   // Group namespace scopes by their dotted name. Each entry carries

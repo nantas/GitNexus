@@ -23,7 +23,7 @@
  * Plan: `docs/plans/2026-04-20-001-refactor-emit-pipeline-generalization-plan.md`.
  */
 
-import type { ParsedFile, RegistryProviders } from 'gitnexus-shared';
+import type { ParsedFile, RegistryProviders, PipelineProgress } from 'gitnexus-shared';
 import type { KnowledgeGraph } from '../../../graph/types.js';
 import type { MutableSemanticModel, SemanticModel } from '../../model/semantic-model.js';
 import { reconcileOwnership, validateOwnershipParity } from './reconcile-ownership.js';
@@ -42,6 +42,7 @@ import type { ScopeResolver } from '../contract/scope-resolver.js';
 import { buildWorkspaceResolutionIndex } from '../workspace-index.js';
 
 import { logger } from '../../../logger.js';
+import { performance } from 'node:perf_hooks';
 interface RunScopeResolutionInput {
   readonly graph: KnowledgeGraph;
   /**
@@ -72,6 +73,18 @@ interface RunScopeResolutionInput {
    * provider doesn't supply a config loader.
    */
   readonly resolutionConfig?: unknown;
+  /**
+   * Pre-extracted ParsedFile[] from the parse-phase worker pool.
+   * When non-empty, skip the readFileContents + extractParsedFile loop
+   * and use these ParsedFiles directly. populateOwners is still called.
+   * `undefined` when workers weren't engaged or produced no data.
+   */
+  readonly preExtractedParsedFiles?: readonly ParsedFile[];
+  /**
+   * Optional progress callback for scope-resolution stages.
+   * Phase name is `'scopeResolution'`.
+   */
+  readonly onProgress?: (progress: PipelineProgress) => void;
 }
 
 interface RunScopeResolutionStats {
@@ -104,23 +117,49 @@ export function runScopeResolution(
   const parsedFiles: ParsedFile[] = [];
   let filesSkipped = 0;
   const treeCache = input.treeCache;
-  for (const file of files) {
-    const cachedTree = treeCache?.get(file.path);
-    const parsed = extractParsedFile(
-      provider.languageProvider,
-      file.content,
-      file.path,
-      onWarn,
-      cachedTree,
-    );
-    if (parsed === undefined) {
-      filesSkipped++;
-      continue;
+  const preExtracted = input.preExtractedParsedFiles;
+  const onProgress = input.onProgress ?? (() => {});
+  const sendProgress = (stage: string, pct: number, msg: string) =>
+    onProgress({
+      phase: 'scopeResolution',
+      percent: pct,
+      message: msg,
+      stats: {
+        filesProcessed: files.length,
+        totalFiles: files.length,
+        nodesCreated: graph.nodeCount,
+      },
+    });
+
+  if (preExtracted !== undefined && preExtracted.length > 0) {
+    // Pre-extracted path: forward ParsedFiles from the parse-phase worker
+    // pool, skipping the readFileContents + extractParsedFile loop. Still
+    // call populateOwners — it attaches file-level ownership info (def →
+    // ownerId) that the worker's extractParsedFile doesn't set.
+    for (const parsed of preExtracted) parsedFiles.push(parsed);
+    for (const parsed of parsedFiles) provider.populateOwners(parsed);
+    sendProgress('extract', 10, `Using pre-extracted scope data (${parsedFiles.length} files)`);
+  } else {
+    for (const file of files) {
+      const cachedTree = treeCache?.get(file.path);
+      const parsed = extractParsedFile(
+        provider.languageProvider,
+        file.content,
+        file.path,
+        onWarn,
+        cachedTree,
+      );
+      if (parsed === undefined) {
+        filesSkipped++;
+        continue;
+      }
+      provider.populateOwners(parsed);
+      parsedFiles.push(parsed);
     }
-    provider.populateOwners(parsed);
-    parsedFiles.push(parsed);
   }
   provider.populateWorkspaceOwners?.(parsedFiles, { fileContents: getFileContents() });
+
+  sendProgress('extract', 10, `Extracting scope from ${parsedFiles.length} files...`);
 
   // Reconcile scope-resolution's ownership view into the SemanticModel.
   // See `reconcile-ownership.ts` for the full rationale (Contract
@@ -151,10 +190,13 @@ export function runScopeResolution(
 
   // ── Phase 2: finalize → ScopeResolutionIndexes ─────────────────────────
   const allFilePaths = new Set(parsedFiles.map((f) => f.filePath));
+  const tf0 = performance.now();
   const nodeLookup = buildGraphNodeLookup(graph);
+  const tf1 = performance.now();
   const mroByClassDefId = provider.buildMro(graph, parsedFiles, nodeLookup);
 
   const resolutionConfig = input.resolutionConfig;
+  const tf2 = performance.now();
   const finalized = finalizeScopeModel(parsedFiles, {
     hooks: {
       resolveImportTarget: (targetRaw, fromFile) =>
@@ -172,6 +214,7 @@ export function runScopeResolution(
   // instead of mutating the finalized result through an `as` cast —
   // downstream passes get an object whose readonly guarantees match
   // the type system.
+  const tf3 = performance.now();
   const indexes = {
     ...finalized,
     methodDispatch: buildPopulatedMethodDispatch(mroByClassDefId),
@@ -182,6 +225,7 @@ export function runScopeResolution(
   // cannot carry. Must run AFTER `populateOwners` (so owned defs are
   // attributed correctly) and AFTER finalize (so module-scope
   // bindings are available).
+  const tf4 = performance.now();
   const workspaceIndex = buildWorkspaceResolutionIndex(parsedFiles);
 
   // Cross-file implicit-namespace visibility (C#). Must run before
@@ -189,6 +233,7 @@ export function runScopeResolution(
   // class bindings when chasing return-type chains across files.
   // The hook writes to `bindingAugmentations` only; finalized
   // `indexes.bindings` remains immutable post-finalize (I8).
+  const tf5 = performance.now();
   if (provider.populateNamespaceSiblings !== undefined) {
     provider.populateNamespaceSiblings(parsedFiles, indexes, {
       fileContents: getFileContents(),
@@ -196,7 +241,18 @@ export function runScopeResolution(
     });
   }
 
+  const tf6 = performance.now();
+  sendProgress('finalize', 30, 'Finalizing scope model...');
   const tFinalize = PROF ? process.hrtime.bigint() : 0n;
+  logger.warn(
+    `[scope-resolution:finalize] nodeLookup=${(tf1 - tf0).toFixed(0)}ms` +
+      ` buildMro=${(tf2 - tf1).toFixed(0)}ms` +
+      ` finalizeScope=${(tf3 - tf2).toFixed(0)}ms` +
+      ` methodDispatch=${(tf4 - tf3).toFixed(0)}ms` +
+      ` workspaceIndex=${(tf5 - tf4).toFixed(0)}ms` +
+      ` namespaceSiblings=${(tf6 - tf5).toFixed(0)}ms` +
+      ` finalizeTotal=${(tf6 - tf0).toFixed(0)}ms (${parsedFiles.length} files)`,
+  );
 
   // Cross-package namespace typeBinding mirroring. Runs before
   // propagateImportedReturnTypes so the SCC-ordered pass sees the
@@ -238,6 +294,7 @@ export function runScopeResolution(
     scopes: indexes,
     providers: registryProviders,
   });
+  sendProgress('resolve', 60, 'Resolving references...');
   const tResolve = PROF ? process.hrtime.bigint() : 0n;
 
   // ── Phase 4: emit graph edges (LOAD-BEARING ORDER — see I1) ────────────
@@ -276,6 +333,8 @@ export function runScopeResolution(
     indexes.scopeTree,
     provider.importEdgeReason,
   );
+
+  sendProgress('emit', 90, 'Emitting scope edges...');
 
   if (PROF) {
     const tEnd = process.hrtime.bigint();

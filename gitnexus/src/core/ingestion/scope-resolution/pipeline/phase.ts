@@ -93,7 +93,7 @@ export const scopeResolutionPhase: PipelinePhase<ScopeResolutionOutput> = {
     // Worker-mode parses leave the cache empty for those files; they
     // also fall back to a fresh parse — no correctness impact.
     const parseOutput = getPhaseOutput<ParseOutput>(deps, 'parse');
-    const { scopeTreeCache, resolutionContext } = parseOutput;
+    const { scopeTreeCache, resolutionContext, preExtractedParsedFiles } = parseOutput;
     // SemanticModel populated during `parse`: scope-resolution consumes
     // TypeRegistry / MethodRegistry / SymbolTable lookups instead of
     // rebuilding parallel indexes. See ARCHITECTURE.md § "Semantic-model
@@ -136,18 +136,36 @@ export const scopeResolutionPhase: PipelinePhase<ScopeResolutionOutput> = {
           ? await provider.loadResolutionConfig(ctx.repoPath)
           : undefined;
 
+      ctx.onProgress({
+        phase: 'scopeResolution',
+        percent: 82,
+        message: `Scope resolving ${lang} (${files.length} files)...`,
+        stats: { filesProcessed: 0, totalFiles: files.length, nodesCreated: ctx.graph.nodeCount },
+      });
+
+      // Filter pre-extracted ParsedFiles to only include files for the
+      // current language. preExtractedParsedFiles from ParseOutput includes
+      // ALL languages' data; passing un-filtered would cause populateOwners
+      // to be called with wrong-language providers, and fileContents lookups
+      // would reference files not loaded for this language loop.
+      const langPreExtracted = preExtractedParsedFiles?.filter(
+        (p) => getLanguageFromFilename(p.filePath) === lang,
+      );
+
       const stats = runScopeResolution(
         {
           graph: ctx.graph,
           model,
           files,
           treeCache: scopeTreeCache,
+          preExtractedParsedFiles: langPreExtracted,
           resolutionConfig,
           onWarn: (msg) => {
             if (isSemanticModelValidatorEnabled()) {
               logger.warn(`[scope-resolution:${lang}] ${msg}`);
             }
           },
+          onProgress: ctx.onProgress,
         },
         provider,
       );

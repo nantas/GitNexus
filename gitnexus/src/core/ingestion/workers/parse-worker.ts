@@ -85,6 +85,7 @@ import {
 import type { LanguageProvider } from '../language-provider.js';
 import type { ParsedFile } from 'gitnexus-shared';
 import { extractParsedFile } from '../scope-extractor-bridge.js';
+import { isRegistryPrimary } from '../registry-primary-flag.js';
 
 import { logger } from '../../logger.js';
 // ============================================================================
@@ -1437,6 +1438,7 @@ const processFileGroup = (
     }
 
     const provider = getProvider(language);
+    const isPrimary = isRegistryPrimary(language);
 
     // RFC #909 Ring 2: produce a `ParsedFile` for the new scope-based
     // resolution pipeline. No-op (returns undefined) for every language
@@ -1444,6 +1446,11 @@ const processFileGroup = (
     // Runs BEFORE legacy extraction and its result is independent: a
     // failure here is caught inside `extractParsedFile` and does NOT
     // affect the legacy DAG path that follows.
+    // For registry-primary languages, we STILL produce ParsedFile in the
+    // worker so it can be forwarded to scope-resolution via
+    // ParseOutput.preExtractedParsedFiles (avoiding a re-parse). Only
+    // the legacy extraction (calls/imports/heritage) is skipped since
+    // those are handled by scope-resolution's isRegistryPrimary gate.
     const parsedFile = extractParsedFile(
       provider,
       parseContent,
@@ -1460,8 +1467,9 @@ const processFileGroup = (
     // Heritage edges (EXTENDS/IMPLEMENTS) are created by heritage-processor which runs
     // in PARALLEL with call-processor, so the graph edges don't exist when buildTypeEnv
     // runs. This pre-pass makes parent class information available for type resolution.
+    // Skipped for registry-primary languages — scope-resolution handles heritage.
     const fileParentMap = new Map<string, string[]>();
-    if (provider.heritageExtractor) {
+    if (!isPrimary && provider.heritageExtractor) {
       for (const match of matches) {
         const captureMap: Record<string, SyntaxNode> = {};
         for (const c of match.captures) {
@@ -1537,7 +1545,7 @@ const processFileGroup = (
       }
 
       // Extract import paths before skipping
-      if (captureMap['import'] && captureMap['import.source']) {
+      if (!isPrimary && captureMap['import'] && captureMap['import.source']) {
         const rawImportPath = preprocessImportPath(
           captureMap['import.source'].text,
           captureMap['import'],
@@ -1557,6 +1565,7 @@ const processFileGroup = (
 
       // Extract assignment sites (field write access)
       if (
+        !isPrimary &&
         captureMap['assignment'] &&
         captureMap['assignment.receiver'] &&
         captureMap['assignment.property']
@@ -1714,7 +1723,7 @@ const processFileGroup = (
       }
 
       // Extract call sites
-      if (captureMap['call']) {
+      if (!isPrimary && captureMap['call']) {
         const callNode = captureMap['call'];
         const callNameNode = captureMap['call.name'];
         const callExtractor = provider.callExtractor;
@@ -1950,7 +1959,7 @@ const processFileGroup = (
       }
 
       // Extract heritage (extends/implements) via provider heritage extractor
-      if (captureMap['heritage.class']) {
+      if (!isPrimary && captureMap['heritage.class']) {
         if (provider.heritageExtractor) {
           const heritageItems = provider.heritageExtractor.extract(captureMap, {
             filePath: file.path,

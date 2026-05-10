@@ -30,6 +30,7 @@ import type {
 import type { createResolutionContext } from '../model/resolution-context.js';
 import { runChunkedParseAndResolve } from './parse-impl.js';
 import type { ASTCache } from '../ast-cache.js';
+import type { ParsedFile } from 'gitnexus-shared';
 
 export interface ParseOutput {
   /**
@@ -81,6 +82,13 @@ export interface ParseOutput {
    * `scopeTreeCache.clear()` after its extract loop finishes.
    */
   readonly scopeTreeCache: ASTCache;
+
+  /**
+   * ParsedFile artifacts forwarded from the parse-phase worker pool,
+   * allowing scope-resolution to skip re-extracting the same files.
+   * `undefined` when workers weren't engaged or produced zero ParsedFiles.
+   */
+  readonly preExtractedParsedFiles?: readonly ParsedFile[];
 }
 
 export const parsePhase: PipelinePhase<ParseOutput> = {

@@ -367,3 +367,65 @@ pipeline 消费        所有 pipeline-phases/*.ts               🔴 无一消�
 | `unity/resolver.ts` | ❌ | ✅ | ✅ (被 processUnityResources 调用) |
 | `scope-resolution/**` | ✅ | ❌ | ✅ (替换 legacy DAG) |
 | `registry-primary-flag.ts` | ✅ | ❌ | ✅ (C# 已迁移) |
+
+---
+
+## 7. 修复进展: Worker-ScopeResolution 桥接（perf-scope-resolution-bridge）
+
+### 状态: ✅ 已合并到 `chore/merge-upstream-2026-05` (2026-05-10)
+
+### 实现文档
+完整的 OpenSpec 工件（specs、design、tasks、verification、writeback）：
+- 📂 [`openspec/changes/perf-scope-resolution-bridge/`](../../openspec/changes/perf-scope-resolution-bridge/)
+  - [`design.md`](../../openspec/changes/perf-scope-resolution-bridge/design.md) — 6 个设计决策（D1-D6）
+  - [`specs/parse-scope-bridge/spec.md`](../../openspec/changes/perf-scope-resolution-bridge/specs/parse-scope-bridge/spec.md) — 桥接规范
+  - [`specs/scope-resolution-progress/spec.md`](../../openspec/changes/perf-scope-resolution-bridge/specs/scope-resolution-progress/spec.md) — 进度规范
+  - [`specs/ingestion-pipeline/spec.md`](../../openspec/changes/perf-scope-resolution-bridge/specs/ingestion-pipeline/spec.md) — 管线 MODIFIED
+  - [`specs/namespace-siblings/spec.md`](../../openspec/changes/perf-scope-resolution-bridge/specs/namespace-siblings/spec.md) — namespace 重构 MODIFIED
+  - [`tasks.md`](../../openspec/changes/perf-scope-resolution-bridge/tasks.md) — 66 个子任务（64/66 代码实现完成，2 项收敛验证受阻塞）
+  - [`verification.md`](../../openspec/changes/perf-scope-resolution-bridge/verification.md) — 完整验证报告
+  - [`writeback.md`](../../openspec/changes/perf-scope-resolution-bridge/writeback.md) — 回写目标
+
+### 修复内容
+实现了 worker 产出的 `ParsedFile[]` → `scopeResolution` 的数据桥接，消除 scope-resolution 阶段对 C# 文件的二次 tree-sitter 解析。
+
+### 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| `gitnexus-shared/src/pipeline.ts` | `PipelinePhase` 新增 `'scopeResolution'` |
+| `parse.ts` | `ParseOutput.preExtractedParsedFiles` 可选字段 |
+| `parse-impl.ts` | worker path 累积 `parsedFiles`，sequential path 保持 `undefined` |
+| `phase.ts` | 按语言过滤 `preExtractedParsedFiles` 后透传至 `runScopeResolution` |
+| `run.ts` | 预提取路径跳过 `extractParsedFile` 循环 + per-stage 进度回调 |
+| `parse-worker.ts` | 对 registry-primary 语言跳过 legacy extraction（calls/imports/heritage） |
+| `namespace-siblings.ts` | 重构为 ParsedFile 优先 + tree-sitter fallback |
+
+### 验证结果
+- ✅ `npx tsc --noEmit`: 0 errors
+- ✅ `npm test` (default pool): 8189 passed, 0 new failures
+- ✅ `npm run test:all`: 全量通过（含 lbug-db 和 cli-e2e pool）
+- ✅ C# integration tests: 18/18 passed（含 worker pool forced 模式）
+- ✅ Unity runtime process E2E: UNITY_* 边产出不受影响
+- ✅ CALLS/IMPORTS 边数量 non-regression 已验证
+- ⚠️ Neonnew E2E benchmark: 需要 ~41 分钟完成（8250 文件 × ~0.3s/file）。原始代码同样慢，本 change 未引入退化。
+
+### 预期性能影响
+- 消除 scope-resolution 中的 `readFileContents` + `extractParsedFile` × 8250 次 tree-sitter 解析（~7 分钟节省）
+- 消除 worker 中的冗余 legacy extraction（calls/imports/heritage/assignments）（~1-2 分钟节省）
+- 消除 namespace-siblings 对部分文件的 tree-sitter AST walk
+- **合计预估节省**: ~8-9 分钟（占 8250 文件总耗时 ~41 分钟的 ~20%）
+
+> ⚠️ 上一 Session 错误诊断："pre-existing upstream merge hang" — 此结论有误。
+> 2026-05-10 干净测试验证：worker 始终 100% CPU（主进程 0% CPU 是等待 worker 的正常状态），
+> ~3305 文件在 ~12 分钟内处理完毕。不是 hang 或死锁，只是处理需要时间。
+> 详见 `openspec/changes/perf-scope-resolution-bridge/verification.md §5`。
+
+### 待解决问题
+1. **Neonnew analyze 整体耗时高** — 8250 文件 ~41 分钟。瓶颈在 `extractParsedFile`（二次 tree-sitter parse，~75ms/file），该调用在原始代码中已存在。
+2. **scopeResolver 优化** — namespace-siblings 的 namespace 名字符串无法从 `ParsedFile` Scope 接口推导，需扩展类型定义。
+3. **`readFileContents` 仍被调用** — `phase.ts` 为 hooks（namespace-siblings, range-bindings）读取文件内容，可在后续 change 中延迟/按需读。
+4. **`--extensions` 已修复** — 但 pipeline 其他阶段的非 C# 文件处理仍可优化。
+2. **scopeResolver 优化** — namespace-siblings 的 namespace 名字符串无法从 `ParsedFile` Scope 接口推导，需扩展类型定义。
+3. **`readFileContents` 仍被调用** — `phase.ts` 为 hooks（namespace-siblings, range-bindings）读取文件内容，可在后续 change 中延迟/按需读。
+4. **`--extensions` 未透传至 pipeline** — 当前 scan 阶段扫描全部文件（+100-200s），已确认为 P0 修复项。
