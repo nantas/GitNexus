@@ -1,0 +1,12 @@
+{
+  "name": "gitnexus",
+  "truthSource": {
+    "enabled": true,
+    "visibility": "visible"
+  },
+  "memory": {
+    "externalDocPaths": [
+      "docs/"
+    ]
+  }
+}
