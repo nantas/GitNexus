@@ -41,6 +41,7 @@ program
     'When CLI options differ from sync manifest directives: ask|update|keep|error (default: ask)',
   )
   .option('--skills', 'Generate repo-specific skill files from detected communities')
+  .option('--no-ai-context', 'Skip writing AGENTS.md/CLAUDE.md and installing repo-local GitNexus skills')
   .option('-v, --verbose', 'Enable verbose ingestion warnings (default: false)')
   .option(
     '--scope-manifest <path>',

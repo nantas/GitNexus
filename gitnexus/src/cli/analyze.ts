@@ -70,6 +70,7 @@ export interface AnalyzeOptions {
   syncManifestPolicy?: SyncManifestPolicy;
   reuseOptions?: boolean;
   skills?: boolean;
+  aiContext?: boolean;
   verbose?: boolean;
 }
 
@@ -484,16 +485,21 @@ export const analyzeCommand = async (
   }
 
   const cliConfig = await loadCLIConfig();
-  const aiContext = await generateAIContextFiles(repoPath, storagePath, projectName, {
-    files: pipelineRuntime.totalFileCount,
-    nodes: stats.nodes,
-    edges: stats.edges,
-    communities: pipelineRuntime.communityResult?.stats.totalCommunities,
-    clusters: aggregatedClusterCount,
-    processes: pipelineRuntime.processResult?.stats.totalProcesses,
-  }, {
-    skillScope: (cliConfig.setupScope === 'global') ? 'global' : 'project',
-  }, generatedSkills);
+  const skipAiContext = options?.aiContext === false;
+  let aiContext: { files: string[] } = { files: [] };
+
+  if (!skipAiContext) {
+    aiContext = await generateAIContextFiles(repoPath, storagePath, projectName, {
+      files: pipelineRuntime.totalFileCount,
+      nodes: stats.nodes,
+      edges: stats.edges,
+      communities: pipelineRuntime.communityResult?.stats.totalCommunities,
+      clusters: aggregatedClusterCount,
+      processes: pipelineRuntime.processResult?.stats.totalProcesses,
+    }, {
+      skillScope: (cliConfig.setupScope === 'global') ? 'global' : 'project',
+    }, generatedSkills);
+  }
 
   await closeLbug();
   // Note: we intentionally do NOT call disposeEmbedder() here.
@@ -553,7 +559,9 @@ export const analyzeCommand = async (
   }
   console.log(`  ${repoPath}`);
 
-  if (aiContext.files.length > 0) {
+  if (skipAiContext) {
+    console.log('  Context: skipped (--no-ai-context)');
+  } else if (aiContext.files.length > 0) {
     console.log(`  Context: ${aiContext.files.join(', ')}`);
   }
 
