@@ -28,6 +28,8 @@ import {
 } from './analyze-summary.js';
 import { resolveChildProcessExit } from './exit-code.js';
 import { toPipelineRuntimeSummary } from './analyze-runtime-summary.js';
+import { acquireAnalyzeLock } from './analyze-lock.js';
+import { removeLbugArtifacts } from './analyze-storage.js';
 
 import type { PipelineResult } from '../types/pipeline.js';
 import type { UnityParitySeed } from '../core/ingestion/unity-parity-seed.js';
@@ -121,6 +123,26 @@ export const analyzeCommand = async (
     return;
   }
 
+  const { storagePath } = getStoragePaths(repoPath);
+  const analyzeLock = await acquireAnalyzeLock(storagePath, {
+    onWait: (owner) => {
+      const ownerDetail = owner ? ` (pid ${owner.pid})` : '';
+      console.log(`  Waiting for another analyze process${ownerDetail}...\n`);
+    },
+  });
+  let shouldForceExit = false;
+  try {
+    shouldForceExit = await analyzeRepository(repoPath, options);
+  } finally {
+    await analyzeLock.release();
+  }
+  if (shouldForceExit) process.exit(0);
+};
+
+const analyzeRepository = async (
+  repoPath: string,
+  options?: AnalyzeOptions,
+): Promise<boolean> => {
   const { storagePath, lbugPath } = getStoragePaths(repoPath);
 
   // Clean up stale KuzuDB files from before the LadybugDB migration.
@@ -321,11 +343,8 @@ export const analyzeCommand = async (
   // ── Phase 2: LadybugDB (60–85%) ──────────────────────────────────────
   updateBar(60, 'Loading into LadybugDB...');
 
-  await closeLbug();
-  const lbugFiles = [lbugPath, `${lbugPath}.wal`, `${lbugPath}.lock`];
-  for (const f of lbugFiles) {
-    try { await fs.rm(f, { recursive: true, force: true }); } catch {}
-  }
+  await closeLbug({ throwOnError: true });
+  await removeLbugArtifacts(lbugPath);
 
   const t0Lbug = Date.now();
   await initLbug(lbugPath);
@@ -474,7 +493,7 @@ export const analyzeCommand = async (
     }, generatedSkills);
   }
 
-  await closeLbug();
+  await closeLbug({ throwOnError: true });
   // Note: we intentionally do NOT call disposeEmbedder() here.
   // ONNX Runtime's native cleanup segfaults on macOS and some Linux configs.
   // Since the process exits immediately after, Node.js reclaims everything.
@@ -556,7 +575,7 @@ export const analyzeCommand = async (
   // LadybugDB's native module holds open handles that prevent Node from exiting.
   // ONNX Runtime also registers native atexit hooks that segfault on some
   // platforms (#38, #40). Force-exit to ensure clean termination.
-  process.exit(0);
+  return true;
 };
 
 export function buildPipelineRunOptionsForAnalyze(

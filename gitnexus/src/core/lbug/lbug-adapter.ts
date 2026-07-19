@@ -13,6 +13,7 @@ import {
 } from './schema.js';
 import { streamAllCSVsToDisk } from './csv-generator.js';
 import { replayFallbackRelationships } from './fallback-relationship-replay.js';
+import { createSchemaOrThrow } from './schema-initializer.js';
 
 let db: lbug.Database | null = null;
 let conn: lbug.Connection | null = null;
@@ -112,16 +113,18 @@ const doInitLbug = async (dbPath: string) => {
   db = new lbug.Database(dbPath);
   conn = new lbug.Connection(db);
 
-  for (const schemaQuery of SCHEMA_QUERIES) {
-    try {
-      await conn.query(schemaQuery);
-    } catch (err) {
-      // Only ignore "already exists" errors - log everything else
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!msg.includes('already exists')) {
-        console.warn(`⚠️ Schema creation warning: ${msg.slice(0, 120)}`);
-      }
-    }
+  try {
+    await createSchemaOrThrow(SCHEMA_QUERIES, (schemaQuery) => conn!.query(schemaQuery));
+  } catch (error) {
+    const failedConn = conn;
+    const failedDb = db;
+    conn = null;
+    db = null;
+    currentDbPath = null;
+    ftsLoaded = false;
+    try { await failedConn?.close(); } catch {}
+    try { await failedDb?.close(); } catch {}
+    throw error;
   }
 
   currentDbPath = dbPath;
@@ -588,21 +591,30 @@ export const loadCachedEmbeddings = async (): Promise<{
   return { embeddingNodeIds, embeddings };
 };
 
-export const closeLbug = async (): Promise<void> => {
+export const closeLbug = async (options: { throwOnError?: boolean } = {}): Promise<void> => {
+  const errors: unknown[] = [];
   if (conn) {
     try {
       await conn.close();
-    } catch {}
+    } catch (error) {
+      errors.push(error);
+    }
     conn = null;
   }
   if (db) {
     try {
       await db.close();
-    } catch {}
+    } catch (error) {
+      errors.push(error);
+    }
     db = null;
   }
   currentDbPath = null;
   ftsLoaded = false;
+  if (options.throwOnError && errors.length > 0) {
+    const details = errors.map((error) => error instanceof Error ? error.message : String(error)).join('; ');
+    throw new Error(`Failed to close LadybugDB cleanly: ${details}`, { cause: errors[0] });
+  }
 };
 
 export const isLbugReady = (): boolean => conn !== null && db !== null;
