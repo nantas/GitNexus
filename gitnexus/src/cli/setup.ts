@@ -1,6 +1,12 @@
+import {
+  setupCommand as setupDetectedAgents,
+  formatHookCommand,
+  copyHookHelpers,
+} from './setup-detected-agents.js';
+export { setupDetectedAgents, formatHookCommand, copyHookHelpers };
 /**
  * Setup Command
- * 
+ *
  * One-time MCP configuration writer with explicit agent targeting.
  * Configures only the selected coding agent's MCP entry
  * in either global or project scope.
@@ -30,6 +36,7 @@ interface SetupResult {
 type SetupScope = 'global' | 'project';
 
 interface SetupOptions {
+  codingAgent?: string[] | string;
   scope?: string;
   agent?: string;
   cliVersion?: string;
@@ -76,21 +83,25 @@ async function installLegacyCursorSkills(result: SetupResult): Promise<void> {
  * The MCP server entry for all editors.
  * Uses the locally installed gitnexus binary.
  */
-function getMcpEntry(): McpEntry {
+function getMcpEntry(packageSpec: string): McpEntry {
+  if (!packageSpec)
+    return process.platform === 'win32'
+      ? { command: 'cmd', args: ['/c', 'gitnexus', 'mcp'] }
+      : { command: 'gitnexus', args: ['mcp'] };
   if (process.platform === 'win32') {
     return {
       command: 'cmd',
-      args: ['/c', 'gitnexus', 'mcp'],
+      args: ['/c', 'npx', '-y', packageSpec, 'mcp'],
     };
   }
   return {
-    command: 'gitnexus',
-    args: ['mcp'],
+    command: 'npx',
+    args: ['-y', packageSpec, 'mcp'],
   };
 }
 
-function getOpenCodeMcpEntry() {
-  const entry = getMcpEntry();
+function getOpenCodeMcpEntry(packageSpec: string) {
+  const entry = getMcpEntry(packageSpec);
   return {
     type: 'local',
     command: [entry.command, ...entry.args],
@@ -101,14 +112,14 @@ function getOpenCodeMcpEntry() {
  * Merge gitnexus entry into an existing MCP config JSON object.
  * Returns the updated config.
  */
-function mergeMcpConfig(existing: any): any {
+function mergeMcpConfig(existing: any, packageSpec: string): any {
   if (!existing || typeof existing !== 'object') {
     existing = {};
   }
   if (!existing.mcpServers || typeof existing.mcpServers !== 'object') {
     existing.mcpServers = {};
   }
-  existing.mcpServers.gitnexus = getMcpEntry();
+  existing.mcpServers.gitnexus = getMcpEntry(packageSpec);
   return existing;
 }
 
@@ -116,14 +127,14 @@ function mergeMcpConfig(existing: any): any {
  * Merge gitnexus entry into an OpenCode config JSON object.
  * Returns the updated config.
  */
-function mergeOpenCodeConfig(existing: any): any {
+function mergeOpenCodeConfig(existing: any, packageSpec: string): any {
   if (!existing || typeof existing !== 'object') {
     existing = {};
   }
   if (!existing.mcp || typeof existing.mcp !== 'object') {
     existing.mcp = {};
   }
-  existing.mcp.gitnexus = getOpenCodeMcpEntry();
+  existing.mcp.gitnexus = getOpenCodeMcpEntry(packageSpec);
   return existing;
 }
 
@@ -178,8 +189,8 @@ function toTomlString(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-function buildCodexMcpTable(): string {
-  const entry = getMcpEntry();
+function buildCodexMcpTable(packageSpec: string): string {
+  const entry = getMcpEntry(packageSpec);
   return [
     '[mcp_servers.gitnexus]',
     `command = ${toTomlString(entry.command)}`,
@@ -187,8 +198,8 @@ function buildCodexMcpTable(): string {
   ].join('\n');
 }
 
-function mergeCodexConfig(existingRaw: string): string {
-  const table = buildCodexMcpTable();
+function mergeCodexConfig(existingRaw: string, packageSpec: string): string {
+  const table = buildCodexMcpTable(packageSpec);
   const normalized = existingRaw.replace(/\r\n/g, '\n');
   const tablePattern = /^\[mcp_servers\.gitnexus\][\s\S]*?(?=^\[[^\]]+\]|(?![\s\S]))/m;
 
@@ -213,7 +224,7 @@ async function resolveOpenCodeConfigPath(opencodeDir: string): Promise<string> {
 
 // ─── Editor-specific setup ─────────────────────────────────────────
 
-async function setupCursor(result: SetupResult): Promise<void> {
+async function setupCursor(result: SetupResult, packageSpec: string): Promise<void> {
   const cursorDir = path.join(os.homedir(), '.cursor');
   if (!(await dirExists(cursorDir))) {
     result.skipped.push('Cursor (not installed)');
@@ -223,7 +234,7 @@ async function setupCursor(result: SetupResult): Promise<void> {
   const mcpPath = path.join(cursorDir, 'mcp.json');
   try {
     const existing = await readJsonFile(mcpPath);
-    const updated = mergeMcpConfig(existing);
+    const updated = mergeMcpConfig(existing, packageSpec);
     await writeJsonFile(mcpPath, updated);
     result.configured.push('Cursor');
   } catch (err: any) {
@@ -231,7 +242,7 @@ async function setupCursor(result: SetupResult): Promise<void> {
   }
 }
 
-async function setupClaudeCode(result: SetupResult): Promise<void> {
+async function setupClaudeCode(result: SetupResult, packageSpec: string): Promise<void> {
   const claudeDir = path.join(os.homedir(), '.claude');
   const hasClaude = await dirExists(claudeDir);
 
@@ -258,7 +269,9 @@ async function installGlobalAgentSkills(result: SetupResult): Promise<void> {
   try {
     const installed = await installSkillsTo(skillsDir);
     if (installed.length > 0) {
-      result.configured.push(`Global agent skills (${installed.length} skills → ~/.agents/skills/gitnexus/)`);
+      result.configured.push(
+        `Global agent skills (${installed.length} skills → ~/.agents/skills/gitnexus/)`,
+      );
     }
   } catch (err: any) {
     result.errors.push(`Global agent skills: ${err.message}`);
@@ -270,7 +283,9 @@ async function installProjectAgentSkills(repoRoot: string, result: SetupResult):
   try {
     const installed = await installSkillsTo(skillsDir);
     if (installed.length > 0) {
-      result.configured.push(`Project agent skills (${installed.length} skills → ${path.relative(repoRoot, skillsDir)}/)`);
+      result.configured.push(
+        `Project agent skills (${installed.length} skills → ${path.relative(repoRoot, skillsDir)}/)`,
+      );
     }
   } catch (err: any) {
     result.errors.push(`Project agent skills: ${err.message}`);
@@ -307,25 +322,29 @@ async function installClaudeCodeHooks(result: SetupResult): Promise<void> {
       const jsonCli = JSON.stringify(normalizedCli);
       content = content.replace(
         "let cliPath = path.resolve(__dirname, '..', '..', 'dist', 'cli', 'index.js');",
-        `let cliPath = ${jsonCli};`
+        `let cliPath = ${jsonCli};`,
       );
       await fs.writeFile(dest, content, 'utf-8');
     } catch {
       // Script not found in source — skip
     }
 
+    if ((await copyHookHelpers(pluginHooksPath, destHooksDir, 'Claude Code hooks', result)).length)
+      return;
     const hookPath = path.join(destHooksDir, 'gitnexus-hook.cjs').replace(/\\/g, '/');
-    const hookCmd = `node "${hookPath.replace(/"/g, '\\"')}"`;
+    const hookCmd = formatHookCommand(hookPath, process.platform === 'win32');
 
     // Merge hook config into ~/.claude/settings.json
-    const existing = await readJsonFile(settingsPath) || {};
+    const existing = (await readJsonFile(settingsPath)) || {};
     if (!existing.hooks) existing.hooks = {};
 
     // NOTE: SessionStart hooks are broken on Windows (Claude Code bug #23576).
     // Session context is delivered via CLAUDE.md / skills instead.
 
     // Helper: add a hook entry if one with 'gitnexus-hook' isn't already registered
-    interface HookEntry { hooks?: Array<{ command?: string }> }
+    interface HookEntry {
+      hooks?: Array<{ command?: string }>;
+    }
     function ensureHookEntry(
       eventName: string,
       matcher: string,
@@ -333,8 +352,8 @@ async function installClaudeCodeHooks(result: SetupResult): Promise<void> {
       statusMessage: string,
     ) {
       if (!existing.hooks[eventName]) existing.hooks[eventName] = [];
-      const hasHook = existing.hooks[eventName].some(
-        (h: HookEntry) => h.hooks?.some(hh => hh.command?.includes('gitnexus-hook'))
+      const hasHook = existing.hooks[eventName].some((h: HookEntry) =>
+        h.hooks?.some((hh) => hh.command?.includes('gitnexus-hook')),
       );
       if (!hasHook) {
         existing.hooks[eventName].push({
@@ -354,7 +373,7 @@ async function installClaudeCodeHooks(result: SetupResult): Promise<void> {
   }
 }
 
-async function setupOpenCode(result: SetupResult): Promise<void> {
+async function setupOpenCode(result: SetupResult, packageSpec: string): Promise<void> {
   const opencodeDir = path.join(os.homedir(), '.config', 'opencode');
   if (!(await dirExists(opencodeDir))) {
     result.skipped.push('OpenCode (not installed)');
@@ -364,7 +383,7 @@ async function setupOpenCode(result: SetupResult): Promise<void> {
   const configPath = await resolveOpenCodeConfigPath(opencodeDir);
   try {
     const existing = await readJsonFile(configPath);
-    const config = mergeOpenCodeConfig(existing);
+    const config = mergeOpenCodeConfig(existing, packageSpec);
     await writeJsonFile(configPath, config);
     result.configured.push(`OpenCode (${path.basename(configPath)})`);
   } catch (err: any) {
@@ -372,15 +391,14 @@ async function setupOpenCode(result: SetupResult): Promise<void> {
   }
 }
 
-async function setupCodex(result: SetupResult): Promise<void> {
-  const entry = getMcpEntry();
+async function setupCodex(result: SetupResult, packageSpec: string): Promise<void> {
+  const entry = getMcpEntry(packageSpec);
 
   try {
-    await execFileAsync(
-      'codex',
-      ['mcp', 'add', 'gitnexus', '--', entry.command, ...entry.args],
-      { timeout: 15000 }
-    );
+    await execFileAsync('codex', ['mcp', 'add', 'gitnexus', '--', entry.command, ...entry.args], {
+      timeout: 15000,
+      windowsHide: true,
+    });
     result.configured.push('Codex');
   } catch (err: any) {
     if (err?.code === 'ENOENT') {
@@ -391,11 +409,15 @@ async function setupCodex(result: SetupResult): Promise<void> {
   }
 }
 
-async function setupProjectMcp(repoRoot: string, result: SetupResult): Promise<void> {
+async function setupProjectMcp(
+  repoRoot: string,
+  result: SetupResult,
+  packageSpec: string,
+): Promise<void> {
   const mcpPath = path.join(repoRoot, '.mcp.json');
   try {
     const existing = await readJsonFile(mcpPath);
-    const updated = mergeMcpConfig(existing);
+    const updated = mergeMcpConfig(existing, packageSpec);
     await writeJsonFile(mcpPath, updated);
     result.configured.push(`Project MCP (${path.relative(repoRoot, mcpPath)})`);
   } catch (err: any) {
@@ -403,7 +425,11 @@ async function setupProjectMcp(repoRoot: string, result: SetupResult): Promise<v
   }
 }
 
-async function setupProjectCodex(repoRoot: string, result: SetupResult): Promise<void> {
+async function setupProjectCodex(
+  repoRoot: string,
+  result: SetupResult,
+  packageSpec: string,
+): Promise<void> {
   const codexConfigPath = path.join(repoRoot, '.codex', 'config.toml');
   try {
     let existingRaw = '';
@@ -413,7 +439,7 @@ async function setupProjectCodex(repoRoot: string, result: SetupResult): Promise
       if (err?.code !== 'ENOENT') throw err;
     }
 
-    const merged = mergeCodexConfig(existingRaw);
+    const merged = mergeCodexConfig(existingRaw, packageSpec);
     await fs.mkdir(path.dirname(codexConfigPath), { recursive: true });
     await fs.writeFile(codexConfigPath, merged, 'utf-8');
     result.configured.push(`Project Codex MCP (${path.relative(repoRoot, codexConfigPath)})`);
@@ -422,11 +448,15 @@ async function setupProjectCodex(repoRoot: string, result: SetupResult): Promise
   }
 }
 
-async function setupProjectOpenCode(repoRoot: string, result: SetupResult): Promise<void> {
+async function setupProjectOpenCode(
+  repoRoot: string,
+  result: SetupResult,
+  packageSpec: string,
+): Promise<void> {
   const opencodePath = path.join(repoRoot, 'opencode.json');
   try {
     const existing = await readJsonFile(opencodePath);
-    const merged = mergeOpenCodeConfig(existing);
+    const merged = mergeOpenCodeConfig(existing, packageSpec);
     await writeJsonFile(opencodePath, merged);
     result.configured.push(`Project OpenCode MCP (${path.relative(repoRoot, opencodePath)})`);
   } catch (err: any) {
@@ -445,7 +475,11 @@ function extractVersionFromPackageSpec(packageSpec: string): string | undefined 
   return at > 0 ? trimmed.slice(at + 1) : undefined;
 }
 
-async function saveSetupConfig(scope: SetupScope, packageSpec: string, result: SetupResult): Promise<void> {
+async function saveSetupConfig(
+  scope: SetupScope,
+  packageSpec: string,
+  result: SetupResult,
+): Promise<void> {
   try {
     const existing = await loadCLIConfig();
     await saveCLIConfig({
@@ -550,6 +584,16 @@ async function copyDirRecursive(src: string, dest: string): Promise<void> {
 // ─── Main command ──────────────────────────────────────────────────
 
 export const setupCommand = async (options: SetupOptions = {}) => {
+  if (options.codingAgent !== undefined) {
+    if (options.agent || options.scope || options.cliSpec || options.cliVersion) {
+      process.stderr.write(
+        '--coding-agent cannot be combined with --agent, --scope, or CLI pin overrides.\n',
+      );
+      process.exitCode = 1;
+      return;
+    }
+    return setupDetectedAgents({ codingAgent: options.codingAgent });
+  }
   console.log('');
   console.log('  GitNexus Setup');
   console.log('  ==============');
@@ -583,7 +627,7 @@ export const setupCommand = async (options: SetupOptions = {}) => {
     explicitVersion: options.cliVersion,
     config: existingConfig,
   });
-  const mcpPackageSpec = resolvedCliSpec.packageSpec;
+  const mcpPackageSpec = options.cliSpec || options.cliVersion ? resolvedCliSpec.packageSpec : '';
 
   const result: SetupResult = {
     configured: [],
@@ -593,24 +637,24 @@ export const setupCommand = async (options: SetupOptions = {}) => {
 
   if (scope === 'global') {
     if (legacyCursorMode) {
-      await setupCursor(result);
+      await setupCursor(result, mcpPackageSpec);
       await installLegacyCursorSkills(result);
-      await saveSetupConfig(scope, mcpPackageSpec, result);
+      await saveSetupConfig(scope, resolvedCliSpec.packageSpec, result);
       agent = LEGACY_CURSOR_AGENT as SetupAgent;
     } else {
       // Configure only the selected agent MCP
       if (agent === 'claude') {
-        await setupClaudeCode(result);
+        await setupClaudeCode(result, mcpPackageSpec);
         // Claude-only hooks should only be installed when Claude is selected.
         await installClaudeCodeHooks(result);
       } else if (agent === 'opencode') {
-        await setupOpenCode(result);
+        await setupOpenCode(result, mcpPackageSpec);
       } else if (agent === 'codex') {
-        await setupCodex(result);
+        await setupCodex(result, mcpPackageSpec);
       }
       // Install shared global skills once
       await installGlobalAgentSkills(result);
-      await saveSetupConfig(scope, mcpPackageSpec, result);
+      await saveSetupConfig(scope, resolvedCliSpec.packageSpec, result);
     }
   } else {
     const repoRoot = getGitRoot(process.cwd());
@@ -620,14 +664,14 @@ export const setupCommand = async (options: SetupOptions = {}) => {
       return;
     }
     if (agent === 'claude') {
-      await setupProjectMcp(repoRoot, result);
+      await setupProjectMcp(repoRoot, result, mcpPackageSpec);
     } else if (agent === 'codex') {
-      await setupProjectCodex(repoRoot, result);
+      await setupProjectCodex(repoRoot, result, mcpPackageSpec);
     } else if (agent === 'opencode') {
-      await setupProjectOpenCode(repoRoot, result);
+      await setupProjectOpenCode(repoRoot, result, mcpPackageSpec);
     }
     await installProjectAgentSkills(repoRoot, result);
-    await saveSetupConfig(scope, mcpPackageSpec, result);
+    await saveSetupConfig(scope, resolvedCliSpec.packageSpec, result);
   }
 
   // Print results
@@ -659,8 +703,12 @@ export const setupCommand = async (options: SetupOptions = {}) => {
   console.log(`    Scope: ${scope}`);
   console.log(`    Agent: ${legacyCursorMode ? LEGACY_CURSOR_AGENT : agent}`);
   console.log(`    CLI package spec: ${mcpPackageSpec}`);
-  console.log(`    MCP configured for: ${result.configured.filter(c => !c.includes('skills')).join(', ') || 'none'}`);
-  console.log(`    Skills installed to: ${result.configured.filter(c => c.includes('skills')).length > 0 ? result.configured.filter(c => c.includes('skills')).join(', ') : 'none'}`);
+  console.log(
+    `    MCP configured for: ${result.configured.filter((c) => !c.includes('skills')).join(', ') || 'none'}`,
+  );
+  console.log(
+    `    Skills installed to: ${result.configured.filter((c) => c.includes('skills')).length > 0 ? result.configured.filter((c) => c.includes('skills')).join(', ') : 'none'}`,
+  );
   console.log('');
   console.log('  Next steps:');
   console.log('    1. cd into any git repo');
@@ -668,3 +716,8 @@ export const setupCommand = async (options: SetupOptions = {}) => {
   console.log('    3. Open the repo in your editor — MCP is ready!');
   console.log('');
 };
+
+const RENAMED_SKILL_DIRS: Readonly<Record<string, readonly string[]>> = {
+  'gitnexus-review': ['gitnexus-pr-review'],
+};
+export const LEGACY_SKILL_DIR_NAMES: readonly string[] = Object.values(RENAMED_SKILL_DIRS).flat();

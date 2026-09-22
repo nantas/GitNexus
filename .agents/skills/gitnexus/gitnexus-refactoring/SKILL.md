@@ -35,7 +35,7 @@ When refactoring scope includes Unity runtime process semantics (runtime chain l
 
 ```
 - [ ] gitnexus_rename({symbol_name: "oldName", new_name: "newName", dry_run: true}) — preview all edits
-- [ ] Review graph edits (high confidence) and ast_search edits (review carefully)
+- [ ] Review graph edits (high confidence) and text_search edits (review carefully)
 - [ ] If satisfied: gitnexus_rename({..., dry_run: false}) — apply edits
 - [ ] gitnexus_detect_changes() — verify only expected files changed
 - [ ] Run tests for affected processes
@@ -74,7 +74,7 @@ When refactoring scope includes Unity runtime process semantics (runtime chain l
 ```
 gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: true})
 → 12 edits across 8 files
-→ 10 graph edits (high confidence), 2 ast_search edits (review)
+→ 10 graph edits (high confidence), 2 text_search edits (review)
 → Changes: [{file_path, edits: [{line, old_text, new_text, confidence}]}]
 ```
 
@@ -115,10 +115,10 @@ RETURN caller.name, caller.filePath ORDER BY caller.filePath
 
 ```
 1. gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: true})
-   → 12 edits: 10 graph (safe), 2 ast_search (review)
+   → 12 edits: 10 graph (safe), 2 text_search (review)
    → Files: validator.ts, login.ts, middleware.ts, config.json...
 
-2. Review ast_search edits (config.json: dynamic reference!)
+2. Review text_search edits (config.json: dynamic reference!)
 
 3. gitnexus_rename({symbol_name: "validateUser", new_name: "authenticateUser", dry_run: false})
    → Applied 12 edits across 8 files
@@ -135,3 +135,19 @@ RETURN caller.name, caller.filePath ORDER BY caller.filePath
   - `policy-adjusted`: user-visible result after hydration policy is applied
 - If `hydration_policy=strict` and `hydrationMeta.fallbackToCompact=true`, the result is downgraded policy-adjusted output and is not closure.
 - In that downgraded state, rerun with parity before final conclusions.
+
+
+## Verification completeness
+
+`partial: true` (a graph query failed) or `truncated: true` (the changed-symbol
+listing was capped) means the result is short of the truth: a short or empty
+list is not proof that only the expected files changed. Re-run it rather than
+treat the refactor as verified.
+
+A wrong-worktree zero carries neither flag and is indistinguishable from a
+clean verification, so confirm the diffed checkout is the one you edited.
+
+
+## Repository identity
+
+Use `list_repos {}` to inspect registered repositories. Follow `offset: pagination.nextOffset` until `hasMore` is false when you need the complete list. Bind subsequent calls explicitly, for example `repo: "my-app"`, when working across repositories. Read-only tools may infer the registered path containing the process cwd, but must not cross an unindexed nested Git checkout. If no sole/default/cwd match exists, resolve the ambiguity before proceeding. For a linked checkout, pass `worktree` to `detect_changes` so its diff comes from the edited checkout.

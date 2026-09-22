@@ -1,0 +1,627 @@
+# GitNexus skill evolution: runs the offline propose → benchmark → gate loop
+# (eval/workflow_bench/evolve.py) on a schedule and, when the deterministic
+# promotion gate passes, opens a human-reviewed PR with the promoted skill
+# overlay. The gate is evidence FOR a PR, never a bypass of one — nothing
+# merges without review.
+#
+# Activation and operations checklist.
+# [x] Configure at least one model secret on the `gitnexus-evolution`
+#     Environment: GITNEXUS_BENCH_ANTHROPIC_API_KEY (Anthropic API key — not
+#     the Claude Code OAuth token; legacy GITNEXUS_BENCH_AUTH_TOKEN is still
+#     accepted) and/or GITNEXUS_BENCH_OPENAI_API_KEY. Sessions bill real usage.
+#     OpenAI keys are not native to Claude Code; the loop starts a loopback
+#     LiteLLM proxy and keeps the OpenAI key off the sandboxed agent. With only
+#     the OpenAI secret, or with provider=openai, dispatch-time Claude model
+#     defaults are gpt-5.6-sol with xhigh reasoning effort.
+# [x] Configure the RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY secrets (the
+#     App that opens the promotion PR). The Mint-App-Token step hard-fails
+#     without them once a promotion is detected. Verify the App installation
+#     is scoped to this repo with only Contents: RW + Pull requests: RW.
+# [x] Create the protected Environment `gitnexus-evolution` with a
+#     deployment-branch rule restricting it to `main`, and ideally scope the
+#     four secrets above to that Environment. workflow_dispatch runs this
+#     workflow (and eval/workflow_bench/evolve.py) from the *dispatched ref*,
+#     so this server-side rule — not a code-side guard the branch could edit
+#     away — is what stops a non-main branch from running with the secrets.
+# [x] Register a self-hosted runner labeled `gitnexus-evolution` (a dedicated
+#     EC2 box works well). GitHub-hosted runners hard-cap job execution at 6
+#     hours, non-configurable — too short once a benchmark session actually
+#     invokes Skill/MCP tools for real. Self-hosted runners cap at 5 days
+#     instead. This job only ever runs on schedule/workflow_dispatch, never
+#     on fork-PR content, so the usual public-repo self-hosted-runner risk
+#     doesn't apply — still keep the box dedicated to this workflow, with
+#     outbound-only network access, and prefer on-demand over Spot (a Spot
+#     reclaim mid-run loses the same way a 6-hour timeout does). Instance,
+#     security group, and IAM setup are documented privately, not in this
+#     repo — publishing the exact topology of a real, live AWS account
+#     isn't safe to do in a public repo even without literal secrets.
+#     Accepted tradeoff: the box is stopped between runs (an EventBridge
+#     schedule starts it ~15min before the Saturday cron and stops it 24h
+#     later) but is not destroyed/recreated per run, so it isn't fully
+#     ephemeral — a compromise between the review-flagged ideal (re-image
+#     between runs, bounding how long the injected model API key could
+#     matter if the box were ever compromised some other way) and the added
+#     complexity of per-job ephemeral provisioning for a job that runs at
+#     most weekly. Revisit if run frequency increases or the threat model
+#     changes; stopping already bounds the exposure window to the job's own
+#     runtime on 1 day out of 7.
+# [ ] Install and verify the runner survival policy below before enabling
+#     scheduled runs. A run
+#     spans ~15h and apt-daily-upgrade.timer fires daily (~06:34), so every
+#     scheduled run crosses it. On 2026-08-02 unattended-upgrades upgraded
+#     openssl at 07:54:02 and needrestart restarted the Actions runner five
+#     seconds later: the job went to Canceled, and a cancelled job skips even
+#     `if: always()`, so the evidence artifact died with it. Keep installing
+#     updates, but never let them restart services here:
+#         /etc/needrestart/conf.d/90-gitnexus-evolution.conf
+#         $nrconf{restart} = 'l';
+#     A drop-in, so a needrestart package upgrade cannot clobber it. Nothing
+#     is left unpatched in practice — the box is stopped between runs, so the
+#     new binaries take effect at the next boot.
+# [x] Run workflow_dispatch once and confirm: containment preflight passes,
+#     the benchmark completes inside the job timeout, the results artifact
+#     uploads, and a promotion (if any) opens a well-formed PR. Run
+#     29907431284 (2026-07-22) went green end to end in 14h45m and reached a
+#     gate decision (`insufficient_evidence`, no promotion).
+# [ ] Confirm a workers=3 dispatch has zero excluded runs (review sessions in
+#     33962002890 averaged ~19m serial, well under the 90m session ceiling).
+#     Then set GITNEXUS_EVOLUTION_WORKERS=3 and
+#     GITNEXUS_EVOLUTION_ENABLED=true for scheduled runs. Scheduled runs
+#     require both values, so leaving the var unset is an immediate rollback.
+#     Dispatch defaults to 3; pass workers=1 only to debug a contended host.
+#     Weekly generations reuse matching incumbent/CE cells from the previous
+#     artifact so the paid matrix is the new candidate, not a 54-cell replay.
+#     Wall clock is quantised by ceil(cells_per_task / workers), and a review
+#     task is 9 cells cold, so 4 costs host contention for exactly the wall
+#     clock of 3. The next step up that buys anything is 5 (3 waves -> 2).
+name: GitNexus skill evolution
+
+on:
+  schedule:
+    # Weekly is a deliberate cadence to catch model/harness drift promptly; a
+    # no-promotion week only costs one benchmark run (the gate keeps the
+    # incumbent unless quality improves). Dial back toward the README's ~90-day
+    # re-evaluation guidance if the recurring spend is not worth it.
+    - cron: '0 3 * * 6' # weekly, Saturday 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      generations:
+        description: 'Propose→bench→gate generations to run'
+        required: false
+        default: '1'
+        type: string
+      runs:
+        description: 'Runs per arm per task (the gate needs at least 3)'
+        required: false
+        default: '3'
+        type: string
+      workers:
+        description: 'Benchmark cells of one task to run at once — 3 fits the evolution box; drop to 1 only if siblings hit the session ceiling'
+        required: false
+        default: '3'
+        type: string
+      model:
+        description: 'Model for the benchmark arms (match the model your skill users run)'
+        required: false
+        default: 'gpt-5.6-sol'
+        type: string
+      proposer_model:
+        description: 'Model for the proposer/diagnosis session — a stronger model is fine (one session per generation)'
+        required: false
+        default: 'gpt-5.6-sol'
+        type: string
+      effort:
+        description: 'Reasoning effort for every proposer and benchmark session'
+        required: false
+        default: xhigh
+        type: choice
+        options:
+          - low
+          - medium
+          - high
+          - xhigh
+          - max
+      provider:
+        description: 'Model backend. auto uses Anthropic when that secret exists; openai forces the loopback OpenAI gateway even if an Anthropic key is also configured.'
+        required: false
+        default: openai
+        type: choice
+        options:
+          - auto
+          - openai
+          - anthropic
+      include_expensive:
+        description: 'Include tasks marked expensive: true'
+        required: false
+        default: false
+        type: boolean
+      seed_from_previous:
+        description: "Seed the proposer with the previous run's evidence and rejected proposal. Turn off to start from a blank slate — required when the earlier evidence is not trustworthy (e.g. produced before a harness-integrity fix), since a tainted proposal would otherwise propagate into every later generation."
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  evolve:
+    name: Propose, benchmark, and gate skill candidates
+    if: >-
+      github.repository == 'abhigyanpatwari/GitNexus' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (
+          vars.GITNEXUS_EVOLUTION_ENABLED == 'true' &&
+          vars.GITNEXUS_EVOLUTION_WORKERS == '3'
+        )
+      )
+    runs-on: [self-hosted, linux, x64, gitnexus-evolution]
+    # Gate promotion runs on a protected Environment. An admin must attach a
+    # deployment-branch rule (main only) and ideally scope the model and App
+    # secrets to it — server-side enforcement a dispatched non-main ref cannot bypass by
+    # editing its own workflow copy. See the activation checklist above.
+    environment: gitnexus-evolution
+    # Three budgets have to nest, longest first, or the evidence is lost:
+    #   EventBridge instance uptime (24h from ~02:45)
+    #     > this job timeout (21h)
+    #       > the benchmark step timeout (19h, set on the step below)
+    # A job-level timeout CANCELS the job, so the upload step never runs and a
+    # multi-hour generation's evidence dies with it; a step-level timeout only
+    # fails that step, and `if: always()` still uploads what the sweep wrote.
+    # The instance must outlive the job for the same reason — when the box
+    # stops the runner just disappears mid-step. Scheduled runs can start well
+    # after the cron (the 2026-08-01 run was queued 65min late), so the job
+    # budget has to absorb that delay and still land inside the uptime window.
+    # A Friday workflow_dispatch on a box that already booted for Saturday's
+    # cron inherits leftover uptime, not a fresh 24h. Run 33962002890 started
+    # Friday 10:57 UTC and vanished at the Saturday 03:00 stop — 51 finished
+    # sessions never uploaded. run-evolution.sh therefore passes
+    # --max-runtime-from-instance-window, and the CLI derives its cap from
+    # /proc/uptime at startup, so the sweep fails in-process and this always()
+    # upload still runs.
+    timeout-minutes: 1260
+    permissions:
+      contents: read # The promotion PR uses a short-lived App token minted below.
+      actions: read # Read the previous run's evidence artifact to seed the proposer.
+    env:
+      GENERATIONS: ${{ inputs.generations || '1' }}
+      RUNS: ${{ inputs.runs || '3' }}
+      # A manual input wins; scheduled runs use the repository rollout knob.
+      # Both fall back to serial — see workflow_bench.runner --workers for why.
+      WORKERS: ${{ inputs.workers || vars.GITNEXUS_EVOLUTION_WORKERS || '1' }}
+      MODEL: ${{ inputs.model || 'gpt-5.6-sol' }}
+      PROPOSER_MODEL: ${{ inputs.proposer_model || 'gpt-5.6-sol' }}
+      EFFORT: ${{ inputs.effort || 'xhigh' }}
+      PROVIDER: ${{ inputs.provider || 'openai' }}
+      INCLUDE_EXPENSIVE: ${{ inputs.include_expensive && '1' || '' }}
+    steps:
+      - name: Require the benchmark auth secret
+        env:
+          HAS_ANTHROPIC: ${{ secrets.GITNEXUS_BENCH_ANTHROPIC_API_KEY != '' || secrets.GITNEXUS_BENCH_AUTH_TOKEN != '' }}
+          HAS_OPENAI: ${{ secrets.GITNEXUS_BENCH_OPENAI_API_KEY != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_ANTHROPIC}" != 'true' && "${HAS_OPENAI}" != 'true' ]]; then
+            echo '::error::Configure GITNEXUS_BENCH_ANTHROPIC_API_KEY (Anthropic API key, not the Claude Code OAuth token) and/or GITNEXUS_BENCH_OPENAI_API_KEY. The evolution loop runs real benchmark sessions.'
+            exit 1
+          fi
+          case "${PROVIDER}" in
+            openai)
+              if [[ "${HAS_OPENAI}" != 'true' ]]; then
+                echo '::error::provider=openai requires GITNEXUS_BENCH_OPENAI_API_KEY on the gitnexus-evolution environment.'
+                exit 1
+              fi
+              ;;
+            anthropic)
+              if [[ "${HAS_ANTHROPIC}" != 'true' ]]; then
+                echo '::error::provider=anthropic requires GITNEXUS_BENCH_ANTHROPIC_API_KEY on the gitnexus-evolution environment.'
+                exit 1
+              fi
+              ;;
+            auto)
+              ;;
+            *)
+              echo "::error::Unknown provider '${PROVIDER}' (expected auto, openai, or anthropic)."
+              exit 1
+              ;;
+          esac
+
+      - name: Verify runner survival policy
+        run: |
+          set -euo pipefail
+          needrestart_policy=/etc/needrestart/conf.d/90-gitnexus-evolution.conf
+          needrestart_line="\$nrconf{restart} = 'l';"
+          if [[ ! -r "${needrestart_policy}" ]] || ! grep -Fqx "${needrestart_line}" "${needrestart_policy}"; then
+            echo "::error::${needrestart_policy} must contain: ${needrestart_line}"
+            exit 1
+          fi
+          # The runner sets job processes to 500; the host oom-guard rewrites
+          # them to -900. Read once and the check loses that race.
+          oom_score_adjustment="$(</proc/self/oom_score_adj)"
+          deadline=$((SECONDS + 5))
+          while (( oom_score_adjustment > -900 && SECONDS < deadline )); do
+            sleep 0.05
+            oom_score_adjustment="$(</proc/self/oom_score_adj)"
+          done
+          if (( oom_score_adjustment > -900 )); then
+            echo "::error::Runner.Worker descendants require OOMScoreAdjust=-900 or stronger; effective value is ${oom_score_adjustment}."
+            exit 1
+          fi
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.18.0'
+          cache: npm
+          cache-dependency-path: |
+            gitnexus/package-lock.json
+            gitnexus-shared/package-lock.json
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: '0.11.23'
+          python-version: '3.13'
+          enable-cache: true
+          cache-dependency-glob: eval/uv.lock
+
+      - name: Fetch pinned Compound Engineering review comparator
+        env:
+          CE_COMMIT: 3ad9b51bceecf0158e590c882034d0398dbb9c5c
+        run: |
+          set -euo pipefail
+          destination="${RUNNER_TEMP}/compound-engineering-plugin"
+          rm -rf "${destination}"
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/EveryInc/compound-engineering-plugin.git "${destination}"
+          git -C "${destination}" checkout --detach "${CE_COMMIT}"
+          test "$(git -C "${destination}" rev-parse HEAD)" = "${CE_COMMIT}"
+
+      - name: Install sandbox runtime and pinned Claude CLI
+        run: |
+          set -euo pipefail
+          # This box is stopped six days a week, so persistent apt timers can
+          # begin their catch-up run shortly after boot. Wait for dpkg instead
+          # of racing the same package lock and failing the weekly lane.
+          sudo apt-get -o DPkg::Lock::Timeout=600 update
+          sudo apt-get -o DPkg::Lock::Timeout=600 install --yes --no-install-recommends bubblewrap ripgrep socat
+          apparmor_userns=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -r "${apparmor_userns}" ]] && [[ "$(<"${apparmor_userns}")" == '1' ]]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          canary_runtime="${RUNNER_TEMP}/claude-canary"
+          install -d -m 0700 "${canary_runtime}"
+          install -m 0600 \
+            .github/claude-canary-runtime/package.json \
+            "${canary_runtime}/package.json"
+          install -m 0600 \
+            .github/claude-canary-runtime/package-lock.json \
+            "${canary_runtime}/package-lock.json"
+          npm ci \
+            --prefix "${canary_runtime}" \
+            --ignore-scripts=false \
+            --audit=false \
+            --fund=false
+          node -e \
+            "const p=require(process.argv[1]); if(p.version!=='2.1.214') process.exit(1)" \
+            "${canary_runtime}/node_modules/@anthropic-ai/claude-code/package.json"
+          test "$("${canary_runtime}/node_modules/@anthropic-ai/claude-code-linux-x64/claude" --version)" = \
+            '2.1.214 (Claude Code)'
+
+      - name: Verify contained review execution before paid sessions
+        working-directory: eval
+        env:
+          GITNEXUS_REQUIRE_BWRAP_CANARY: '1'
+          GITNEXUS_REQUIRE_CLAUDE_CANARY: '1'
+          CLAUDE_CANARY_BIN: ${{ runner.temp }}/claude-canary/node_modules/@anthropic-ai/claude-code-linux-x64/claude
+        run: |
+          set -euo pipefail
+          uv run --locked --extra dev python -m pytest tests/test_proposer_sandbox.py -q
+
+      - name: Install monorepo root dependencies
+        run: |
+          set -euo pipefail
+          # The benchmark's task bindings sandbox-copy node_modules from the
+          # monorepo root as well as gitnexus-shared and gitnexus (see the
+          # sandbox_copy entries in tasks.scenarios.yaml). The two steps below
+          # install the subpackage trees; the root tree needs its own install
+          # or capture_task_dependency_binding aborts at task binding on the
+          # missing root node_modules.
+          npm ci
+
+      - name: Build pinned shared runtime
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+        working-directory: gitnexus-shared
+
+      - name: Install and build pinned GitNexus runtime
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+        working-directory: gitnexus
+
+      - name: Point the benchmark task repo at the checkout
+        run: |
+          set -euo pipefail
+          # tasks.review.scenarios.yaml addresses the target repo as ~/GitNexus (the
+          # developer-local convention). On the runner the repo is the checkout
+          # at ${GITHUB_WORKSPACE}; link it so runner_tasks.py can resolve the
+          # task `repo` path. The benchmark only clones the repo (copy-on-write)
+          # and mounts dependencies read-only, so the checkout is never mutated.
+          if [[ -e "${HOME}/GitNexus" && ! -L "${HOME}/GitNexus" ]]; then
+            echo '::error::~/GitNexus exists and is not a symlink; refusing to place the checkout inside it.'
+            exit 1
+          fi
+          ln -sfn "${GITHUB_WORKSPACE}" "${HOME}/GitNexus"
+          # The review corpus pins historical object ids. Fetch main so those
+          # objects are present even when actions/checkout selected another ref.
+          git -C "${GITHUB_WORKSPACE}" fetch --no-tags --quiet \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" \
+            '+refs/heads/main:refs/remotes/origin/main'
+          baseline_sha="$(git -C "${GITHUB_WORKSPACE}" rev-parse --verify 'refs/remotes/origin/main^{commit}')"
+          echo "Fetched review corpus history at ${baseline_sha}"
+
+      - name: Seed the proposer with the previous run's evidence
+        id: seed
+        # Scheduled runs always seed; a dispatch can opt out to start clean.
+        if: github.event_name != 'workflow_dispatch' || inputs.seed_from_previous
+        # Best-effort seeding must not consume the benchmark's budget. This
+        # step walks up to 10 prior runs and every iteration blocks on network
+        # it does not control (`gh run download` of a multi-hundred-megabyte
+        # artifact). Unbounded, a wedged download sits here until the 21h job
+        # timeout CANCELS the job — and a cancelled job skips even
+        # `if: always()`, so the sweep never starts and nothing is uploaded.
+        # Bounding the step instead fails it in minutes, which is a loud,
+        # cheap, re-runnable failure rather than a silent 21h loss. 15 minutes
+        # is an order of magnitude above the observed walk (well under a
+        # minute) and a rounding error against the 19h sweep it protects.
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Without this the weekly lane is memoryless: `--seed-results` is the
+          # only way a run sees what already lost (evolve stages the prior
+          # proposal when present and summarizes promotion.json when present),
+          # and with the default --generations 1 there is no earlier generation
+          # in-process to supply it. Every Saturday would otherwise propose
+          # from a blank slate and could re-propose the same rejected candidate
+          # forever. Best-effort by design: a first run, an expired artifact,
+          # or a download failure must not cost a whole generation.
+          if ! command -v gh >/dev/null; then
+            echo '::warning::gh is not installed on this runner — proposing without prior evidence. The promotion-PR step needs gh too.'
+            exit 0
+          fi
+          if ! previous_runs="$(gh run list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow gitnexus-skill-evolution.yml \
+            --branch main \
+            --status completed \
+            --limit 10 \
+            --json databaseId \
+            --jq "map(.databaseId) | map(select(. != ${GITHUB_RUN_ID})) | .[]")"; then
+            echo '::warning::Prior workflow runs could not be listed; proposing without prior evidence.'
+            exit 0
+          fi
+          if [[ -z "${previous_runs}" ]]; then
+            echo 'No prior completed run to seed from; the proposer starts from the learnings queue only.'
+            exit 0
+          fi
+          seed_root="${RUNNER_TEMP}/wfseed"
+          rm -rf "${seed_root}"
+          install -d -m 0700 "${seed_root}"
+          seed=''
+          # Failed sweeps deliberately upload partial evidence, so "completed"
+          # is the right population. Walk newest-first until one still-retained
+          # artifact actually contains benchmark rows; an empty latest run must
+          # not hide an older useful one.
+          for previous in ${previous_runs}; do
+            if [[ ! "${previous}" =~ ^[0-9]+$ ]]; then
+              echo "::warning::Ignoring malformed prior run id: ${previous}"
+              continue
+            fi
+            run_root="${seed_root}/${previous}"
+            install -d -m 0700 "${run_root}"
+            if ! gh run download "${previous}" --repo "${GITHUB_REPOSITORY}" --dir "${run_root}"; then
+              echo "::warning::Evidence from run ${previous} could not be downloaded (expired or absent); trying an older run."
+              continue
+            fi
+            unsafe="$(find "${run_root}" ! -type d ! -type f -print -quit)"
+            if [[ -n "${unsafe}" ]]; then
+              echo "::warning::Run ${previous} contains a non-regular artifact entry; trying an older run."
+              continue
+            fi
+            # upload-artifact normalizes directories/files to 0755/0644, while
+            # the evidence reader deliberately requires transcript paths to be
+            # owner-only. Restore that trust-boundary invariant after download.
+            if ! chmod -R go-rwx "${run_root}"; then
+              echo "::warning::Evidence permissions from run ${previous} could not be restricted; trying an older run."
+              continue
+            fi
+            # The artifact holds gen-N/bench/{results.jsonl,promotion.json,...};
+            # the highest generation is the one that actually reached the gate.
+            latest="$(find "${run_root}" -type f -path '*/gen-*/bench/results.jsonl' | sort -V | tail -1)"
+            if [[ -z "${latest}" || -L "${latest}" || ! -f "${latest}" ]]; then
+              echo "::warning::Run ${previous} uploaded no usable benchmark results; trying an older run."
+              continue
+            fi
+            # Existence is insufficient: an interrupted run may leave an empty,
+            # malformed, or session/infra-only JSONL. Reuse the same bounded
+            # selection and transcript/digest preflight the proposer will use,
+            # so an unusable newer run cannot hide an older useful one.
+            if uv run --project eval --locked --extra dev python -c \
+              'from pathlib import Path; import json, sys, tempfile; from workflow_bench.evolve import load_jsonl, select_evidence, stage_proposer_evidence_bundle, summarize_gate; result = Path(sys.argv[1]); root = result.parent; rows = select_evidence(load_jsonl(result)); rows or sys.exit(10); promotion = root / "promotion.json"; gate = summarize_gate(json.loads(promotion.read_text())) if promotion.is_file() else []; prior = root.parent / "proposal.md"; prior = prior if prior.is_file() and not prior.is_symlink() else None; dest = Path(tempfile.mkdtemp(prefix="wfseed-preflight-")) / "bundle"; stage_proposer_evidence_bundle(dest, results_dir=root, evidence=rows, learnings=[], gate_summary=gate, prior_proposal=prior)' \
+              "${latest}"; then
+              :
+            else
+              usability_status=$?
+              echo "::warning::Run ${previous} failed evidence preflight (exit ${usability_status}); trying an older run."
+              continue
+            fi
+            seed="$(dirname "${latest}")"
+            echo "Seeding the proposer from run ${previous}: ${seed}"
+            break
+          done
+          if [[ -z "${seed}" ]]; then
+            echo '::warning::No usable prior benchmark artifact found; proposing without prior evidence.'
+            exit 0
+          fi
+          echo "seed=${seed}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run the propose → benchmark → gate loop
+        id: loop
+        # Kill the sweep with time left in the job to upload what it produced.
+        # See the budget nesting on the job above.
+        timeout-minutes: 1140
+        env:
+          GITNEXUS_BENCH_ANTHROPIC_API_KEY: ${{ secrets.GITNEXUS_BENCH_ANTHROPIC_API_KEY || secrets.GITNEXUS_BENCH_AUTH_TOKEN }}
+          GITNEXUS_BENCH_OPENAI_API_KEY: ${{ secrets.GITNEXUS_BENCH_OPENAI_API_KEY }}
+          # The step's stdout is a pipe, so CPython block-buffers it and a
+          # multi-hour generation would report nothing until it exits (run
+          # 29907431284 emitted every line at the same timestamp, 14h45m in).
+          PYTHONUNBUFFERED: '1'
+          SEED_RESULTS: ${{ steps.seed.outputs.seed }}
+          EVOLUTION_PROFILE: review
+          CE_PLUGIN_DIR: ${{ runner.temp }}/compound-engineering-plugin
+          CE_PLUGIN_VERSION: 3.24.0
+        run: |
+          set -euo pipefail
+          ./workflow_bench/run-evolution.sh --apply
+        working-directory: eval
+
+      - name: Upload benchmark evidence
+        # Unconditional: the sweep writes results.jsonl and transcripts as it
+        # goes, so a killed or failed generation still has evidence worth
+        # keeping — and that is exactly the run whose evidence is needed.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gitnexus-evolution-${{ github.run_id }}-${{ github.run_attempt }}
+          # Addressed directly rather than carried from the sweep step: that is
+          # the step whose death is the reason this upload matters, and a value
+          # threaded from it would not be there when it counts.
+          path: ${{ runner.temp }}/wfevolve
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Detect and bound the applied promotion
+        id: promotion
+        run: |
+          set -euo pipefail
+          changed="$(git status --porcelain)"
+          if [[ -z "${changed}" ]]; then
+            echo 'No promotion this run; the incumbent skills stand.'
+            echo "promoted=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # The apply step may only touch the canonical skill tree and its
+          # shipped mirrors. Anything else means the overlay escaped its
+          # boundary — refuse to open a PR from it.
+          while IFS= read -r line; do
+            path="${line:3}"
+            case "${path}" in
+              .claude/skills/gitnexus-review/*|gitnexus/skills/gitnexus-review/*|gitnexus-claude-plugin/skills/gitnexus-review/*|gitnexus-cursor-integration/skills/gitnexus-review/*) ;;
+              *)
+                echo "::error::Promotion touched a path outside the skill trees: ${path}"
+                exit 1
+                ;;
+            esac
+          done <<< "${changed}"
+          echo "promoted=true" >> "${GITHUB_OUTPUT}"
+          # The loop returns on the first promotion, so the highest-numbered
+          # gen-N/bench/promotion.json is the decision that actually fired.
+          # Emit only that one — never every generation's, or a rejected
+          # generation's decisions could surface in the PR body. The heredoc
+          # uses a per-run random delimiter so a summary value that ever
+          # contains the marker cannot close the block early and inject keys.
+          promotion_file="$(find "${RUNNER_TEMP}/wfevolve" -name promotion.json | sort -V | tail -1)"
+          delim="PROMOTION_EOF_$(openssl rand -hex 16)"
+          {
+            echo "summary<<${delim}"
+            if [[ -n "${promotion_file}" ]]; then
+              tail -c 8000 "${promotion_file}"
+            fi
+            echo
+            echo "${delim}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Mint GitHub App token
+        id: app-token
+        if: steps.promotion.outputs.promoted == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          # `client-id` supersedes the deprecated `app-id` in v3.x (the action
+          # accepts the numeric App ID here, as publish.yml does). Request only
+          # the permissions this job needs — push a branch and open a PR — so
+          # the minted token drops the installation's other grants (e.g.
+          # Workflows: write).
+          client-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Open the promotion PR
+        if: steps.promotion.outputs.promoted == 'true'
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PROMOTION_SUMMARY: ${{ steps.promotion.outputs.summary }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Include the run attempt: GITHUB_RUN_ID is stable across re-runs, so
+          # a re-run after a push-succeeds/PR-create-fails partial failure needs
+          # a fresh branch to push (a non-force push to the existing branch
+          # would be rejected non-fast-forward and wedge the lane).
+          branch="evolution/skills-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git config user.name 'gitnexus-evolution[bot]'
+          git config user.email 'gitnexus-evolution[bot]@users.noreply.github.com'
+          git checkout -b "${branch}"
+          git add .claude/skills gitnexus/skills gitnexus-claude-plugin/skills gitnexus-cursor-integration/skills/gitnexus-review
+          git commit -m 'feat(skills): promoted evolution overlay (gate-passed)'
+
+          # The App token reaches git through GIT_ASKPASS reading step env at
+          # push time — it never appears in argv, git config, or the checkout.
+          askpass="${RUNNER_TEMP}/evolution-askpass"
+          cat > "${askpass}" <<'ASKPASS_EOF'
+          #!/usr/bin/env bash
+          printf '%s\n' "${APP_TOKEN}"
+          ASKPASS_EOF
+          chmod 0700 "${askpass}"
+          GIT_ASKPASS="${askpass}" GIT_TERMINAL_PROMPT=0 git push \
+            "https://x-access-token@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:refs/heads/${branch}"
+
+          {
+            cat <<'BODY_HEAD'
+          Automated skill-evolution promotion. The deterministic gate passed; this PR is the human-review step — inspect the diff and the evidence before merging.
+          BODY_HEAD
+            printf '\n%s\n\n' "Benchmark evidence: ${RUN_URL} (artifact gitnexus-evolution-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT})."
+            cat <<'BODY_OPEN'
+          <details><summary>Promotion decisions</summary>
+
+          ```json
+          BODY_OPEN
+            printf '%s\n' "${PROMOTION_SUMMARY}"
+            cat <<'BODY_CLOSE'
+          ```
+
+          </details>
+          BODY_CLOSE
+          } > "${RUNNER_TEMP}/pr-body.md"
+          gh pr create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --base main \
+            --head "${branch}" \
+            --title 'feat(skills): promoted evolution overlay' \
+            --body-file "${RUNNER_TEMP}/pr-body.md"

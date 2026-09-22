@@ -4,7 +4,7 @@
  * Tests: formatQueryResult, formatContextResult, formatImpactResult,
  * formatCypherResult, formatDetectChangesResult, formatListReposResult, MAX_BODY_SIZE
  */
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   formatQueryResult,
   formatContextResult,
@@ -13,7 +13,65 @@ import {
   formatDetectChangesResult,
   formatListReposResult,
   MAX_BODY_SIZE,
+  validateHost,
 } from '../../src/cli/eval-server.js';
+import { formatSymbolLine } from '../../src/cli/format-symbol.js';
+
+// ─── validateHost ────────────────────────────────────────────────────
+
+beforeEach(() => {
+  vi.unstubAllEnvs();
+  vi.stubEnv('GITNEXUS_LANG', 'en');
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe('validateHost', () => {
+  it('passes "localhost" through unchanged', () => {
+    expect(validateHost('localhost')).toBe('localhost');
+  });
+
+  it('accepts valid IPv4 addresses', () => {
+    expect(validateHost('127.0.0.1')).toBe('127.0.0.1');
+    expect(validateHost('0.0.0.0')).toBe('0.0.0.0');
+    expect(validateHost('192.168.1.5')).toBe('192.168.1.5');
+    expect(validateHost('10.0.0.1')).toBe('10.0.0.1');
+  });
+
+  it('accepts valid IPv6 addresses', () => {
+    expect(validateHost('::1')).toBe('::1');
+    expect(validateHost('::')).toBe('::');
+    expect(validateHost('2001:db8::1')).toBe('2001:db8::1');
+  });
+
+  it('returns null for a non-IP hostname', () => {
+    expect(validateHost('foo.bar')).toBeNull();
+    expect(validateHost('myhost.local')).toBeNull();
+    expect(validateHost('example.com')).toBeNull();
+  });
+
+  it('returns null for out-of-range IPv4 octets', () => {
+    expect(validateHost('999.999.999.999')).toBeNull();
+    expect(validateHost('192.168.1.256')).toBeNull();
+  });
+
+  it('returns null for incomplete IPv4 addresses', () => {
+    expect(validateHost('192.168.1')).toBeNull();
+    expect(validateHost('192.168')).toBeNull();
+  });
+
+  it('returns null for an empty string', () => {
+    expect(validateHost('')).toBeNull();
+  });
+
+  it('returns null for whitespace or padded IPs', () => {
+    expect(validateHost(' ')).toBeNull();
+    expect(validateHost(' 127.0.0.1')).toBeNull();
+    expect(validateHost('127.0.0.1 ')).toBeNull();
+  });
+});
 
 // ─── MAX_BODY_SIZE ───────────────────────────────────────────────────
 
@@ -37,12 +95,22 @@ describe('formatQueryResult', () => {
 
   it('formats processes with symbols', () => {
     const result = formatQueryResult({
-      processes: [
-        { id: 'p1', summary: 'User Login Flow', step_count: 3, symbol_count: 2 },
-      ],
+      processes: [{ id: 'p1', summary: 'User Login Flow', step_count: 3, symbol_count: 2 }],
       process_symbols: [
-        { process_id: 'p1', type: 'Function', name: 'login', filePath: 'src/auth.ts', startLine: 10 },
-        { process_id: 'p1', type: 'Function', name: 'validate', filePath: 'src/auth.ts', startLine: 20 },
+        {
+          process_id: 'p1',
+          type: 'Function',
+          name: 'login',
+          filePath: 'src/auth.ts',
+          startLine: 10,
+        },
+        {
+          process_id: 'p1',
+          type: 'Function',
+          name: 'validate',
+          filePath: 'src/auth.ts',
+          startLine: 20,
+        },
       ],
       definitions: [],
     });
@@ -70,9 +138,7 @@ describe('formatQueryResult', () => {
   it('formats standalone definitions', () => {
     const result = formatQueryResult({
       processes: [],
-      definitions: [
-        { type: 'Interface', name: 'Config', filePath: 'src/types.ts' },
-      ],
+      definitions: [{ type: 'Interface', name: 'Config', filePath: 'src/types.ts' }],
     });
     expect(result).toContain('Standalone definitions');
     expect(result).toContain('Config');
@@ -134,9 +200,7 @@ describe('formatContextResult', () => {
       symbol: { kind: 'Function', name: 'foo', filePath: 'src/a.ts' },
       incoming: {},
       outgoing: {},
-      processes: [
-        { name: 'Auth Flow', step_index: 2, step_count: 5 },
-      ],
+      processes: [{ name: 'Auth Flow', step_index: 2, step_count: 5 }],
     });
     expect(result).toContain('1 execution flow');
     expect(result).toContain('Auth Flow');
@@ -171,6 +235,162 @@ describe('formatImpactResult', () => {
     expect(formatImpactResult({ error: 'bad request' })).toContain('Error: bad request');
   });
 
+  it('surfaces per-candidate blast radius for an ambiguous result, never the "isolated" headline (#2129)', () => {
+    const result = formatImpactResult({
+      status: 'ambiguous',
+      target: { name: 'classifyCard' },
+      direction: 'upstream',
+      impactedCount: 0,
+      risk: 'UNKNOWN',
+      maxImpactedCount: 3,
+      maxRisk: 'MEDIUM',
+      candidates: [
+        {
+          uid: 'Function:src/sync-logic.ts:classifyCard',
+          name: 'classifyCard',
+          kind: 'Function',
+          filePath: 'src/sync-logic.ts',
+          line: 1,
+          impactedCount: 3,
+          risk: 'MEDIUM',
+        },
+        {
+          uid: 'Function:src/ui-helpers.ts:classifyCard',
+          name: 'classifyCard',
+          kind: 'Function',
+          filePath: 'src/ui-helpers.ts',
+          line: 1,
+          impactedCount: 1,
+          risk: 'LOW',
+        },
+      ],
+    });
+    // Must NOT print the false-safe "isolated" headline.
+    expect(result).not.toContain('isolated');
+    expect(result).toContain('AMBIGUOUS');
+    expect(result).toContain('Max blast radius 3');
+    // Both candidates + their real counts are visible.
+    expect(result).toContain('src/sync-logic.ts');
+    expect(result).toContain('[3 upstream');
+    expect(result).toContain('--uid');
+    // No probe failed here → no lower-bound warning.
+    expect(result).not.toContain('candidate probes failed');
+  });
+
+  it('warns that the max is a lower bound when a candidate probe failed (#2129 review F1)', () => {
+    const result = formatImpactResult({
+      status: 'ambiguous',
+      target: { name: 'classifyCard' },
+      direction: 'upstream',
+      impactedCount: 0,
+      risk: 'UNKNOWN',
+      maxImpactedCount: 2,
+      maxRisk: 'LOW',
+      partialProbe: true,
+      candidates: [
+        {
+          uid: 'A',
+          name: 'classifyCard',
+          kind: 'Function',
+          filePath: 'src/a.ts',
+          line: 1,
+          impactedCount: 2,
+          risk: 'LOW',
+        },
+        {
+          uid: 'B',
+          name: 'classifyCard',
+          kind: 'Function',
+          filePath: 'src/b.ts',
+          line: 1,
+          impactedCount: 0,
+          risk: 'UNKNOWN',
+        },
+      ],
+    });
+    expect(result).not.toContain('isolated');
+    expect(result).toContain('candidate probes failed');
+    expect(result).toContain('lower bound');
+    // The honest max is still shown.
+    expect(result).toContain('Max blast radius 2');
+  });
+
+  it('reports the full match count when the candidate list is truncated (#2129 review F11)', () => {
+    const result = formatImpactResult({
+      status: 'ambiguous',
+      target: { name: 'handle' },
+      direction: 'upstream',
+      impactedCount: 0,
+      risk: 'UNKNOWN',
+      maxImpactedCount: 5,
+      maxRisk: 'HIGH',
+      totalCandidates: 9,
+      candidatesTruncated: true,
+      candidates: Array.from({ length: 6 }, (_, i) => ({
+        uid: `U${i}`,
+        name: 'handle',
+        kind: 'Function',
+        filePath: `src/h${i}.ts`,
+        line: 1,
+        impactedCount: i,
+        risk: 'LOW',
+      })),
+    });
+    // Full count (9), not the truncated array length (6).
+    expect(result).toContain('9 symbols');
+    expect(result).toContain('showing 6');
+  });
+
+  it('shows a plain count when the candidate list is not truncated', () => {
+    const result = formatImpactResult({
+      status: 'ambiguous',
+      target: { name: 'foo' },
+      direction: 'upstream',
+      impactedCount: 0,
+      risk: 'UNKNOWN',
+      maxImpactedCount: 1,
+      maxRisk: 'LOW',
+      totalCandidates: 2,
+      candidates: [
+        {
+          uid: 'A',
+          name: 'foo',
+          kind: 'Function',
+          filePath: 'src/a.ts',
+          line: 1,
+          impactedCount: 1,
+          risk: 'LOW',
+        },
+        {
+          uid: 'B',
+          name: 'foo',
+          kind: 'Function',
+          filePath: 'src/b.ts',
+          line: 1,
+          impactedCount: 0,
+          risk: 'LOW',
+        },
+      ],
+    });
+    expect(result).toContain('2 symbols');
+    expect(result).not.toContain('showing');
+  });
+
+  it('surfaces the lower-bound boundary note when epistemic is lower-bound (#1858)', () => {
+    const result = formatImpactResult({
+      target: { kind: 'Class', name: 'EmailLogger' },
+      direction: 'upstream',
+      impactedCount: 0,
+      risk: 'LOW',
+      epistemic: 'lower-bound',
+      boundaries: ['Logger is an interface with 2 implementations; callers bind via DI.'],
+      byDepth: {},
+    });
+    expect(result).not.toContain('isolated');
+    expect(result.toLowerCase()).toContain('lower bound');
+    expect(result).toContain('Logger is an interface');
+  });
+
   it('returns error with suggestion when provided', () => {
     const result = formatImpactResult({
       error: 'Impact analysis failed',
@@ -188,14 +408,55 @@ describe('formatImpactResult', () => {
       partial: true,
       byDepth: {
         1: [
-          { type: 'Function', name: 'caller1', filePath: 'src/a.ts', relationType: 'CALLS', confidence: 1 },
-          { type: 'Function', name: 'caller2', filePath: 'src/b.ts', relationType: 'CALLS', confidence: 1 },
+          {
+            type: 'Function',
+            name: 'caller1',
+            filePath: 'src/a.ts',
+            relationType: 'CALLS',
+            confidence: 1,
+          },
+          {
+            type: 'Function',
+            name: 'caller2',
+            filePath: 'src/b.ts',
+            relationType: 'CALLS',
+            confidence: 1,
+          },
         ],
       },
     });
     expect(result).toContain('Partial results');
     expect(result).toContain('caller1');
     expect(result).toContain('caller2');
+  });
+
+  it('prints the shared-axes comparison when a target has unavailable risk axes', () => {
+    const result = formatImpactResult({
+      target: { kind: 'File', name: 'crypto.ts' },
+      direction: 'upstream',
+      impactedCount: 13,
+      risk: 'MEDIUM',
+      riskSharedAxes: 'MEDIUM',
+      riskScale: {
+        comparableAcrossKinds: false,
+        unusedAxes: [
+          {
+            axis: 'processes',
+            reason: 'file-nodes-have-no-process-or-community-membership',
+          },
+          {
+            axis: 'modules',
+            reason: 'file-nodes-have-no-process-or-community-membership',
+          },
+        ],
+      },
+      byDepthCounts: { 1: 13 },
+    });
+
+    expect(result).toContain('Risk: MEDIUM');
+    expect(result).toContain('Shared-axes risk: MEDIUM');
+    expect(result).toContain('process/module axes are unavailable');
+    expect(result).toContain('do not use this to waive a HIGH/CRITICAL risk warning');
   });
 
   it('handles zero impact', () => {
@@ -205,7 +466,22 @@ describe('formatImpactResult', () => {
       impactedCount: 0,
       byDepth: {},
     });
-    expect(result).toContain('No upstream dependencies');
+    expect(result).toContain('No upstream callers resolved');
+    expect(result).not.toContain('appears isolated');
+  });
+
+  it('prints UNKNOWN and riskNote for an empty upstream walk', () => {
+    const result = formatImpactResult({
+      target: { name: 'foo' },
+      direction: 'upstream',
+      impactedCount: 0,
+      risk: 'UNKNOWN',
+      riskNote: 'safe to change is a claim about callers and there were none to reason about',
+      byDepth: {},
+    });
+    expect(result).toContain('Risk: UNKNOWN');
+    expect(result).toContain('safe to change is a claim about callers');
+    expect(result).not.toContain('appears isolated');
   });
 
   it('formats impact by depth', () => {
@@ -215,11 +491,29 @@ describe('formatImpactResult', () => {
       impactedCount: 3,
       byDepth: {
         1: [
-          { type: 'Function', name: 'caller1', filePath: 'src/a.ts', relationType: 'CALLS', confidence: 1 },
-          { type: 'Function', name: 'caller2', filePath: 'src/b.ts', relationType: 'CALLS', confidence: 0.8 },
+          {
+            type: 'Function',
+            name: 'caller1',
+            filePath: 'src/a.ts',
+            relationType: 'CALLS',
+            confidence: 1,
+          },
+          {
+            type: 'Function',
+            name: 'caller2',
+            filePath: 'src/b.ts',
+            relationType: 'CALLS',
+            confidence: 0.8,
+          },
         ],
         2: [
-          { type: 'Class', name: 'App', filePath: 'src/app.ts', relationType: 'IMPORTS', confidence: 1 },
+          {
+            type: 'Class',
+            name: 'App',
+            filePath: 'src/app.ts',
+            relationType: 'IMPORTS',
+            confidence: 1,
+          },
         ],
       },
     });
@@ -280,6 +574,40 @@ describe('formatCypherResult', () => {
   });
 });
 
+// ─── formatSymbolLine ────────────────────────────────────────────────
+
+describe('formatSymbolLine', () => {
+  // `||`, not `??`, on every field: a node whose label came back as an EMPTY
+  // STRING (several node types do) still needs the placeholder — a `??` here
+  // would render "  login → src/auth.ts" instead of "  Symbol login → ...".
+  it.each<[string | undefined, string | undefined, string | undefined, string]>([
+    ['Function', 'login', 'src/auth.ts', '  Function login → src/auth.ts'],
+    ['', 'login', 'src/auth.ts', '  Symbol login → src/auth.ts'],
+    [undefined, 'login', 'src/auth.ts', '  Symbol login → src/auth.ts'],
+    ['Function', '', 'src/auth.ts', '  Function ? → src/auth.ts'],
+    ['Function', undefined, 'src/auth.ts', '  Function ? → src/auth.ts'],
+    ['Function', 'login', '', '  Function login → ?'],
+    ['Function', 'login', undefined, '  Function login → ?'],
+    [undefined, undefined, undefined, '  Symbol ? → ?'],
+  ])('renders type=%s name=%s path=%s as "%s"', (type, name, filePath, expected) => {
+    expect(formatSymbolLine(type, name, filePath)).toBe(expected);
+  });
+
+  it('is the line both consumers render (detect_changes + query definitions)', () => {
+    const detectChanges = formatDetectChangesResult({
+      summary: { changed_files: 1, changed_count: 1, affected_count: 0, risk_level: 'LOW' },
+      changed_symbols: [{ type: '', name: 'foo', filePath: 'src/a.ts' }],
+    });
+    expect(detectChanges).toContain(formatSymbolLine('', 'foo', 'src/a.ts'));
+
+    const query = formatQueryResult({
+      processes: [],
+      definitions: [{ type: '', name: '', filePath: '' }],
+    });
+    expect(query).toContain(formatSymbolLine('', '', ''));
+  });
+});
+
 // ─── formatDetectChangesResult ───────────────────────────────────────
 
 describe('formatDetectChangesResult', () => {
@@ -292,12 +620,83 @@ describe('formatDetectChangesResult', () => {
     expect(result).toBe('No changes detected.');
   });
 
+  it('flags a degraded run instead of printing a clean bill of health (#2283)', () => {
+    // The backend sets `partial` when a graph query is swallowed, and leaves the
+    // counts at zero. Without the note the pre-commit gate reads as "clean".
+    const result = formatDetectChangesResult({ partial: true, summary: { changed_count: 0 } });
+    expect(result).toContain('PARTIAL RESULT');
+    expect(result).toContain('a graph query failed');
+    expect(result).not.toContain('No changes detected.');
+  });
+
+  it('flags a degraded run that still found symbols', () => {
+    const result = formatDetectChangesResult({
+      partial: true,
+      summary: { changed_files: 1, changed_count: 1, affected_count: 0, risk_level: 'LOW' },
+      changed_symbols: [{ type: 'Function', name: 'foo', filePath: 'src/a.ts' }],
+    });
+    expect(result).toContain('PARTIAL RESULT');
+    expect(result).toContain('foo');
+  });
+
+  it('flags a capped listing, so a short list is not read as a short diff', () => {
+    // `truncated` is `partial`'s sibling and NOT the same claim: the counts and
+    // risk level still cover every changed symbol, only the names were capped.
+    const result = formatDetectChangesResult({
+      truncated: true,
+      summary: { changed_files: 40, changed_count: 500, affected_count: 0, risk_level: 'HIGH' },
+      changed_symbols: [{ type: 'Function', name: 'foo', filePath: 'src/a.ts' }],
+    });
+    expect(result).toContain('LISTING CAPPED');
+    expect(result).not.toContain('PARTIAL RESULT');
+    expect(result).toContain('foo');
+  });
+
+  it('leads with both notes when a run was degraded AND capped', () => {
+    const result = formatDetectChangesResult({
+      partial: true,
+      truncated: true,
+      summary: { changed_files: 40, changed_count: 500, affected_count: 0, risk_level: 'HIGH' },
+      changed_symbols: [{ type: 'Function', name: 'foo', filePath: 'src/a.ts' }],
+    });
+    // A caveat printed after the summary is read too late, so both notes lead.
+    expect(result.indexOf('PARTIAL RESULT')).toBe(0);
+    expect(result.indexOf('LISTING CAPPED')).toBeGreaterThan(0);
+    expect(result.indexOf('LISTING CAPPED')).toBeLessThan(result.indexOf('Changes: 40 files'));
+    // And it must NOT keep the truncated-only reassurance that the counts are
+    // whole: `changed_count` was summed from the batches that succeeded, so with
+    // `partial` it is a floor. Claiming otherwise here contradicts the note above
+    // it and the tool description.
+    expect(result).toContain('lower bound');
+    expect(result).not.toContain('still cover all of them');
+  });
+
+  it('flags a capped listing that found nothing, alongside the no-changes line', () => {
+    const result = formatDetectChangesResult({ truncated: true, summary: { changed_count: 0 } });
+    expect(result).toContain('LISTING CAPPED');
+    expect(result).toContain('No changes detected.');
+  });
+
+  it('reports the overflow count once — the capped note carries no number of its own', () => {
+    const result = formatDetectChangesResult({
+      truncated: true,
+      summary: { changed_files: 40, changed_count: 500, affected_count: 0, risk_level: 'HIGH' },
+      changed_symbols: Array.from({ length: 15 }, (_, i) => ({
+        type: 'Function',
+        name: `fn${i}`,
+        filePath: 'src/test.ts',
+      })),
+    });
+    // Splitting on a needle yields (occurrences + 1) pieces.
+    expect(result.split('... and 485 more')).toHaveLength(2);
+    expect(result.split('LISTING CAPPED')).toHaveLength(2);
+    expect(result.match(/485/g)).toEqual(['485']);
+  });
+
   it('formats changes with affected processes', () => {
     const result = formatDetectChangesResult({
       summary: { changed_files: 2, changed_count: 3, affected_count: 1, risk_level: 'MEDIUM' },
-      changed_symbols: [
-        { type: 'Function', name: 'foo', filePath: 'src/a.ts' },
-      ],
+      changed_symbols: [{ type: 'Function', name: 'foo', filePath: 'src/a.ts' }],
       affected_processes: [
         { name: 'Auth Flow', step_count: 5, changed_steps: [{ symbol: 'foo' }] },
       ],
@@ -320,27 +719,94 @@ describe('formatDetectChangesResult', () => {
     });
     expect(result).toContain('and 5 more');
   });
+
+  it('localizes detect_changes labels for Simplified Chinese', () => {
+    vi.stubEnv('GITNEXUS_LANG', 'zh-CN');
+
+    const result = formatDetectChangesResult({
+      summary: { changed_files: 2, changed_count: 3, affected_count: 1, risk_level: 'MEDIUM' },
+      changed_symbols: [{ type: 'Function', name: 'foo', filePath: 'src/a.ts' }],
+      affected_processes: [
+        { name: 'Auth Flow', step_count: 5, changed_steps: [{ symbol: 'foo' }] },
+      ],
+    });
+
+    expect(result).toContain('变更：2 个文件，3 个符号');
+    expect(result).toContain('受影响流程：1');
+    expect(result).toContain('风险等级：MEDIUM');
+    expect(result).toContain('已变更符号：');
+    expect(result).toContain('受影响执行流程：');
+    expect(result).toContain('Auth Flow (5 步) — 已变更：foo');
+  });
 });
 
 // ─── formatListReposResult ───────────────────────────────────────────
 
 describe('formatListReposResult', () => {
-  it('handles empty/null input', () => {
-    expect(formatListReposResult([])).toBe('No indexed repositories.');
-    expect(formatListReposResult(null)).toBe('No indexed repositories.');
+  it('handles an empty page (no pagination)', () => {
+    expect(formatListReposResult({ repositories: [] })).toBe('No indexed repositories.');
   });
 
-  it('formats repo list', () => {
-    const result = formatListReposResult([
-      {
-        name: 'my-project',
-        path: '/home/user/my-project',
-        indexedAt: '2024-01-01',
-        stats: { nodes: 100, edges: 200, processes: 10 },
-      },
-    ]);
+  it('formats a repo list (no pagination → no footer)', () => {
+    const result = formatListReposResult({
+      repositories: [
+        {
+          name: 'my-project',
+          path: '/home/user/my-project',
+          indexedAt: '2024-01-01',
+          lastCommit: 'abc1234',
+          stats: { nodes: 100, edges: 200, processes: 10 },
+        },
+      ],
+    });
     expect(result).toContain('Indexed repositories');
     expect(result).toContain('my-project');
     expect(result).toContain('100 symbols');
+    expect(result).not.toContain('Showing'); // no pagination → no footer
+  });
+
+  it('formats a paginated { repositories, pagination } result with a continuation footer', () => {
+    const result = formatListReposResult({
+      repositories: [
+        {
+          name: 'my-project',
+          path: '/home/user/my-project',
+          indexedAt: '2024-01-01',
+          lastCommit: 'abc1234',
+          stats: { nodes: 100, edges: 200, processes: 10 },
+        },
+      ],
+      pagination: { total: 437, limit: 50, offset: 0, returned: 1, hasMore: true, nextOffset: 50 },
+    });
+    expect(result).toContain('Indexed repositories');
+    expect(result).toContain('my-project');
+    expect(result).toContain('Showing 1 of 437');
+    expect(result).toContain('offset 50'); // continuation hint
+  });
+
+  it('formats the final page (hasMore false) without a continuation hint', () => {
+    const result = formatListReposResult({
+      repositories: [
+        {
+          name: 'only',
+          path: '/p/only',
+          indexedAt: '2024-01-01',
+          lastCommit: 'abc1234',
+          stats: {},
+        },
+      ],
+      pagination: { total: 1, limit: 50, offset: 0, returned: 1, hasMore: false },
+    });
+    expect(result).toContain('Showing 1 of 1');
+    expect(result).not.toContain('More available');
+  });
+
+  it('reports an empty page using pagination metadata', () => {
+    const result = formatListReposResult({
+      repositories: [],
+      pagination: { total: 437, limit: 50, offset: 1000, returned: 0, hasMore: false },
+    });
+    expect(result).toContain('No repositories on this page');
+    expect(result).toContain('437');
   });
 });

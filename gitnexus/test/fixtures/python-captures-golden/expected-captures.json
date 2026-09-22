@@ -1,0 +1,818 @@
+{
+  "python-abstract-dispatch/app.py": {
+    "captureGroups": 12,
+    "digest": "43c8bfb463c6384aeec03754d61b402f273137548ac6f3c860f9b559624831c2"
+  },
+  "python-abstract-dispatch/base.py": {
+    "captureGroups": 22,
+    "digest": "94900994d4bae8c55660e21694afba50d0edd6e22b71bcc897982aa860bbb07e"
+  },
+  "python-abstract-dispatch/impl.py": {
+    "captureGroups": 19,
+    "digest": "38892e74626e45c0c29f16fdf5ea8b433045e965cdac09ec0dc8d2808a8d97a1"
+  },
+  "python-alias-imports/app.py": {
+    "captureGroups": 13,
+    "digest": "ff2b2ffe8ec9ee93c8a1318e95bfd83b899f4a667feaf8f7434b61e8ceff3629"
+  },
+  "python-alias-imports/models.py": {
+    "captureGroups": 13,
+    "digest": "cec30bb7577edfb751bcd4f5026a0c9d77ed235071421a2a46f87580c7bcdf47"
+  },
+  "python-ambiguous/models/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-ambiguous/models/handler.py": {
+    "captureGroups": 7,
+    "digest": "65f156895b52d0f2f221edb0ae34294b2a4ded348ed859f47b601aee4d7e516b"
+  },
+  "python-ambiguous/other/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-ambiguous/other/handler.py": {
+    "captureGroups": 7,
+    "digest": "37a41af1b2d5e8b2592e9e72ce2ca224a9a0ab4d9171819a80406931c16b9f86"
+  },
+  "python-ambiguous/services/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-ambiguous/services/user_handler.py": {
+    "captureGroups": 9,
+    "digest": "b8fa61d906afc6e2cafeda9846208f98bace74db07754fc25ac03dd82d96e4f6"
+  },
+  "python-ancestor-import/a/b/c/deep.py": {
+    "captureGroups": 7,
+    "digest": "5a441c8fa5e8a60e12c030409a534e8a35c3a1a08b39ce64e0332cef58f95498"
+  },
+  "python-ancestor-import/a/utils.py": {
+    "captureGroups": 5,
+    "digest": "02af10663e3387191f6cf8b2c1872afc578c336a0117d539c8ad2295ffef0286"
+  },
+  "python-ancestor-import/backend/middleware.py": {
+    "captureGroups": 16,
+    "digest": "a53ebfd3ecd324bd63451675564f4842cd5b21f6e0c73619efd95d0ca83c4662"
+  },
+  "python-ancestor-import/backend/services/auth.py": {
+    "captureGroups": 15,
+    "digest": "8efdc686879ddf1c2ae6fd1e6d86027e1b80e69cb67245f7a02c1577fa83a548"
+  },
+  "python-assignment-chain/app.py": {
+    "captureGroups": 29,
+    "digest": "7b32bc9c8da7691d3c55dc09aabcedc864b11e1154bc623297a797b91203605c"
+  },
+  "python-assignment-chain/repo.py": {
+    "captureGroups": 7,
+    "digest": "29bd91eac43a803bb4afd96ee2d733f62a8c7a56c02cbca79e3d5394ff69ecb6"
+  },
+  "python-assignment-chain/user.py": {
+    "captureGroups": 7,
+    "digest": "3fa157d0e0576fe87c6abf5ce9a3509c82c04b2ecf1fb6d53290ddc1326af8e4"
+  },
+  "python-bare-import/models/user.py": {
+    "captureGroups": 7,
+    "digest": "e023fa6d98558619733e75005e4c6dc4079967b4d43c2fc2ecd24136a4de6e1d"
+  },
+  "python-bare-import/services/auth.py": {
+    "captureGroups": 8,
+    "digest": "8b3659bfdc60eedb1a33fd803f5ad23f1458f134884ed600e3fb4a662e19dbf3"
+  },
+  "python-bare-import/services/user.py": {
+    "captureGroups": 7,
+    "digest": "89d7afbcc21096723cbbeaa5f12a5cec106158d9b426668cd73accdc08b337e2"
+  },
+  "python-call-result-binding/app.py": {
+    "captureGroups": 8,
+    "digest": "24ca249d42c02f7e2ff7ae36eb46edd973332e71f91d05541c9a969efe488962"
+  },
+  "python-call-result-binding/models.py": {
+    "captureGroups": 17,
+    "digest": "441e2596001c4eaea4808ae6dd195a031f99d8ffe38c8fd450415c109d3365e2"
+  },
+  "python-call-result-binding/service.py": {
+    "captureGroups": 9,
+    "digest": "9c7f1c54a9b0ba3bfa4410e1843bf5edb570777789ee659a00d7dd6771f3670f"
+  },
+  "python-calls/one.py": {
+    "captureGroups": 4,
+    "digest": "b99c3406b4b8555cc521b27bab98eefed02a121dc2e878dd4f63133088603dc5"
+  },
+  "python-calls/service.py": {
+    "captureGroups": 6,
+    "digest": "1ad255e4810b63d2b5ca84dd12b071894393f45ed93d805a89b080710cf32025"
+  },
+  "python-calls/zero.py": {
+    "captureGroups": 3,
+    "digest": "49330572d87d1cbfa7db11351b18734bf23fecd686b46e55a788e6b82eca306f"
+  },
+  "python-chain-call/app.py": {
+    "captureGroups": 9,
+    "digest": "4a1b8afad8fe4c1c4260856b9013b0bf7c12271e86871c0feb60f02784020ff8"
+  },
+  "python-chain-call/models/repo.py": {
+    "captureGroups": 7,
+    "digest": "abc5c9d130a440235eaeea7fcb8fc01fe1f93a1eb548083ccba781a5dd143d16"
+  },
+  "python-chain-call/models/user.py": {
+    "captureGroups": 7,
+    "digest": "e023fa6d98558619733e75005e4c6dc4079967b4d43c2fc2ecd24136a4de6e1d"
+  },
+  "python-chain-call/service.py": {
+    "captureGroups": 10,
+    "digest": "661e322408ef754d73a89997de80d517fe649514d7f256e817f54d2bcbc6e0c9"
+  },
+  "python-child-extends-parent/app.py": {
+    "captureGroups": 9,
+    "digest": "456cb9fee3f54ce867da1caa3a6f9ad3c97d43e71337b8bb463edd07a6723f64"
+  },
+  "python-child-extends-parent/child.py": {
+    "captureGroups": 5,
+    "digest": "4b28a9350ababf339a435cd85ed59bf298b7a173a365f35d1a1bc2554a12380f"
+  },
+  "python-child-extends-parent/parent.py": {
+    "captureGroups": 8,
+    "digest": "8d56bb790ffb79c2c211799a331d343cef557f15e180bc5ed65c3a575280436e"
+  },
+  "python-class-annotations/repo.py": {
+    "captureGroups": 9,
+    "digest": "a35d836a4f2de8d78362cb72b81ac4d0918c11b78c0649317b12693b43590644"
+  },
+  "python-class-annotations/service.py": {
+    "captureGroups": 11,
+    "digest": "eefb065bdb85dc8521a40a4614461a9c57a375c872d76fd4b44d9c031b9af02e"
+  },
+  "python-class-annotations/user.py": {
+    "captureGroups": 9,
+    "digest": "23419a3c41d655554aa7bdf47f9c95749c3c83788ba70b5f83bdc2a93c110d1a"
+  },
+  "python-class-attr-export-leak/app.py": {
+    "captureGroups": 9,
+    "digest": "e958f924b72ac35d92cb3a959c4bea866fa1020347e96a09e07b7087ce9a231c"
+  },
+  "python-class-attr-export-leak/mod.py": {
+    "captureGroups": 12,
+    "digest": "1c11a05121d348a540b07761e0bb3c0e56898115bba2d6e64eab9924ed84743b"
+  },
+  "python-class-body-namespace-import/app.py": {
+    "captureGroups": 10,
+    "digest": "ed0aa5fd5e211b41d541e28b3ebfce22e49e9fd482184a68ab16db835c36ae3d"
+  },
+  "python-class-body-namespace-import/mod.py": {
+    "captureGroups": 4,
+    "digest": "d6ead25daf8f609f1ea2ce79ccf1a88ad3c0ee2d0c9ced0ab13e8f1e729eecb5"
+  },
+  "python-constructor-calls/app.py": {
+    "captureGroups": 8,
+    "digest": "877f75415654e57abd197eff88086011d6ac4d1af5b70b0113d0ae1ae2daf077"
+  },
+  "python-constructor-calls/models.py": {
+    "captureGroups": 15,
+    "digest": "201ce01b83b21d729aca89c6299570df55393a95f1899a2eaacd989873950177"
+  },
+  "python-constructor-field-receiver/knowledge_graph_service.py": {
+    "captureGroups": 10,
+    "digest": "83dcf9f81ac7d0a9e9ed5e467e41acd07e2ec581926d85eea5d4b5e1e4157744"
+  },
+  "python-constructor-field-receiver/memory_service.py": {
+    "captureGroups": 59,
+    "digest": "2970afa6cbf85a6e1b3aa91e23203f5bb4a0a807db1ead4b952c3eedc5fdf555"
+  },
+  "python-constructor-field-receiver/test_fixture.py": {
+    "captureGroups": 13,
+    "digest": "6f642e752086a5e9337d21accb65ca90ef5af2b3e139239ea12c5cd031844dd2"
+  },
+  "python-constructor-type-inference/models/repo.py": {
+    "captureGroups": 17,
+    "digest": "3c400c7a331d7796a730e1ba53b91c4f5ec4799121044b0c160844988fca8662"
+  },
+  "python-constructor-type-inference/models/user.py": {
+    "captureGroups": 17,
+    "digest": "441e2596001c4eaea4808ae6dd195a031f99d8ffe38c8fd450415c109d3365e2"
+  },
+  "python-constructor-type-inference/services/app.py": {
+    "captureGroups": 13,
+    "digest": "1c78b859972b8c7c438774eb4741ef61b38b7d71cd57e1f73ca076c53a216859"
+  },
+  "python-default-params/app.py": {
+    "captureGroups": 21,
+    "digest": "445664a07fde4405c6ad43cdcbde1ed0a634865c92183908454e2622166a94e2"
+  },
+  "python-dict-items-loop/app.py": {
+    "captureGroups": 9,
+    "digest": "c96cf28c20ef23f72c824a46bf29e60215d9503298654a42d6b6354f933081da"
+  },
+  "python-dict-items-loop/repo.py": {
+    "captureGroups": 16,
+    "digest": "2d283b4acbc71e318a4520cb7557508b9084213ba53fbdac07457e348a8b24c6"
+  },
+  "python-dict-items-loop/user.py": {
+    "captureGroups": 16,
+    "digest": "6568834a7f228e78a11b08282196e138795980aed6c55b9953cc89e87c998e52"
+  },
+  "python-django-app-imports/accounts/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-django-app-imports/accounts/admin.py": {
+    "captureGroups": 2,
+    "digest": "23787f4b7bc3bca1fee92b855aa43798d7e89f4832103516a62e8efa14dc6e18"
+  },
+  "python-django-app-imports/accounts/apps.py": {
+    "captureGroups": 6,
+    "digest": "3171a6359a492381bf7cf8bc13ca6cc71e6042248253f4001d835eeb9e704e30"
+  },
+  "python-django-app-imports/accounts/migrations/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-django-app-imports/accounts/models.py": {
+    "captureGroups": 8,
+    "digest": "9e0b16268b3785f5537569c4aa0241438110f9d93b51102825f79fa9578c055f"
+  },
+  "python-django-app-imports/accounts/tests.py": {
+    "captureGroups": 2,
+    "digest": "8507ddbb8881f127667d8d101d13111e7a3f690f75f48fcef44adee4781fb278"
+  },
+  "python-django-app-imports/accounts/views.py": {
+    "captureGroups": 2,
+    "digest": "1f5aa2e7edb841dbf237e03005da414d4ed8d3fdfac00f891d0dec589fc9d06c"
+  },
+  "python-django-app-imports/billing/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-django-app-imports/billing/admin.py": {
+    "captureGroups": 2,
+    "digest": "23787f4b7bc3bca1fee92b855aa43798d7e89f4832103516a62e8efa14dc6e18"
+  },
+  "python-django-app-imports/billing/apps.py": {
+    "captureGroups": 6,
+    "digest": "d33f67a3e9e8664195e1398cd47481dfb73064b77b47ec1d727161e555e6958d"
+  },
+  "python-django-app-imports/billing/migrations/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-django-app-imports/billing/models.py": {
+    "captureGroups": 14,
+    "digest": "ba52ff4c0d62b293d92d16ef75e7ee4573ed776051381549c704f78966388ddb"
+  },
+  "python-django-app-imports/billing/tests.py": {
+    "captureGroups": 2,
+    "digest": "8507ddbb8881f127667d8d101d13111e7a3f690f75f48fcef44adee4781fb278"
+  },
+  "python-django-app-imports/billing/views.py": {
+    "captureGroups": 2,
+    "digest": "1f5aa2e7edb841dbf237e03005da414d4ed8d3fdfac00f891d0dec589fc9d06c"
+  },
+  "python-django-app-imports/config/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-django-app-imports/config/asgi.py": {
+    "captureGroups": 7,
+    "digest": "cb79e02122dbb855128522604d6a02b4036c7c3a1b33399e74e74ccf0a4b2d91"
+  },
+  "python-django-app-imports/config/settings.py": {
+    "captureGroups": 21,
+    "digest": "b22804b1d8004058cd45f5909b665f678660a59423995bd943e4b1ba70551b9b"
+  },
+  "python-django-app-imports/config/urls.py": {
+    "captureGroups": 6,
+    "digest": "fafd174ed34c43ad90cb16849bb8ae8cac25014e3ca28a6abab4e9efc2babe0f"
+  },
+  "python-django-app-imports/config/wsgi.py": {
+    "captureGroups": 7,
+    "digest": "30f4d926def67232c2e50cd313984838ce08ac6ff4f6cc8de33c787381b37dac"
+  },
+  "python-django-app-imports/manage.py": {
+    "captureGroups": 11,
+    "digest": "49022e52142b861dbeab7f2aac57cf76c2d782d7e37fc37ad2e9e6b3b995d0ff"
+  },
+  "python-enumerate-loop/app.py": {
+    "captureGroups": 27,
+    "digest": "57a172a191372feef1dcec36b9507a4c8cca57c2bcbdfc2fe0737a147369fd89"
+  },
+  "python-enumerate-loop/repo.py": {
+    "captureGroups": 8,
+    "digest": "d1e23831dcae38034b278bfefa2b8c4e21ca722ab2c79bfb3126744338a2a401"
+  },
+  "python-enumerate-loop/user.py": {
+    "captureGroups": 17,
+    "digest": "441e2596001c4eaea4808ae6dd195a031f99d8ffe38c8fd450415c109d3365e2"
+  },
+  "python-field-type-disambig/address.py": {
+    "captureGroups": 9,
+    "digest": "ea626af0637cfe9dbbf908917128a31375734743aab1e8b1b098cf0748aa7d1c"
+  },
+  "python-field-type-disambig/service.py": {
+    "captureGroups": 7,
+    "digest": "0708fe103f4640be24192f21ee19c189c3137e68ca1a114ad5781494671a8190"
+  },
+  "python-field-type-disambig/user.py": {
+    "captureGroups": 12,
+    "digest": "b1ee07ad62d150fbecd9132282ac65ac85bf09da32e6aeda046753efe1f2411e"
+  },
+  "python-field-types/models.py": {
+    "captureGroups": 20,
+    "digest": "9b82907071315cb07aa6d4c97df8613d51f7371292afa124aa6338f90c204787"
+  },
+  "python-field-types/service.py": {
+    "captureGroups": 7,
+    "digest": "c5ef531cccca993f8de7afac6fb22d2f0dad9e25a90e1dcbcba08f5b2238c2b0"
+  },
+  "python-for-call-expr/main.py": {
+    "captureGroups": 15,
+    "digest": "1b937e43f7daac20daa819e3e488b8af2708f988f0808dc50596cc2681e7532e"
+  },
+  "python-for-call-expr/models.py": {
+    "captureGroups": 41,
+    "digest": "e8807a9969732197feb04204d200d5810b895c006f1424a7a6f5f0d5762ef49a"
+  },
+  "python-from-module-alias/decoy/models.py": {
+    "captureGroups": 7,
+    "digest": "bc8f2332e9a4a683f3fdae966a0d8a8f534a310ddc438a7a4ebc040e97d642b8"
+  },
+  "python-from-module-alias/pkg/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-from-module-alias/pkg/app.py": {
+    "captureGroups": 23,
+    "digest": "cf33360bc2c57d888ec9fef4e93f1adefccf598e814ac619871241172da9c9fb"
+  },
+  "python-from-module-alias/pkg/models.py": {
+    "captureGroups": 14,
+    "digest": "fe52542a27d98c57d7acd48212dc301bdb448ad5868afb68c98cede9299dd1e5"
+  },
+  "python-function-local-import-chain/app.py": {
+    "captureGroups": 9,
+    "digest": "ad4d45976ca10c3fc3b7bf498ee23397797368a5d2817311d0e95e943af89199"
+  },
+  "python-function-local-import-chain/svc.py": {
+    "captureGroups": 12,
+    "digest": "5463c3e1d3159af3d37f1e0341ea0a429c6f54cf99e117a466b210df05fe94ec"
+  },
+  "python-function-local-namespace-import/app.py": {
+    "captureGroups": 9,
+    "digest": "45f477cfd7b4991a8ce04239fde92b60b6c015922ac7cc52d5aa42caf5b69c3b"
+  },
+  "python-function-local-namespace-import/svc.py": {
+    "captureGroups": 4,
+    "digest": "efe8b8af2d4e7f547a659aecc00399091af2597b47adc7b296bddb10cab2da69"
+  },
+  "python-grandparent-resolution/app.py": {
+    "captureGroups": 9,
+    "digest": "dda8b7578e22c44f2defdaa5d7bb76c0b04b03cd7017506ef7df6810d6116ade"
+  },
+  "python-grandparent-resolution/models/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-grandparent-resolution/models/a.py": {
+    "captureGroups": 10,
+    "digest": "66550f3bf6d516d79bf6c9e2d554c8430270c74e0adf7dda8280898ab6a11d7d"
+  },
+  "python-grandparent-resolution/models/b.py": {
+    "captureGroups": 5,
+    "digest": "db7cfd6a048822e9b4aabe1e41dd7679e819cfc3c8b76771b0f613fc07818f05"
+  },
+  "python-grandparent-resolution/models/c.py": {
+    "captureGroups": 5,
+    "digest": "1c7d1dd6018a9a3ce2caacde328958372fd602aaf350f8345fe9a39e17e2a538"
+  },
+  "python-grandparent-resolution/models/greeting.py": {
+    "captureGroups": 8,
+    "digest": "6ce8f7f1b5ccd7951765eee06a538d2fe791f7ca955230fc8041b2cf46b9ca8d"
+  },
+  "python-inline-constructor-receiver/app.py": {
+    "captureGroups": 17,
+    "digest": "501e0bec762e09ec77b8fe3166136492845864c95a342b8fbf2ef281ad5eebc1"
+  },
+  "python-inline-constructor-receiver/models/repo.py": {
+    "captureGroups": 14,
+    "digest": "a6b2ee5047f71951ed90feb0eee43b75fe7c2d5656fe2e3e7fe5db7e8328bef6"
+  },
+  "python-inline-constructor-receiver/models/user.py": {
+    "captureGroups": 14,
+    "digest": "98d04d069da1a1feefc832b5b1b62c236062fced95b82782ee344a21860bfadb"
+  },
+  "python-local-shadow/app.py": {
+    "captureGroups": 9,
+    "digest": "2c19dd1d65127e35c18aff110ca92b89297549c00e148f9b206ba85559a43573"
+  },
+  "python-local-shadow/utils.py": {
+    "captureGroups": 5,
+    "digest": "287289abcacd9dd0f3763632fe57579567df01b73ea4b48e68c59e2f8aded3da"
+  },
+  "python-match-case/app.py": {
+    "captureGroups": 8,
+    "digest": "63fd7f7d49dd091854fdebdc5f1746e23899b5a0c026469958123848d031b02e"
+  },
+  "python-match-case/models/repo.py": {
+    "captureGroups": 7,
+    "digest": "abc5c9d130a440235eaeea7fcb8fc01fe1f93a1eb548083ccba781a5dd143d16"
+  },
+  "python-match-case/models/user.py": {
+    "captureGroups": 7,
+    "digest": "e023fa6d98558619733e75005e4c6dc4079967b4d43c2fc2ecd24136a4de6e1d"
+  },
+  "python-mcp-tools/helper1.py": {
+    "captureGroups": 3,
+    "digest": "7110e59dc2f17eb91a3055a133ec9243e706df3ec81be7b16b5f5eed1ae5412f"
+  },
+  "python-mcp-tools/helper10.py": {
+    "captureGroups": 3,
+    "digest": "78645d6df40eea5a5fe93c795028e71c947632da816b2a0df7ba09c3ec87b209"
+  },
+  "python-mcp-tools/helper11.py": {
+    "captureGroups": 3,
+    "digest": "6829e8ce4d64652d636f60771534460a8f110df3bbb09ddf1ec3ffbff892bc3f"
+  },
+  "python-mcp-tools/helper12.py": {
+    "captureGroups": 3,
+    "digest": "b02a4035ee0492ab6df26386bc9d60f508b07bb655ab5a598986380940615d1c"
+  },
+  "python-mcp-tools/helper13.py": {
+    "captureGroups": 3,
+    "digest": "79464a367f1f1a5819f6b7bc0be14c4bb36f27e9197d71bdd4b541fb0831738e"
+  },
+  "python-mcp-tools/helper14.py": {
+    "captureGroups": 3,
+    "digest": "ddbb20f3e0c3fdfff5e97b946ca32c761f584534b5dc7ce74c0fd9fef8e0f1e3"
+  },
+  "python-mcp-tools/helper2.py": {
+    "captureGroups": 3,
+    "digest": "0936e364c53dd42c0bb0d2be02d4432a45b1570e8cf7b6c422aeb2952be4e816"
+  },
+  "python-mcp-tools/helper3.py": {
+    "captureGroups": 3,
+    "digest": "72a155ec8c5318ba679c51355b1760abbd927356b2503c19aa78a4af645013d1"
+  },
+  "python-mcp-tools/helper4.py": {
+    "captureGroups": 3,
+    "digest": "9b253f8b946df5dd072c61cca4985c791de90fcd26b1749ccde0eae6a6cbedd6"
+  },
+  "python-mcp-tools/helper5.py": {
+    "captureGroups": 3,
+    "digest": "e20e5fe81bd196ce552040f22e145dad1a784fcd3fe2cdd374939803394b65ce"
+  },
+  "python-mcp-tools/helper6.py": {
+    "captureGroups": 3,
+    "digest": "a5f7af11d4c665e802ed1fc9fdbf6ecb8fafcb140067cb1a90f5c1b4c88e4abb"
+  },
+  "python-mcp-tools/helper7.py": {
+    "captureGroups": 3,
+    "digest": "efdb60c4a9df5ddaff336e4c9899207cc9a2b9be231f596b9671e6001c8b6038"
+  },
+  "python-mcp-tools/helper8.py": {
+    "captureGroups": 3,
+    "digest": "894d62be48b6e8a67266cace71a247521a2e6d1a58ceaa138f9ffbaf829ec492"
+  },
+  "python-mcp-tools/helper9.py": {
+    "captureGroups": 3,
+    "digest": "25270485caa12492922ede0e4a2ed1e898f7d7862641e89cbc25ff0d31f77f18"
+  },
+  "python-mcp-tools/server.py": {
+    "captureGroups": 46,
+    "digest": "a4ec8b75d09c95b99236117405a1e11e2b52f96058798e7e3e3e5ae34fa70595"
+  },
+  "python-member-access-for-loop/app.py": {
+    "captureGroups": 26,
+    "digest": "f82703823df19780706c486f257524b5a4e87b91fb75472e18ed198633080352"
+  },
+  "python-member-access-for-loop/models/repo.py": {
+    "captureGroups": 7,
+    "digest": "abc5c9d130a440235eaeea7fcb8fc01fe1f93a1eb548083ccba781a5dd143d16"
+  },
+  "python-member-access-for-loop/models/user.py": {
+    "captureGroups": 7,
+    "digest": "e023fa6d98558619733e75005e4c6dc4079967b4d43c2fc2ecd24136a4de6e1d"
+  },
+  "python-member-calls/app.py": {
+    "captureGroups": 8,
+    "digest": "14e60b556e8dac569ef11770738da2c68dd808291413aa33973815f1102503f3"
+  },
+  "python-member-calls/user.py": {
+    "captureGroups": 12,
+    "digest": "19f6f21b1d5d25dc3e1653537e986f65fdd3697efd48affa9325fe2ecffe188d"
+  },
+  "python-method-chain-binding/app.py": {
+    "captureGroups": 19,
+    "digest": "01e37b98dc27472d1a8e49ae716c4d3998da58e8b4b3075321a2a28b017a0f5c"
+  },
+  "python-method-chain-binding/models.py": {
+    "captureGroups": 48,
+    "digest": "f049817034428759193fce03b417ca23c133f6ead87f960e173afba9b79b88e8"
+  },
+  "python-method-enrichment/app.py": {
+    "captureGroups": 13,
+    "digest": "a116c45ac776c24ac1e2dafb511e7ab06de52027b7c6c94ea4a5016d42adc676"
+  },
+  "python-method-enrichment/models.py": {
+    "captureGroups": 31,
+    "digest": "9e3f359187a82e936cd74c59848a296d19f138865a71882e3bbd3842bb4f0704"
+  },
+  "python-module-export-vs-method-collision/app.py": {
+    "captureGroups": 14,
+    "digest": "1362e9187b6a8a8223e55833c725b3f02475faaa803ac657b917d434b550356a"
+  },
+  "python-module-export-vs-method-collision/mod.py": {
+    "captureGroups": 13,
+    "digest": "d3032a370833cf67e68672de0ec85b199756f43984488f93a37de81501cac1c1"
+  },
+  "python-module-import/app.py": {
+    "captureGroups": 15,
+    "digest": "29560a379fc78162c760c142019d480ddbdd56e807da5831bc39d2c559136f3e"
+  },
+  "python-module-import/auth.py": {
+    "captureGroups": 13,
+    "digest": "21f44ba75e592c14a94cd7820cfb04d2ccba7a9c97c40a778c6d727f286f8665"
+  },
+  "python-module-import/models.py": {
+    "captureGroups": 7,
+    "digest": "e023fa6d98558619733e75005e4c6dc4079967b4d43c2fc2ecd24136a4de6e1d"
+  },
+  "python-multi-level-mro/app.py": {
+    "captureGroups": 9,
+    "digest": "ee7c02ef3588dc5c8d9f3932f05d8287a0c79a922551246e4fa1df10c92a81df"
+  },
+  "python-multi-level-mro/child.py": {
+    "captureGroups": 5,
+    "digest": "4b28a9350ababf339a435cd85ed59bf298b7a173a365f35d1a1bc2554a12380f"
+  },
+  "python-multi-level-mro/grandparent.py": {
+    "captureGroups": 8,
+    "digest": "fdb504c509c49a276524145bd2f5a9946f2e8ef8ea07be166abe5a3c15b748a0"
+  },
+  "python-multi-level-mro/parent.py": {
+    "captureGroups": 5,
+    "digest": "3f6da3b76acc03c679d173549f6d10577445741ec0f6555bc90ab648fc8984d4"
+  },
+  "python-multi-segment-ancestor-import/backend/auth_utils.py": {
+    "captureGroups": 8,
+    "digest": "cb8c5013202cea31bd75d05907e2d45087060fa9b00c0983127701012c3dc6d2"
+  },
+  "python-multi-segment-ancestor-import/backend/routers/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-multi-segment-ancestor-import/backend/routers/alerts.py": {
+    "captureGroups": 3,
+    "digest": "be1e4339d6f7d31c86c60fa950ca455a38b7ec18a223f5b2fef4dadbae0d3328"
+  },
+  "python-multi-segment-ancestor-import/backend/routers/cron.py": {
+    "captureGroups": 25,
+    "digest": "6e4851c201c7437c445a2600b8ad2a64f408069d8fb82973503261ded05602ca"
+  },
+  "python-multi-segment-ancestor-import/backend/services/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-multi-segment-ancestor-import/backend/services/alerts.py": {
+    "captureGroups": 4,
+    "digest": "a0c37af99021c9f0f08c7f80c89b8126581a78f3595a9dd54fe9b0de9e95723c"
+  },
+  "python-multi-segment-ancestor-import/backend/services/sync.py": {
+    "captureGroups": 7,
+    "digest": "c247e0961ca943badd8407134d12f9d0760020336bcd14b462500bcbbe2ca078"
+  },
+  "python-named-imports/app.py": {
+    "captureGroups": 5,
+    "digest": "33ad01673b41ce4cfd51d9054ca1fd00236ff61494297740de8e0aae0bfb04a2"
+  },
+  "python-named-imports/format_prefix.py": {
+    "captureGroups": 5,
+    "digest": "7f321a84964a7f3c1c3612150331b94e635f40bac021d4b5e407be36b4740188"
+  },
+  "python-named-imports/format_upper.py": {
+    "captureGroups": 5,
+    "digest": "df334f13bf7c81ba01c861c2b9a4ddc969645ccecbd536088c3556a2a2fb1f2b"
+  },
+  "python-nullable-chain/app.py": {
+    "captureGroups": 33,
+    "digest": "b8fc05256ec1460896cec13f7c8675389aae795b2138b3fe8f4f352b9aea360f"
+  },
+  "python-nullable-chain/repo.py": {
+    "captureGroups": 8,
+    "digest": "12ae0c4f238838d13501844676855952c54c47a0fe5eca937355e918e1f041b1"
+  },
+  "python-nullable-chain/user.py": {
+    "captureGroups": 8,
+    "digest": "72f02563ba72a1a1a595623a81341c694124054698afeb606e65662915b66a22"
+  },
+  "python-nullable-receiver/app.py": {
+    "captureGroups": 23,
+    "digest": "7b00548c67067d49ed69c057f102915642c29ec3d7ba5ea30cd7034c4374e82f"
+  },
+  "python-nullable-receiver/repo.py": {
+    "captureGroups": 7,
+    "digest": "29bd91eac43a803bb4afd96ee2d733f62a8c7a56c02cbca79e3d5394ff69ecb6"
+  },
+  "python-nullable-receiver/user.py": {
+    "captureGroups": 7,
+    "digest": "3fa157d0e0576fe87c6abf5ce9a3509c82c04b2ecf1fb6d53290ddc1326af8e4"
+  },
+  "python-overload-dispatch/app.py": {
+    "captureGroups": 21,
+    "digest": "3ad870d0f3c152f74a1b0c7d80be2352d7cad006e09ceef00705001aeaf6ad92"
+  },
+  "python-overload-dispatch/service.py": {
+    "captureGroups": 37,
+    "digest": "b661e8965b168f16124d4682906516527e79d4c9de6f36fa1e7cf7aff9211c28"
+  },
+  "python-parent-resolution/models/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-parent-resolution/models/base.py": {
+    "captureGroups": 8,
+    "digest": "3e885e626c46c7c4b9779867991a939f136f3a5669f092094c3ef33542ddf7f1"
+  },
+  "python-parent-resolution/models/user.py": {
+    "captureGroups": 10,
+    "digest": "e2bb91181a16a1c8cc84220614043117aabda3592cb5e6ca554c39f1a42749a9"
+  },
+  "python-parsing-coverage/heritage.py": {
+    "captureGroups": 21,
+    "digest": "9fbb72e842b740b8c0be78a8da0f76b9639f86ccb7a73b1b0d9d70855b935fcd"
+  },
+  "python-pkg/models/base.py": {
+    "captureGroups": 11,
+    "digest": "53dd613c8d7cd9e20ec44919455741b0cccea5e32efc907680c8078b16c7bf2d"
+  },
+  "python-pkg/models/user.py": {
+    "captureGroups": 9,
+    "digest": "0fcd9e526d5af4736888a1ed673c77a3e9c48096c77723f6c4d82c5e1cb123db"
+  },
+  "python-pkg/services/auth.py": {
+    "captureGroups": 11,
+    "digest": "83ebe6861ed8370e9666fcf97f92aa3decddf7e95cd55b9764ecd09bf6daf367"
+  },
+  "python-pkg/utils/helpers.py": {
+    "captureGroups": 8,
+    "digest": "f2b698016eb90ef1311602981627141a1b9ca7e41e66aea4da33fb1cf1242942"
+  },
+  "python-plain-import-alias/app.py": {
+    "captureGroups": 17,
+    "digest": "a419c716b0d13787ce1f3cc2adb5ab2ab77604cb8348a9b27aa56443984ab0b2"
+  },
+  "python-plain-import-alias/auth.py": {
+    "captureGroups": 7,
+    "digest": "d8be5670ece6958c45dc48149f1bf0a826adf285262ab93745e34e61fe80e60b"
+  },
+  "python-plain-import-alias/models.py": {
+    "captureGroups": 13,
+    "digest": "cec30bb7577edfb751bcd4f5026a0c9d77ed235071421a2a46f87580c7bcdf47"
+  },
+  "python-qualified-base/a/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-qualified-base/a/b.py": {
+    "captureGroups": 8,
+    "digest": "2c3fdd9f12bcb1dfc9165b65d4dc4768519a26a1bcfa7ec8cacc102d7ba1e069"
+  },
+  "python-qualified-base/base_mod.py": {
+    "captureGroups": 14,
+    "digest": "e3033d124fafff6e4bf7f62307359f2070c4fc876d3a986a8476397975aa98ba"
+  },
+  "python-qualified-base/service.py": {
+    "captureGroups": 16,
+    "digest": "6ae05e4f3d276c770b6a6dcd94a201475d7c6f0424bae33b0c54d2ef6c267f85"
+  },
+  "python-qualified-constructor/main.py": {
+    "captureGroups": 9,
+    "digest": "9e4d51c06d75721e3c07898124ef85139d52d9f20d6df6bae557aff98a3ed207"
+  },
+  "python-qualified-constructor/models.py": {
+    "captureGroups": 18,
+    "digest": "6b350aa1579d58e036053a16e8e94b91d8a8f6906f78d4f44ef675887a48bf5d"
+  },
+  "python-receiver-resolution/app.py": {
+    "captureGroups": 15,
+    "digest": "68a0a495d3dcdc2372295d035369c6c2a3cdb39ffe0b74eb4b0717f6a2994c85"
+  },
+  "python-receiver-resolution/repo.py": {
+    "captureGroups": 7,
+    "digest": "29bd91eac43a803bb4afd96ee2d733f62a8c7a56c02cbca79e3d5394ff69ecb6"
+  },
+  "python-receiver-resolution/user.py": {
+    "captureGroups": 7,
+    "digest": "3fa157d0e0576fe87c6abf5ce9a3509c82c04b2ecf1fb6d53290ddc1326af8e4"
+  },
+  "python-reexport-chain/app.py": {
+    "captureGroups": 13,
+    "digest": "733114addc76c5bee5054960bba49ea372d8e3f8ca587a1d1a5eed35fcd995a2"
+  },
+  "python-reexport-chain/models/__init__.py": {
+    "captureGroups": 3,
+    "digest": "72c3c31725839c7fcacd034c3309e737f08d0b450ceff6d02970b07aebe46723"
+  },
+  "python-reexport-chain/models/base.py": {
+    "captureGroups": 15,
+    "digest": "e1e9f98ffb690ffabecd7287bf7f640e3fa53ecdda37dba41692b6914a37c591"
+  },
+  "python-return-type-inference/app.py": {
+    "captureGroups": 8,
+    "digest": "952e31ff4894e8efca3f5af0404f8f37a0a2d785080e0a1300a02fe319536799"
+  },
+  "python-return-type-inference/models.py": {
+    "captureGroups": 17,
+    "digest": "441e2596001c4eaea4808ae6dd195a031f99d8ffe38c8fd450415c109d3365e2"
+  },
+  "python-return-type-inference/service.py": {
+    "captureGroups": 9,
+    "digest": "9c7f1c54a9b0ba3bfa4410e1843bf5edb570777789ee659a00d7dd6771f3670f"
+  },
+  "python-same-file-method-collision/app.py": {
+    "captureGroups": 17,
+    "digest": "5248d59b03f40d11e4cb70c3caa91352356ad8fccc36c0b75f25cabae92e452a"
+  },
+  "python-same-file-method-collision/models.py": {
+    "captureGroups": 25,
+    "digest": "b892bec2982f22ac15e5db0decc934be3a59464961fdde657fb1a80110df074e"
+  },
+  "python-same-name-collision/metrics.py": {
+    "captureGroups": 8,
+    "digest": "5bede48bac9564a854a5e6073b9b099c54da7ae4ab44e33ce8b337125326fd67"
+  },
+  "python-same-name-collision/router.py": {
+    "captureGroups": 10,
+    "digest": "e9248113f2dbae22dff443551daa131136c69f00ea0fb912a6419fcb1c1e7833"
+  },
+  "python-self-this-resolution/models/repo.py": {
+    "captureGroups": 8,
+    "digest": "d1e23831dcae38034b278bfefa2b8c4e21ca722ab2c79bfb3126744338a2a401"
+  },
+  "python-self-this-resolution/models/user.py": {
+    "captureGroups": 14,
+    "digest": "c7ed155a14a8ca915ec5db84e5eed21d783a3a8ef8ed6a74a456cfe7456eac09"
+  },
+  "python-static-class-methods/app.py": {
+    "captureGroups": 14,
+    "digest": "daddc1c32884a3573c0837a323d10e7f9dd5629359bab32663fb9074b02024e0"
+  },
+  "python-static-class-methods/service.py": {
+    "captureGroups": 39,
+    "digest": "0c734dc7f683469f9c1a9eb97fd8be2af68e29aedd20cd8c6f0c86c17f7ce13e"
+  },
+  "python-super-resolution/models/__init__.py": {
+    "captureGroups": 0,
+    "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "python-super-resolution/models/base.py": {
+    "captureGroups": 8,
+    "digest": "3e885e626c46c7c4b9779867991a939f136f3a5669f092094c3ef33542ddf7f1"
+  },
+  "python-super-resolution/models/repo.py": {
+    "captureGroups": 8,
+    "digest": "d1e23831dcae38034b278bfefa2b8c4e21ca722ab2c79bfb3126744338a2a401"
+  },
+  "python-super-resolution/models/user.py": {
+    "captureGroups": 12,
+    "digest": "5e2c847ee321e3837c2163429564ecbe48d7906031bcc8d811c69a7b52378701"
+  },
+  "python-variadic-resolution/app.py": {
+    "captureGroups": 5,
+    "digest": "a9a377bff2d2abea4bf2375401c9fe6b53c756b987ef81eab0569ae1ea58b9a7"
+  },
+  "python-variadic-resolution/logger.py": {
+    "captureGroups": 7,
+    "digest": "e539f618f46b19d1f7674321c6b994c773b57753c19d7764da83900143d71c0e"
+  },
+  "python-walrus-chain/app.py": {
+    "captureGroups": 37,
+    "digest": "2f2f237a7fc9fece184820a3136aaf496991f1093e5462fc199f1b46f84655ff"
+  },
+  "python-walrus-chain/repo.py": {
+    "captureGroups": 8,
+    "digest": "12ae0c4f238838d13501844676855952c54c47a0fe5eca937355e918e1f041b1"
+  },
+  "python-walrus-chain/user.py": {
+    "captureGroups": 8,
+    "digest": "72f02563ba72a1a1a595623a81341c694124054698afeb606e65662915b66a22"
+  },
+  "python-walrus-operator/main.py": {
+    "captureGroups": 7,
+    "digest": "a1431ed7cd066e56812de3d08e2f907207042d72cb7030238f7d879a08f42e63"
+  },
+  "python-walrus-operator/models.py": {
+    "captureGroups": 22,
+    "digest": "9ab1a8a69970e8c875bd103251ecf9c8af2c1464a6bdc1213fe7560c4fa34063"
+  },
+  "python-write-access/models.py": {
+    "captureGroups": 11,
+    "digest": "d1b714cb6654f83df3bb40830ced44f2950a122270c9e379f732943d57688151"
+  },
+  "python-write-access/service.py": {
+    "captureGroups": 10,
+    "digest": "5bc6c06cf8bcb1e8a862f8f0488d57dd1f043e86e09556fc796a7b67966e0ce0"
+  },
+  "synthetic:dao-20": {
+    "captureGroups": 773,
+    "digest": "ad0182803a61b67d0d2f9d878e8e2bd9c10b0a79e71c04957b358db8a3714d1f"
+  }
+}

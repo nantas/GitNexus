@@ -1,6 +1,6 @@
 /**
  * Wiki Command
- * 
+ *
  * Generates repository documentation from the knowledge graph.
  * Usage: gitnexus wiki [path] [options]
  */
@@ -10,17 +10,80 @@ import readline from 'readline';
 import { execSync, execFileSync } from 'child_process';
 import cliProgress from 'cli-progress';
 import { getGitRoot, isGitRepo } from '../storage/git.js';
-import { getStoragePaths, loadMeta, loadCLIConfig, saveCLIConfig } from '../storage/repo-manager.js';
+import { getStoragePaths, loadCLIConfig, saveCLIConfig } from '../storage/repo-manager.js';
+import {
+  requireStoragePath,
+  STATUS_STORAGE_REQUIREMENTS,
+  StorageRequirementError,
+  isUnusableIndexInspection,
+} from '../storage/storage-resolver.js';
 import { WikiGenerator, type WikiOptions } from '../core/wiki/generator.js';
-import { resolveLLMConfig } from '../core/wiki/llm-client.js';
+import {
+  MINIMAX_MODEL_IDS,
+  MINIMAX_OPENAI_BASE_URLS,
+  parseLLMAllowedInsecureHttpHosts,
+  resolveLLMConfig,
+  type LLMProvider,
+} from '../core/wiki/llm-client.js';
+import { detectCursorCLI } from '../core/wiki/cursor-client.js';
+import { detectGrokCLI } from '../core/wiki/grok-client.js';
+import { detectLocalCLI } from '../core/wiki/local-cli-client.js';
+import { logger } from '../core/logger.js';
 
 export interface WikiCommandOptions {
   force?: boolean;
   model?: string;
   baseUrl?: string;
   apiKey?: string;
+  apiVersion?: string;
+  reasoningModel?: boolean;
   concurrency?: string;
   gist?: boolean;
+  provider?: LLMProvider;
+  verbose?: boolean;
+  review?: boolean;
+  timeout?: string;
+  retries?: string;
+  lang?: string;
+  allowInsecureConnection?: string;
+}
+
+function parsePositiveIntegerOption(
+  value: string | undefined,
+  flag: string,
+  multiplier = 1,
+): number | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (!/^[1-9]\d*$/.test(trimmed)) {
+    throw new Error(`${flag} must be a positive integer`);
+  }
+  const parsed = parseInt(trimmed, 10);
+  if (parsed > Math.floor(Number.MAX_SAFE_INTEGER / multiplier)) {
+    throw new Error(`${flag} is too large`);
+  }
+  return parsed;
+}
+
+function isLocalProvider(
+  provider: LLMProvider | undefined,
+): provider is 'cursor' | 'claude' | 'codex' | 'opencode' | 'grok' {
+  return (
+    provider === 'cursor' ||
+    provider === 'claude' ||
+    provider === 'codex' ||
+    provider === 'opencode' ||
+    provider === 'grok'
+  );
+}
+
+function localModelConfigKey(provider: 'cursor' | 'claude' | 'codex' | 'opencode' | 'grok') {
+  if (provider === 'cursor') return 'cursorModel';
+  if (provider === 'claude') return 'claudeModel';
+  if (provider === 'codex') return 'codexModel';
+  if (provider === 'opencode') return 'opencodeModel';
+  if (provider === 'grok') return 'grokModel';
+  throw new Error(`Unsupported local provider: ${provider satisfies never}`);
 }
 
 /**
@@ -74,10 +137,30 @@ function prompt(question: string, hide = false): Promise<string> {
   });
 }
 
-export const wikiCommand = async (
-  inputPath?: string,
-  options?: WikiCommandOptions,
-) => {
+export const wikiCommand = async (inputPath?: string, options?: WikiCommandOptions) => {
+  // Snapshot GITNEXUS_VERBOSE at entry — wikiCommand mutates it (the impl
+  // below) so cursor-client (process.env-driven) sees the right value during
+  // this run. Restored in finally so back-to-back wiki calls in long-running
+  // hosts don't leak verbose state from one invocation to the next. Pairs
+  // with the same snapshot/restore pattern in `analyzeCommand`.
+  const originalVerbose = process.env.GITNEXUS_VERBOSE;
+  try {
+    await wikiCommandImpl(inputPath, options);
+  } finally {
+    if (originalVerbose === undefined) {
+      delete process.env.GITNEXUS_VERBOSE;
+    } else {
+      process.env.GITNEXUS_VERBOSE = originalVerbose;
+    }
+  }
+};
+
+const wikiCommandImpl = async (inputPath?: string, options?: WikiCommandOptions): Promise<void> => {
+  // Set verbose mode globally for cursor-client to pick up
+  if (options?.verbose) {
+    process.env.GITNEXUS_VERBOSE = '1';
+  }
+
   console.log('\n  GitNexus Wiki Generator\n');
 
   // ── Resolve repo path ───────────────────────────────────────────────
@@ -101,124 +184,378 @@ export const wikiCommand = async (
   }
 
   // ── Check for existing index ────────────────────────────────────────
-  const { storagePath, lbugPath } = getStoragePaths(repoPath);
-  const meta = await loadMeta(storagePath);
-
-  if (!meta) {
-    console.log('  Error: No GitNexus index found.');
+  let storagePath: string;
+  try {
+    storagePath = await requireStoragePath(repoPath, STATUS_STORAGE_REQUIREMENTS);
+  } catch (error) {
+    if (!(error instanceof StorageRequirementError)) throw error;
+    const inspection = error.inspection;
+    if (!isUnusableIndexInspection(inspection)) {
+      console.log(`  Error: ${error.message}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`  Error: No GitNexus index found at ${error.inspection.storagePath}.`);
     console.log('  Run `gitnexus analyze` first to index this repository.\n');
+    process.exitCode = 1;
+    return;
+  }
+  const { lbugPath } = getStoragePaths(repoPath, undefined, storagePath);
+
+  let timeoutSeconds: number | undefined;
+  let retries: number | undefined;
+  let allowedInsecureHttpHosts: string[] | undefined;
+  try {
+    timeoutSeconds = parsePositiveIntegerOption(options?.timeout, '--timeout', 1000);
+    retries = parsePositiveIntegerOption(options?.retries, '--retries');
+    allowedInsecureHttpHosts =
+      options?.allowInsecureConnection === undefined
+        ? undefined
+        : parseLLMAllowedInsecureHttpHosts(options.allowInsecureConnection);
+  } catch (error) {
+    console.log(`  Error: ${(error as Error).message}\n`);
     process.exitCode = 1;
     return;
   }
 
   // ── Resolve LLM config (with interactive fallback) ─────────────────
   // Save any CLI overrides immediately
-  if (options?.apiKey || options?.model || options?.baseUrl) {
+  if (
+    options?.apiKey ||
+    options?.model ||
+    options?.baseUrl ||
+    options?.provider ||
+    options?.apiVersion ||
+    options?.reasoningModel !== undefined
+  ) {
     const existing = await loadCLIConfig();
-    const updates: Record<string, string> = {};
+    const updates: Partial<typeof existing> = {};
+    const providerChanged = !!options.provider && options.provider !== existing.provider;
+    if (providerChanged) {
+      updates.apiKey = undefined;
+      updates.baseUrl = undefined;
+      updates.model = undefined;
+      updates.apiVersion = undefined;
+      updates.isReasoningModel = undefined;
+    }
     if (options.apiKey) updates.apiKey = options.apiKey;
-    if (options.model) updates.model = options.model;
     if (options.baseUrl) updates.baseUrl = options.baseUrl;
+    if (options.provider) updates.provider = options.provider;
+    if (options.apiVersion) updates.apiVersion = options.apiVersion;
+    if (options.reasoningModel !== undefined) updates.isReasoningModel = options.reasoningModel;
+    if (options.provider === 'minimax') {
+      if (providerChanged && options.reasoningModel === undefined) {
+        updates.isReasoningModel = undefined;
+      }
+      if (!options.baseUrl && (providerChanged || !existing.baseUrl)) {
+        updates.baseUrl = MINIMAX_OPENAI_BASE_URLS.global_en;
+      }
+      if (!options.model && (providerChanged || !existing.model)) {
+        updates.model = MINIMAX_MODEL_IDS[0];
+      }
+    }
+    // Save model to appropriate field based on provider.
+    if (options.model) {
+      const targetProvider = options.provider ?? existing.provider;
+      if (isLocalProvider(targetProvider)) {
+        updates[localModelConfigKey(targetProvider)] = options.model;
+      } else {
+        updates.model = options.model;
+      }
+    }
     await saveCLIConfig({ ...existing, ...updates });
     console.log('  Config saved to ~/.gitnexus/config.json\n');
   }
 
   const savedConfig = await loadCLIConfig();
-  const hasSavedConfig = !!(savedConfig.apiKey && savedConfig.baseUrl);
-  const hasCLIOverrides = !!(options?.apiKey || options?.model || options?.baseUrl);
+  const hasSavedConfig = !!(
+    isLocalProvider(savedConfig.provider) ||
+    (savedConfig.apiKey && (savedConfig.baseUrl || savedConfig.provider === 'minimax'))
+  );
+  const hasCLIOverrides = !!(
+    options?.apiKey ||
+    options?.model ||
+    options?.baseUrl ||
+    options?.provider ||
+    options?.apiVersion ||
+    options?.reasoningModel !== undefined
+  );
 
   let llmConfig = await resolveLLMConfig({
     model: options?.model,
     baseUrl: options?.baseUrl,
     apiKey: options?.apiKey,
+    provider: options?.provider,
+    apiVersion: options?.apiVersion,
+    isReasoningModel: options?.reasoningModel,
+    allowedInsecureHttpHosts,
   });
 
   // Run interactive setup if no saved config and no CLI flags provided
   // (even if env vars exist — let user explicitly choose their provider)
   if (!hasSavedConfig && !hasCLIOverrides) {
     if (!process.stdin.isTTY) {
-      if (!llmConfig.apiKey) {
+      // Non-interactive mode — need either API key or Cursor CLI
+      if (!llmConfig.apiKey && !isLocalProvider(llmConfig.provider)) {
         console.log('  Error: No LLM API key found.');
-        console.log('  Set OPENAI_API_KEY or GITNEXUS_API_KEY environment variable,');
-        console.log('  or pass --api-key <key>.\n');
+        console.log('  Set MINIMAX_API_KEY, GITNEXUS_API_KEY, or OPENAI_API_KEY,');
+        console.log(
+          '  or pass --api-key <key>, or use --provider cursor|claude|codex|opencode|grok.\n',
+        );
         process.exitCode = 1;
         return;
       }
-      // Non-interactive with env var — just use it
+      // Non-interactive with env var or cursor — just use it
     } else {
-      console.log('  No LLM configured. Let\'s set it up.\n');
-      console.log('  Supports OpenAI, OpenRouter, or any OpenAI-compatible API.\n');
+      console.log("  No LLM configured. Let's set it up.\n");
+      console.log('  Supports MiniMax, OpenAI-compatible APIs, and local agent CLIs.\n');
+
+      // Check if local agent CLIs are available.
+      const hasCursor = detectCursorCLI();
+      const hasClaude = detectLocalCLI('claude');
+      const hasCodex = detectLocalCLI('codex');
+      const hasOpenCode = detectLocalCLI('opencode');
+      const hasGrok = detectGrokCLI();
+      const localChoices: Array<{
+        choice: string;
+        provider: 'cursor' | 'claude' | 'codex' | 'opencode' | 'grok';
+      }> = [];
 
       // Provider selection
       console.log('  [1] OpenAI (api.openai.com)');
       console.log('  [2] OpenRouter (openrouter.ai)');
-      console.log('  [3] Custom endpoint\n');
+      console.log('  [3] Azure OpenAI');
+      console.log('  [4] Custom endpoint');
+      console.log('  [5] MiniMax Global (api.minimax.io)');
+      console.log('  [6] MiniMax China (api.minimaxi.com)');
+      let nextChoice = 7;
+      if (hasCursor) {
+        const choice = String(nextChoice++);
+        localChoices.push({
+          choice,
+          provider: 'cursor',
+        });
+        console.log(`  [${choice}] Cursor CLI (local, uses your Cursor subscription)`);
+      }
+      if (hasClaude) {
+        const choice = String(nextChoice++);
+        localChoices.push({
+          choice,
+          provider: 'claude',
+        });
+        console.log(`  [${choice}] Claude CLI (local, uses your Claude Code login)`);
+      }
+      if (hasCodex) {
+        const choice = String(nextChoice++);
+        localChoices.push({
+          choice,
+          provider: 'codex',
+        });
+        console.log(`  [${choice}] Codex CLI (local, uses your Codex login)`);
+      }
+      if (hasOpenCode) {
+        const choice = String(nextChoice++);
+        localChoices.push({
+          choice,
+          provider: 'opencode',
+        });
+        console.log(`  [${choice}] OpenCode CLI (local, uses your OpenCode login/config)`);
+      }
+      if (hasGrok) {
+        const choice = String(nextChoice++);
+        localChoices.push({
+          choice,
+          provider: 'grok',
+        });
+        console.log(`  [${choice}] Grok CLI (local, uses your Grok Build login)`);
+      }
+      console.log('');
 
-      const choice = await prompt('  Select provider (1/2/3): ');
+      const maxChoice = String(nextChoice - 1);
+      const choice = await prompt(`  Select provider (1/${maxChoice}): `);
 
       let baseUrl: string;
       let defaultModel: string;
+      let provider: LLMProvider = 'openai';
+      let key = '';
 
-      if (choice === '2') {
-        baseUrl = 'https://openrouter.ai/api/v1';
-        defaultModel = 'minimax/minimax-m2.5';
+      const selectedLocal = localChoices.find((item) => item.choice === choice);
+      if (selectedLocal) {
+        // Local CLI selected - model defaults to the CLI's configured default.
+        provider = selectedLocal.provider;
+        baseUrl = '';
+
+        const modelInput = await prompt('  Model (leave empty for CLI default): ');
+        const model = modelInput || '';
+
+        const localConfig = { ...savedConfig, provider };
+        if (model) (localConfig as Record<string, unknown>)[localModelConfigKey(provider)] = model;
+        await saveCLIConfig(localConfig);
+        console.log('  Config saved to ~/.gitnexus/config.json\n');
+
+        llmConfig = { ...llmConfig, provider, model, apiKey: '', baseUrl: '' };
       } else if (choice === '3') {
-        baseUrl = await prompt('  Base URL (e.g. http://localhost:11434/v1): ');
-        if (!baseUrl) {
-          console.log('\n  No URL provided. Aborting.\n');
+        // Azure OpenAI guided setup — minimal prompts
+        console.log('\n  Azure OpenAI setup.\n');
+
+        const endpoint = (
+          await prompt('  Endpoint URL (e.g. https://my-resource.openai.azure.com): ')
+        )
+          .trim()
+          .replace(/\/+$/, '');
+        if (!endpoint) {
+          console.log('\n  No endpoint provided. Aborting.\n');
           process.exitCode = 1;
           return;
         }
-        defaultModel = 'gpt-4o-mini';
+
+        const deploymentName = (await prompt('  Deployment name: ')).trim();
+        if (!deploymentName) {
+          console.log('\n  No deployment name provided. Aborting.\n');
+          process.exitCode = 1;
+          return;
+        }
+
+        // API key — use env var if available
+        const envKey = process.env.GITNEXUS_API_KEY || process.env.OPENAI_API_KEY || '';
+        let azureKey: string;
+        if (envKey) {
+          const masked = envKey.slice(0, 6) + '...' + envKey.slice(-4);
+          const useEnv = await prompt(`  Use existing env key (${masked})? (Y/n): `);
+          if (!useEnv || useEnv.toLowerCase() === 'y' || useEnv.toLowerCase() === 'yes') {
+            azureKey = envKey;
+          } else {
+            azureKey = await prompt('  API key: ', true);
+          }
+        } else {
+          azureKey = await prompt('  API key: ', true);
+        }
+
+        if (!azureKey) {
+          console.log('\n  No key provided. Aborting.\n');
+          process.exitCode = 1;
+          return;
+        }
+
+        // Always use v1 API format — no need for api-version
+        const azureBaseUrl = `${endpoint}/openai/v1`;
+
+        await saveCLIConfig({
+          ...savedConfig,
+          apiKey: azureKey,
+          baseUrl: azureBaseUrl,
+          model: deploymentName,
+          provider: 'azure',
+        });
+        console.log('  Config saved to ~/.gitnexus/config.json\n');
+
+        llmConfig = {
+          ...llmConfig,
+          apiKey: azureKey,
+          baseUrl: azureBaseUrl,
+          model: deploymentName,
+          provider: 'azure',
+        };
       } else {
-        baseUrl = 'https://api.openai.com/v1';
-        defaultModel = 'gpt-4o-mini';
-      }
+        // OpenAI-compatible provider setup
+        if (choice === '2') {
+          baseUrl = 'https://openrouter.ai/api/v1';
+          defaultModel = '';
+          provider = 'openrouter';
+        } else if (choice === '4') {
+          baseUrl = await prompt('  Base URL (e.g. http://localhost:11434/v1): ');
+          if (!baseUrl) {
+            console.log('\n  No URL provided. Aborting.\n');
+            process.exitCode = 1;
+            return;
+          }
+          defaultModel = 'gpt-4o-mini';
+          provider = 'custom';
+        } else if (choice === '5' || choice === '6') {
+          baseUrl =
+            choice === '6' ? MINIMAX_OPENAI_BASE_URLS.cn_zh : MINIMAX_OPENAI_BASE_URLS.global_en;
+          defaultModel = MINIMAX_MODEL_IDS[0];
+          provider = 'minimax';
+        } else {
+          baseUrl = 'https://api.openai.com/v1';
+          defaultModel = 'gpt-4o-mini';
+          provider = 'openai';
+        }
 
-      // Model
-      const modelInput = await prompt(`  Model (default: ${defaultModel}): `);
-      const model = modelInput || defaultModel;
+        // Model
+        const modelInput = await prompt(
+          defaultModel ? `  Model (default: ${defaultModel}): ` : '  Model: ',
+        );
+        const model = modelInput || defaultModel;
+        if (!model) {
+          console.log('\n  No model provided. Aborting.\n');
+          process.exitCode = 1;
+          return;
+        }
 
-      // API key — pre-fill hint if env var exists
-      const envKey = process.env.GITNEXUS_API_KEY || process.env.OPENAI_API_KEY || '';
-      let key: string;
-      if (envKey) {
-        const masked = envKey.slice(0, 6) + '...' + envKey.slice(-4);
-        const useEnv = await prompt(`  Use existing env key (${masked})? (Y/n): `);
-        if (!useEnv || useEnv.toLowerCase() === 'y' || useEnv.toLowerCase() === 'yes') {
-          key = envKey;
+        // API key — pre-fill hint if env var exists
+        const envKey =
+          (provider === 'minimax' ? process.env.MINIMAX_API_KEY : undefined) ||
+          process.env.GITNEXUS_API_KEY ||
+          process.env.OPENAI_API_KEY ||
+          '';
+        if (envKey) {
+          const masked = envKey.slice(0, 6) + '...' + envKey.slice(-4);
+          const useEnv = await prompt(`  Use existing env key (${masked})? (Y/n): `);
+          if (!useEnv || useEnv.toLowerCase() === 'y' || useEnv.toLowerCase() === 'yes') {
+            key = envKey;
+          } else {
+            key = await prompt('  API key: ', true);
+          }
         } else {
           key = await prompt('  API key: ', true);
         }
-      } else {
-        key = await prompt('  API key: ', true);
+
+        if (!key) {
+          console.log('\n  No key provided. Aborting.\n');
+          process.exitCode = 1;
+          return;
+        }
+
+        // Save
+        await saveCLIConfig({
+          ...savedConfig,
+          apiKey: key,
+          baseUrl,
+          model,
+          provider,
+          apiVersion: undefined,
+          isReasoningModel: undefined,
+        });
+        console.log('  Config saved to ~/.gitnexus/config.json\n');
+
+        llmConfig = { ...llmConfig, apiKey: key, baseUrl, model, provider };
       }
-
-      if (!key) {
-        console.log('\n  No key provided. Aborting.\n');
-        process.exitCode = 1;
-        return;
-      }
-
-      // Save
-      await saveCLIConfig({ apiKey: key, baseUrl, model });
-      console.log('  Config saved to ~/.gitnexus/config.json\n');
-
-      llmConfig = { ...llmConfig, apiKey: key, baseUrl, model };
     }
   }
 
+  // ── Apply per-run overrides not saved to config ────────────────────
+  if (timeoutSeconds !== undefined) {
+    llmConfig.requestTimeoutMs = timeoutSeconds * 1000;
+  }
+  if (retries !== undefined) {
+    llmConfig.maxAttempts = retries;
+  }
+
   // ── Setup progress bar with elapsed timer ──────────────────────────
-  const bar = new cliProgress.SingleBar({
-    format: '  {bar} {percentage}% | {phase}',
-    barCompleteChar: '\u2588',
-    barIncompleteChar: '\u2591',
-    hideCursor: true,
-    barGlue: '',
-    autopadding: true,
-    clearOnComplete: false,
-    stopOnComplete: false,
-  }, cliProgress.Presets.shades_grey);
+  const bar = new cliProgress.SingleBar(
+    {
+      format: '  {bar} {percentage}% | {phase}',
+      barCompleteChar: '\u2588',
+      barIncompleteChar: '\u2591',
+      hideCursor: true,
+      barGlue: '',
+      autopadding: true,
+      clearOnComplete: false,
+      stopOnComplete: false,
+    },
+    cliProgress.Presets.shades_grey,
+  );
 
   bar.start(100, 0, { phase: 'Initializing...' });
 
@@ -239,9 +576,9 @@ export const wikiCommand = async (
   // ── Run generator ───────────────────────────────────────────────────
   const wikiOptions: WikiOptions = {
     force: options?.force,
-    model: options?.model,
-    baseUrl: options?.baseUrl,
     concurrency: options?.concurrency ? parseInt(options.concurrency, 10) : undefined,
+    reviewOnly: options?.review,
+    lang: options?.lang,
   };
 
   const generator = new WikiGenerator(
@@ -264,13 +601,121 @@ export const wikiCommand = async (
     const result = await generator.run();
 
     clearInterval(elapsedTimer);
-    bar.update(100, { phase: 'Done' });
     bar.stop();
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
     const wikiDir = path.join(storagePath, 'wiki');
     const viewerPath = path.join(wikiDir, 'index.html');
+    const treeFile = path.join(wikiDir, 'module_tree.json');
+
+    // Review mode: show module tree and ask for confirmation
+    if (options?.review && result.moduleTree) {
+      console.log(`\n  Module structure ready for review (${elapsed}s)\n`);
+      console.log('  Modules to generate:\n');
+
+      const printTree = (nodes: typeof result.moduleTree, indent = 0) => {
+        for (const node of nodes) {
+          const prefix = '  '.repeat(indent + 2);
+          const fileCount = node.files?.length || 0;
+          const childCount = node.children?.length || 0;
+          const suffix =
+            fileCount > 0
+              ? ` (${fileCount} files)`
+              : childCount > 0
+                ? ` (${childCount} children)`
+                : '';
+          console.log(`${prefix}- ${node.name}${suffix}`);
+          if (node.children && node.children.length > 0) {
+            printTree(node.children, indent + 1);
+          }
+        }
+      };
+      printTree(result.moduleTree);
+
+      console.log(`\n  Tree saved to: ${treeFile}`);
+      console.log('  You can edit this file to remove/rename modules.\n');
+
+      // Ask for confirmation (auto-continue in non-interactive environments)
+      if (!process.stdin.isTTY) {
+        console.log('  Non-interactive mode — auto-continuing with generation.\n');
+      }
+      const answer = process.stdin.isTTY
+        ? await prompt('  Continue with generation? (Y/n/edit): ')
+        : 'y';
+      const choice = answer.trim().toLowerCase();
+
+      if (choice === 'n' || choice === 'no') {
+        console.log('\n  Generation cancelled. Run `gitnexus wiki` later to generate.\n');
+        return;
+      }
+
+      if (choice === 'edit' || choice === 'e') {
+        // Open editor for the user
+        const editor = process.env.EDITOR || process.env.VISUAL || 'vi';
+        console.log(`\n  Opening ${treeFile} in ${editor}...`);
+        console.log('  Save and close the editor when done.\n');
+
+        try {
+          execFileSync(editor, [treeFile], { stdio: 'inherit', windowsHide: true });
+        } catch {
+          console.log(`  Could not open editor. Please edit manually:\n  ${treeFile}\n`);
+          console.log('  Then run `gitnexus wiki` to continue.\n');
+          return;
+        }
+      }
+
+      // Continue with generation using the (possibly edited) tree
+      console.log('\n  Continuing with wiki generation...\n');
+      bar.start(100, 30, { phase: 'Generating pages...' });
+
+      // Re-run generator without reviewOnly flag
+      const continueOptions: WikiOptions = {
+        ...wikiOptions,
+        reviewOnly: false,
+      };
+
+      const continueGenerator = new WikiGenerator(
+        repoPath,
+        storagePath,
+        lbugPath,
+        llmConfig,
+        continueOptions,
+        (phase, percent, detail) => {
+          const label = detail || phase;
+          if (label !== lastPhase) {
+            lastPhase = label;
+            phaseStart = Date.now();
+          }
+          bar.update(percent, { phase: label });
+        },
+      );
+
+      const continueResult = await continueGenerator.run();
+
+      bar.update(100, { phase: 'Done' });
+      bar.stop();
+
+      const totalElapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      console.log(`\n  Wiki generated successfully (${totalElapsed}s)\n`);
+      console.log(`  Mode: ${continueResult.mode}`);
+      console.log(`  Pages: ${continueResult.pagesGenerated}`);
+      console.log(`  Output: ${wikiDir}`);
+      console.log(`  Viewer: ${viewerPath}`);
+
+      if (continueResult.failedModules && continueResult.failedModules.length > 0) {
+        console.log(`\n  Failed modules (${continueResult.failedModules.length}):`);
+        for (const mod of continueResult.failedModules) {
+          console.log(`    - ${mod}`);
+        }
+      }
+
+      console.log('');
+      await maybePublishGist(viewerPath, options?.gist);
+      return;
+    }
+
+    bar.update(100, { phase: 'Done' });
 
     if (result.mode === 'up-to-date' && !options?.force) {
       console.log('\n  Wiki is already up to date.');
@@ -302,17 +747,31 @@ export const wikiCommand = async (
 
     if (err.message?.includes('No source files')) {
       console.log(`\n  ${err.message}\n`);
+    } else if (err.message?.includes('LLM request timed out after')) {
+      console.log(`\n  Timeout: ${err.message}\n`);
+    } else if (err.message?.includes('content filter')) {
+      // Content filter block — actionable message
+      console.log(`\n  Content Filter: ${err.message}\n`);
+      console.log(
+        '  To resolve: rephrase your prompt or adjust the content filter policy for your deployment.\n',
+      );
     } else if (err.message?.includes('API key') || err.message?.includes('API error')) {
       console.log(`\n  LLM Error: ${err.message}\n`);
 
       // Offer to reconfigure on auth-related failures
-      const isAuthError = err.message?.includes('401') || err.message?.includes('403')
-        || err.message?.includes('502') || err.message?.includes('authenticate')
-        || err.message?.includes('Unauthorized');
+      const isAuthError =
+        err.message?.includes('401') ||
+        err.message?.includes('403') ||
+        err.message?.includes('502') ||
+        err.message?.includes('authenticate') ||
+        err.message?.includes('Unauthorized');
       if (isAuthError && process.stdin.isTTY) {
         const answer = await new Promise<string>((resolve) => {
           const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-          rl.question('  Reconfigure LLM settings? (Y/n): ', (ans) => { rl.close(); resolve(ans.trim().toLowerCase()); });
+          rl.question('  Reconfigure LLM settings? (Y/n): ', (ans) => {
+            rl.close();
+            resolve(ans.trim().toLowerCase());
+          });
         });
         if (!answer || answer === 'y' || answer === 'yes') {
           // Clear saved config so next run triggers interactive setup
@@ -322,8 +781,8 @@ export const wikiCommand = async (
       }
     } else {
       console.log(`\n  Error: ${err.message}\n`);
-      if (process.env.DEBUG) {
-        console.error(err);
+      if (process.env.GITNEXUS_VERBOSE) {
+        logger.error({ err }, 'wiki command failed');
       }
     }
     process.exitCode = 1;
@@ -334,8 +793,40 @@ export const wikiCommand = async (
 
 function hasGhCLI(): boolean {
   try {
-    execSync('gh --version', { stdio: 'ignore' });
+    execSync('gh --version', { stdio: 'ignore', windowsHide: true });
     return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Strict Gist URL predicate. Rejects:
+ *   - any URL that does not parse (URL constructor throws)
+ *   - schemes other than https (drops `http:`, `file:`, `gist:`-style spoofs)
+ *   - hostnames that are not exactly `gist.github.com` (drops substring spoofs
+ *     like `https://evil.com/?u=gist.github.com` and userinfo-prefixed shapes
+ *     like `https://[email protected]/...` — note that URL.hostname
+ *     strips userinfo, so the equality check rejects the userinfo-prefixed
+ *     spoof if the actual host differs from gist.github.com)
+ *   - any URL containing userinfo (`username[:password]@`), which the URL
+ *     parser exposes via `.username` / `.password`. Defense-in-depth: even
+ *     when hostname matches, a credential-bearing URL is suspect and not
+ *     produced by `gh gist create`.
+ *
+ * Closes the substring-bypass class CodeQL `js/incomplete-url-substring-
+ * sanitization` flags.
+ */
+function isGistUrl(line: string): boolean {
+  const trimmed = line.trim();
+  try {
+    const u = new URL(trimmed);
+    return (
+      u.protocol === 'https:' &&
+      u.hostname === 'gist.github.com' &&
+      u.username === '' &&
+      u.password === ''
+    );
   } catch {
     return false;
   }
@@ -343,19 +834,20 @@ function hasGhCLI(): boolean {
 
 function publishGist(htmlPath: string): { url: string; rawUrl: string } | null {
   try {
-    const output = execFileSync('gh', [
-      'gist', 'create', htmlPath,
-      '--desc', 'Repository Wiki — generated by GitNexus',
-      '--public',
-    ], { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    const output = execFileSync(
+      'gh',
+      ['gist', 'create', htmlPath, '--desc', 'Repository Wiki — generated by GitNexus', '--public'],
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
+    ).trim();
 
-    // gh gist create prints the gist URL as the last line
-    const lines = output.split('\n');
-    const gistUrl = lines.find(l => l.includes('gist.github.com')) || lines[lines.length - 1];
+    // `gh gist create` prints the gist URL as a line in the output. Find the
+    // first parseable Gist URL — if no line is a valid Gist URL, fail closed
+    // (do NOT fall back to lines[last]: a non-Gist last line would propagate
+    // through the regex below and produce a malformed `rawUrl`).
+    const gistUrl = output.split('\n').find(isGistUrl);
+    if (!gistUrl) return null;
 
-    if (!gistUrl || !gistUrl.includes('gist.github.com')) return null;
-
-    // Build a raw viewer URL via gist.githack.com
+    // Build a raw viewer URL via gist.githack.com.
     // gist URL format: https://gist.github.com/{user}/{id}
     const match = gistUrl.match(/gist\.github\.com\/([^/]+)\/([a-f0-9]+)/);
     let rawUrl = gistUrl;

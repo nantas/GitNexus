@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseAnalyzeSummary, compareEstimate } from './analyze-parser.js';
 
 test('parseAnalyzeSummary extracts totalSec and kuzu/fts sec', async () => {
-  const summary = await parseAnalyzeSummary('__fixtures__/analyze.log');
+  const summary = await parseAnalyzeSummary('__fixtures__/analyze.txt');
   assert.equal(summary.totalSec, 114.8);
   assert.equal(summary.kuzuSec, 73.5);
   assert.equal(summary.ftsSec, 19.6);

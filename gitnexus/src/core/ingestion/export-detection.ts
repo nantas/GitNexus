@@ -4,27 +4,29 @@
  * Determines whether a symbol (function, class, etc.) is exported/public
  * in its language. This is a pure function — safe for use in worker threads.
  *
- * Shared between parse-worker.ts (worker pool) and parsing-processor.ts (sequential fallback).
+ * Used by the language providers during worker parsing (parse-worker.ts) — the
+ * sole parse path. (Sequential parsing was removed.)
  */
 
-import { findSiblingChild, SyntaxNode } from './utils.js';
-import { SupportedLanguages } from '../../config/supported-languages.js';
+import { findSiblingChild, type SyntaxNode } from './utils/ast-helpers.js';
 
 /** Handler type: given a node and symbol name, return true if the symbol is exported/public. */
-type ExportChecker = (node: SyntaxNode, name: string) => boolean;
+export type ExportChecker = (node: SyntaxNode, name: string) => boolean;
 
 // ============================================================================
 // Per-language export checkers
 // ============================================================================
 
 /** JS/TS: walk ancestors looking for export_statement or export_specifier. */
-const tsExportChecker: ExportChecker = (node, _name) => {
+export const tsExportChecker: ExportChecker = (node, _name) => {
   let current: SyntaxNode | null = node;
   while (current) {
     const type = current.type;
-    if (type === 'export_statement' ||
-        type === 'export_specifier' ||
-        (type === 'lexical_declaration' && current.parent?.type === 'export_statement')) {
+    if (
+      type === 'export_statement' ||
+      type === 'export_specifier' ||
+      (type === 'lexical_declaration' && current.parent?.type === 'export_statement')
+    ) {
       return true;
     }
     // Fallback: check if node text starts with 'export ' for edge cases
@@ -37,10 +39,10 @@ const tsExportChecker: ExportChecker = (node, _name) => {
 };
 
 /** Python: public if no leading underscore (convention). */
-const pythonExportChecker: ExportChecker = (_node, name) => !name.startsWith('_');
+export const pythonExportChecker: ExportChecker = (_node, name) => !name.startsWith('_');
 
 /** Java: check for 'public' modifier — modifiers are siblings of the name node, not parents. */
-const javaExportChecker: ExportChecker = (node, _name) => {
+export const javaExportChecker: ExportChecker = (node, _name) => {
   let current: SyntaxNode | null = node;
   while (current) {
     if (current.parent) {
@@ -64,19 +66,27 @@ const javaExportChecker: ExportChecker = (node, _name) => {
 
 /** C# declaration node types for sibling modifier scanning. */
 const CSHARP_DECL_TYPES = new Set([
-  'method_declaration', 'local_function_statement', 'constructor_declaration',
-  'class_declaration', 'interface_declaration', 'struct_declaration',
-  'enum_declaration', 'record_declaration', 'record_struct_declaration',
-  'record_class_declaration', 'delegate_declaration',
-  'property_declaration', 'field_declaration', 'event_declaration',
-  'namespace_declaration', 'file_scoped_namespace_declaration',
+  'method_declaration',
+  'local_function_statement',
+  'constructor_declaration',
+  'class_declaration',
+  'interface_declaration',
+  'struct_declaration',
+  'enum_declaration',
+  'record_declaration',
+  'delegate_declaration',
+  'property_declaration',
+  'field_declaration',
+  'event_declaration',
+  'namespace_declaration',
+  'file_scoped_namespace_declaration',
 ]);
 
 /**
  * C#: modifier nodes are SIBLINGS of the name node inside the declaration.
  * Walk up to the declaration node, then scan its direct children.
  */
-const csharpExportChecker: ExportChecker = (node, _name) => {
+export const csharpExportChecker: ExportChecker = (node, _name) => {
   let current: SyntaxNode | null = node;
   while (current) {
     if (CSHARP_DECL_TYPES.has(current.type)) {
@@ -92,7 +102,7 @@ const csharpExportChecker: ExportChecker = (node, _name) => {
 };
 
 /** Go: uppercase first letter = exported. */
-const goExportChecker: ExportChecker = (_node, name) => {
+export const goExportChecker: ExportChecker = (_node, name) => {
   if (name.length === 0) return false;
   const first = name[0];
   return first === first.toUpperCase() && first !== first.toLowerCase();
@@ -100,9 +110,19 @@ const goExportChecker: ExportChecker = (_node, name) => {
 
 /** Rust declaration node types for sibling visibility_modifier scanning. */
 const RUST_DECL_TYPES = new Set([
-  'function_item', 'struct_item', 'enum_item', 'trait_item', 'impl_item',
-  'union_item', 'type_item', 'const_item', 'static_item', 'mod_item',
-  'use_declaration', 'associated_type', 'function_signature_item',
+  'function_item',
+  'struct_item',
+  'enum_item',
+  'trait_item',
+  'impl_item',
+  'union_item',
+  'type_item',
+  'const_item',
+  'static_item',
+  'mod_item',
+  'use_declaration',
+  'associated_type',
+  'function_signature_item',
 ]);
 
 /**
@@ -110,7 +130,7 @@ const RUST_DECL_TYPES = new Set([
  * (function_item, struct_item, etc.), not a parent. Walk up to the declaration node,
  * then scan its direct children.
  */
-const rustExportChecker: ExportChecker = (node, _name) => {
+export const rustExportChecker: ExportChecker = (node, _name) => {
   let current: SyntaxNode | null = node;
   while (current) {
     if (RUST_DECL_TYPES.has(current.type)) {
@@ -129,7 +149,7 @@ const rustExportChecker: ExportChecker = (node, _name) => {
  * Kotlin: default visibility is public (unlike Java).
  * visibility_modifier is inside modifiers, a sibling of the name node within the declaration.
  */
-const kotlinExportChecker: ExportChecker = (node, _name) => {
+export const kotlinExportChecker: ExportChecker = (node, _name) => {
   let current: SyntaxNode | null = node;
   while (current) {
     if (current.parent) {
@@ -152,7 +172,7 @@ const kotlinExportChecker: ExportChecker = (node, _name) => {
  * marked 'static' are file-scoped (not exported). C++ anonymous namespaces
  * (namespace { ... }) also give internal linkage.
  */
-const cCppExportChecker: ExportChecker = (node, _name) => {
+export const cCppExportChecker: ExportChecker = (node, _name) => {
   let cur: SyntaxNode | null = node;
   while (cur) {
     if (cur.type === 'function_definition' || cur.type === 'declaration') {
@@ -174,13 +194,15 @@ const cCppExportChecker: ExportChecker = (node, _name) => {
 };
 
 /** PHP: check for visibility modifier or top-level scope. */
-const phpExportChecker: ExportChecker = (node, _name) => {
+export const phpExportChecker: ExportChecker = (node, _name) => {
   let current: SyntaxNode | null = node;
   while (current) {
-    if (current.type === 'class_declaration' ||
-        current.type === 'interface_declaration' ||
-        current.type === 'trait_declaration' ||
-        current.type === 'enum_declaration') {
+    if (
+      current.type === 'class_declaration' ||
+      current.type === 'interface_declaration' ||
+      current.type === 'trait_declaration' ||
+      current.type === 'enum_declaration'
+    ) {
       return true;
     }
     if (current.type === 'visibility_modifier') {
@@ -192,53 +214,92 @@ const phpExportChecker: ExportChecker = (node, _name) => {
   return true;
 };
 
-/** Swift: check for 'public' or 'open' access modifiers. */
-const swiftExportChecker: ExportChecker = (node, _name) => {
+/**
+ * Swift: treat symbols as exported unless explicitly marked private/fileprivate.
+ *
+ * Swift's default access level is `internal`, which means visible to all files
+ * in the same module/target. Since GitNexus indexes at the target level,
+ * `internal` symbols should be treated as exported (cross-file visible).
+ * Only `private` and `fileprivate` symbols are truly file-scoped.
+ */
+export const swiftExportChecker: ExportChecker = (node, _name) => {
   let current: SyntaxNode | null = node;
   while (current) {
     if (current.type === 'modifiers' || current.type === 'visibility_modifier') {
       const text = current.text || '';
-      if (text.includes('public') || text.includes('open')) return true;
+      // Exclude private(set)/fileprivate(set) — only the setter is restricted,
+      // the symbol itself is still readable cross-file.
+      if (/\b(private|fileprivate)\b(?!\s*\()/.test(text)) return false;
     }
+    current = current.parent;
+  }
+  // Default (internal), public, and open are all cross-file visible
+  return true;
+};
+
+/** Ruby: all top-level definitions are public (no export syntax). */
+export const rubyExportChecker: ExportChecker = (_node, _name) => true;
+
+/** Dart: public if no leading underscore (convention, same as Python). */
+export const dartExportChecker: ExportChecker = (_node, name) => !name.startsWith('_');
+
+/** Zig declaration node types whose `pub` / `export` keyword child marks the symbol public. */
+const ZIG_DECL_TYPES = new Set(['function_declaration', 'variable_declaration']);
+
+/**
+ * Zig: walk to the enclosing decl, scan its direct children for an unnamed `pub`
+ * or `export` keyword token (tree-sitter-zig models both as anonymous keyword
+ * children of function_declaration / variable_declaration). Two different
+ * facts share this one flag, on purpose:
+ *   - `pub` is Zig-module visibility — reachable from another `.zig` file
+ *     through `@import`;
+ *   - `export` is C-ABI linkage (`export fn add(...)`) — the symbol lands in
+ *     the object file for FFI callers, and it never carries `pub`.
+ * `isExported` means "visible outside this compilation unit" graph-wide (C uses
+ * external linkage for the same flag), so both qualify. The `visibility`
+ * property is the Zig-only fact and is `pub`-only — see `hasZigPubKeyword`:
+ * an `export fn` without `pub` is public to C and PRIVATE to other Zig files.
+ * Container fields (struct/enum variants) are public if their enclosing
+ * variable_declaration is public.
+ *
+ * The walk stops at the FIRST declaration it reaches: a `fn` inside
+ * `pub const T = struct { … }` carries its own `pub` (or not), independent of
+ * the container's. Continuing up to the wrapper marked every private method of
+ * a public container as exported.
+ */
+export const zigExportChecker: ExportChecker = (node, _name) => {
+  let current: SyntaxNode | null = node;
+  while (current) {
+    if (ZIG_DECL_TYPES.has(current.type)) return hasZigVisibilityKeyword(current);
     current = current.parent;
   }
   return false;
 };
 
-// ============================================================================
-// Exhaustive dispatch table — satisfies enforces all SupportedLanguages are covered
-// ============================================================================
-
-const exportCheckers = {
-  [SupportedLanguages.JavaScript]: tsExportChecker,
-  [SupportedLanguages.TypeScript]: tsExportChecker,
-  [SupportedLanguages.Python]: pythonExportChecker,
-  [SupportedLanguages.Java]: javaExportChecker,
-  [SupportedLanguages.CSharp]: csharpExportChecker,
-  [SupportedLanguages.Go]: goExportChecker,
-  [SupportedLanguages.Rust]: rustExportChecker,
-  [SupportedLanguages.Kotlin]: kotlinExportChecker,
-  [SupportedLanguages.C]: cCppExportChecker,
-  [SupportedLanguages.CPlusPlus]: cCppExportChecker,
-  [SupportedLanguages.PHP]: phpExportChecker,
-  [SupportedLanguages.Swift]: swiftExportChecker,
-  [SupportedLanguages.Ruby]: (_node, _name) => true,
-  [SupportedLanguages.GDScript]: (_node, name) => !name.startsWith('_'),
-} satisfies Record<SupportedLanguages, ExportChecker>;
-
-// ============================================================================
-// Public API
-// ============================================================================
+/**
+ * Does this Zig declaration carry a `pub` or `export` keyword child? Feeds
+ * `isExported` (visible outside the compilation unit — to Zig importers OR to
+ * C callers).
+ */
+export function hasZigVisibilityKeyword(declNode: SyntaxNode): boolean {
+  for (let i = 0; i < declNode.childCount; i++) {
+    const child = declNode.child(i);
+    if (child?.type === 'pub' || child?.type === 'export') return true;
+  }
+  return false;
+}
 
 /**
- * Check if a tree-sitter node is exported/public in its language.
- * @param node - The tree-sitter AST node
- * @param name - The symbol name
- * @param language - The programming language
- * @returns true if the symbol is exported/public
+ * Does this Zig declaration carry a `pub` keyword child? Feeds `visibility`,
+ * the Zig-module fact: per the language reference, only `pub` declarations are
+ * accessible from another file via `@import`; `export` alone gives C linkage
+ * and leaves the declaration private to Zig code. So `export fn c_add` reports
+ * `isExported: true` (FFI surface) with `visibility: 'private'` (Zig surface)
+ * — two facts, two properties, deliberately not one.
  */
-export const isNodeExported = (node: SyntaxNode, name: string, language: SupportedLanguages): boolean => {
-  const checker = exportCheckers[language];
-  if (!checker) return false;
-  return checker(node, name);
-};
+export function hasZigPubKeyword(declNode: SyntaxNode): boolean {
+  for (let i = 0; i < declNode.childCount; i++) {
+    if (declNode.child(i)?.type === 'pub') return true;
+  }
+  return false;
+}

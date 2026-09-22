@@ -46,7 +46,7 @@ export function resolveGitNexusPackageName(): string {
   try {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
-    const packageJsonPath = path.join(__dirname, '..', '..', '..', 'package.json');
+    const packageJsonPath = path.join(__dirname, '..', '..', 'package.json');
     const raw = readFileSync(packageJsonPath, 'utf-8');
     const parsed = JSON.parse(raw) as { name?: string };
     const trimmed = typeof parsed.name === 'string' ? parsed.name.trim() : '';
@@ -73,11 +73,7 @@ function looksLikePackageSpec(token: string): boolean {
   return token.includes('@');
 }
 
-function normalizePackageSpec(
-  packageName: string,
-  raw: string,
-  defaultDistTag: string,
-): string {
+function normalizePackageSpec(packageName: string, raw: string, defaultDistTag: string): string {
   const token = raw.trim();
   if (!token) return `${packageName}@${defaultDistTag}`;
   if (looksLikePackageSpec(token)) {
@@ -87,10 +83,12 @@ function normalizePackageSpec(
 }
 
 export function resolveCliSpec(input: ResolveCliSpecInput = {}): ResolvedCliSpec {
-  const packageName = (input.packageName || resolveGitNexusPackageName()).trim() || DEFAULT_GITNEXUS_PACKAGE_NAME;
+  const packageName =
+    (input.packageName || resolveGitNexusPackageName()).trim() || DEFAULT_GITNEXUS_PACKAGE_NAME;
   const env = input.env || process.env;
   const config = input.config || {};
-  const defaultDistTag = (input.defaultDistTag || DEFAULT_GITNEXUS_DIST_TAG).trim() || DEFAULT_GITNEXUS_DIST_TAG;
+  const defaultDistTag =
+    (input.defaultDistTag || DEFAULT_GITNEXUS_DIST_TAG).trim() || DEFAULT_GITNEXUS_DIST_TAG;
 
   const candidates: Array<{ value?: string; source: CliSpecSource }> = [
     { value: input.explicitSpec, source: 'explicit-spec' },

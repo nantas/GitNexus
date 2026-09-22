@@ -1,25 +1,12 @@
 # Type Resolution Roadmap
 
-This roadmap describes the next major capabilities needed to evolve GitNexus's type-resolution layer from a strong receiver-disambiguation aid into a broader static-analysis foundation.
-
-The roadmap assumes the current system already provides:
-
-- explicit type extraction from declarations and parameters
-- initializer / constructor inference
-- loop element inference for many languages
-- selected pattern binding and narrowing
-- comment-based fallbacks in JS/TS, PHP, and Ruby
-- constrained return-type-aware receiver inference during call processing
-
-The remaining work is about **generalisation**, **deeper structure modelling**, and **better propagation**.
+This roadmap describes the evolution of GitNexus's type-resolution layer from a receiver-disambiguation aid into a production-grade static-analysis foundation.
 
 ---
 
-## Principles for Future Work
+## Principles
 
-The type system should continue to preserve the qualities that make it practical today:
-
-- **stay conservative**
+- **stay conservative** — prefer missing a binding over introducing a misleading one
 - **prefer explainable inference over clever but brittle inference**
 - **limit performance overhead during ingestion**
 - **keep per-language extractors explicit rather than over-generic**
@@ -29,384 +16,257 @@ The goal is not to build a compiler. The goal is to support high-value static an
 
 ---
 
-## Near-Term Priority: Generalise Existing Inference
+## Delivered Phases
 
-The next biggest gain is not inventing a new type system layer. It is expanding the inference the system already performs so more constructs can benefit from it.
+### Phase 7: Cross-Scope and Return-Aware Propagation ✅
 
-### Why this is the right next step
+**Shipped in** `feat/phase7-type-resolution`.
 
-Today, return-type-aware inference already exists in constrained form inside `call-processor.ts`, and loop element inference already handles many identifier-based iterables.
+- `ReturnTypeLookup` interface threading return-type knowledge into TypeEnv
+- Iterable call-expression support across 7 languages (Go, TS, Python, Rust, Java, Kotlin, C#)
+- PHP class-level `@var` property typing for `$this->property` foreach (Strategy C)
+- `pendingCallResults` infrastructure (Tier 2b loop + `PendingAssignment` union) — activated by Phase 9
 
-The most valuable next move is to let those signals participate in more places, especially:
+### Phase 8: Field and Property Type Resolution ✅
 
-- iterable expressions rather than only iterable identifiers
-- assignment propagation from call results
-- doc-comment-derived file-scope bindings where local scope is insufficient
+**Shipped in** `feat/phase8-field-property-type-resolution`.
 
----
+- SymbolTable `fieldByOwner` index — O(1) field lookup by `ownerNodeId\0fieldName`
+- `HAS_PROPERTY` edge type + `declaredType` on Property symbols
+- Deep chain resolution up to 3 levels (`user.address.city.getName()`) across 10 languages
+- Mixed field+method chains via unified `MixedChainStep[]` (`svc.getUser().address.save()`)
+- Type-preserving stdlib passthroughs (`unwrap`, `clone`, `expect`, etc.)
+- `ACCESSES` edge type — read/write field access tracking across 12 languages
+- C++ `field_declaration` capture, `field_expression` receiver support
+- Rust unit struct instantiation, Ruby YARD `@return` for `attr_accessor`
 
-## Phase 7: Cross-Scope and Return-Aware Propagation
+### Phase 9 + 9C: Return-Type-Aware Variable Binding ✅
 
-> **Status: COMPLETE** — shipped in `feat/phase7-type-resolution` (commits `ed767e3`, `ca4c6c1`, `d79237e`).
+**Shipped in** `feat/phase9-call-result-binding` (PR #379).
 
-### Goal
+- Simple call-result binding: `const user = getUser(); user.save()` across 11 languages
+- Unified fixpoint loop replacing sequential Tier 2b/2a — handles 4 binding kinds (`callResult`, `copy`, `fieldAccess`, `methodCallResult`) at arbitrary depth
+- Field access binding: `const addr = user.address` resolves via `lookupFieldByOwner` + `declaredType`
+- Method-call-result binding: `const city = addr.getCity()` resolves via `lookupFuzzyCallable` filtered by `ownerId`
+- Fixpoint iterates until stable (max 10 iterations), enabling chains like `getUser() → .address → .getCity() → city.save()`
+- Reverse-order copy chains now resolve (`const b = a; const a: User = x` → both resolve)
 
-Allow loop inference and assignment inference to see more than the current function-local environment.
+### Milestone D — Completeness ✅
 
-### Problems this phase addresses
+**Shipped in** `feat/type-resolution-milestone-d` (PR #387). Consolidated original Phases 10–13 into 3 balanced phases.
 
-#### 7A. Iterable expressions in Go and similar cases (shipped as Phase 7.3)
+#### Phase A: Fixpoint Completeness ✅
 
-```go
-for _, user := range getUsers() {
-    user.Save()
-}
-```
+- Post-fixpoint for-loop replay (ex-9B): `pendingForLoops` collection + replay after fixpoint resolves iterable types
+- Object destructuring via `fieldAccess` items (TS/JS `object_pattern`, Rust `struct_pattern`) — no new `destructure` PendingAssignment variant needed
+- Extracted `resolveFixpointBindings()` helper with exhaustive switch + `classDefCache` memoization
 
-The iterable is a call expression, not an identifier with a local binding.
+#### Phase B: Inheritance & Receivers ✅
 
-Resolved: `ReturnTypeLookup` introduced in Phase 7.1 exposes `lookupRawReturnType`. All seven typed-iteration languages (Go, TypeScript, Python, Rust, Java, Kotlin, C#) now unwrap the raw container type string to extract the element type when the iterable is a direct function call.
+- `BuildTypeEnvOptions` interface replacing positional params for `buildTypeEnv`
+- Heritage pre-pass constructing `parentMap` from tree-sitter query matches (not graph edges — heritage-processor runs in parallel)
+- MRO-aware `walkParentChain()` (depth 5, cycle-safe BFS) for `resolveFieldType` and `resolveMethodReturnType`
+- `this`/`self`/`$this`/`Me` receiver substitution via `substituteThisReceiver` hook
+- Go `inc_statement`/`dec_statement` write-access queries
 
-#### 7B. File-scope or class-scope iterable typing in PHP (shipped as Phase 7.4)
+#### Phase C: Branch-Sensitive Narrowing ✅
 
-```php
-foreach ($this->users as $user) {
-    $user->save();
-}
-```
+- Null-check narrowing (`!= null`, `!== undefined`, `is not null`) via position-indexed `patternOverrides`
+- Supported for TS, Kotlin, C# — renamed `PATTERN_BRANCH_TYPES` → `NARROWING_BRANCH_TYPES`
+- Bug fix: Kotlin narrowing required 3 fixes in `jvm.ts` (AST node type `equality_expression`, anonymous `null` node, `nullable_type` parameter fallback)
 
-If `$this->users` is typed through a class property annotation or file/class-scope doc-comment information, the current local-scope-only path may not be enough.
+#### Deferred from Milestone D
 
-Resolved: Strategy C in the PHP `extractForLoopBinding` walks up the AST to the enclosing `class_declaration`, scans the `declaration_list` for a matching `property_declaration`, and extracts the element type from the `@var` PHPDoc comment (or PHP 7.4+ native type field). The `@param` workaround previously required in the fixture is gone.
+- **Type predicates (13A):** Cross-function analysis for niche TS `x is User` feature — deferred
+- **Swift parity (11D):** tree-sitter-swift Node 22 issues — all Swift work consolidated to Phase S
+- **Positional destructuring (12C):** Python/Kotlin/C#/C++ tuple-position-to-field mapping — deferred
+- **Discriminated union narrowing (13C):** Needs tagged union metadata not in SymbolTable — deferred
 
-#### 7C. Broader use of already-known return types (shipped as Phase 7.1 + 7.2)
+#### Integration Test Coverage
 
-The system can already infer receiver types from uniquely resolved call results in `call-processor.ts`. That needs to be generalised so `TypeEnv` can benefit from it too.
-
-Resolved: `ReturnTypeLookup` (Phase 7.1) encapsulates `lookupReturnType` / `lookupRawReturnType` and is threaded through `ForLoopExtractorContext` (Phase 7.2) to all for-loop extractors. Phase 7.2 also added the `pendingCallResults` infrastructure (the `PendingAssignment` discriminated union in `types.ts` and the Tier 2b processing loop in `type-env.ts`), but no extractor populates it yet — `var x = f()` propagation is Phase 9 work.
-
-### Engineering direction (as implemented)
-
-- introduced `ReturnTypeLookup` interface and `buildReturnTypeLookup` factory in `type-env.ts`
-- replaced per-extractor `(node, env)` signature with `ForLoopExtractorContext` context object for extensibility
-- added `extractElementTypeFromString` to `shared.ts` as the canonical raw-string container unwrapper
-- added PHP Strategy C helper (`findClassPropertyElementType`) scoped to the PHP extractor
-- kept all changes backwards-compatible — explicit-type paths are untouched
-
-### Delivered impact
-
-- loop inference now works for direct function call iterables in all 7 typed-iteration languages
-- PHP `$this->property` foreach is resolved from class-level `@var` without requiring `@param` workarounds
-- `pendingCallResults` infrastructure is in place (Tier 2b loop + `PendingAssignment` union) — dormant until an extractor emits `{ kind: 'callResult' }` (Phase 9)
-
-### Risk level
-
-**Medium** (as predicted)
-
-The interface change touched all extractors but remained additive — no existing paths were changed.
-
----
-
-## Phase 8: Field and Property Type Resolution
-
-### Goal
-
-Model class / struct fields so chained member access can be resolved more accurately.
-
-### Problems this phase addresses
-
-#### 8A. Deep property chains
-
-```typescript
-user.address.city
-```
-
-Today the system may resolve `user -> User`, but it cannot generally resolve:
-
-- `address -> Address`
-- `city -> City` or scalar type
-
-#### 8B. Chained method targets through field access
-
-```typescript
-user.address.save()
-```
-
-Without field typing, the resolver cannot reliably identify the receiver type of `address`.
-
-#### 8C. Pattern destructuring that depends on field knowledge
-
-This is especially relevant for:
-
-- Rust struct-pattern destructuring
-- PHP chained property access
-- richer TypeScript or Python object-based destructuring in future work
-
-### Engineering direction
-
-- parse field / property declarations per class or struct
-- build a field-type map keyed by owning type
-- teach lookup and chain-resolution logic to walk member segments
-- keep this separate from the base variable-binding layer where possible
-
-### Expected impact
-
-This is the biggest unlock for richer static analysis because it allows the graph to model more than just top-level receivers.
-
-It would materially improve:
-
-- chained property resolution
-- member-based call disambiguation
-- deeper context extraction for downstream tooling
-
-### Risk level
-
-**High**
-
-This is the first phase that pushes the system from variable typing into structural object modelling. It will likely require:
-
-- schema expansion or new internal maps
-- careful handling of inheritance / embedding / language-specific member semantics
-- broader test coverage than earlier phases
+17 fixture directories, 23 describe blocks, 705 lines of test code covering all 11 languages:
+- Grandparent MRO (depth-2 C→B→A): TS, JS, Kotlin, C#, C++, Java, PHP, Python, Ruby
+- Object destructuring: TS, JS
+- Struct destructuring: Rust
+- Post-fixpoint for-loop replay: TS, JS
+- Go inc/dec write access
+- Null-check narrowing: TS, C#, Kotlin
 
 ---
 
-## Phase 9: Full Return-Type-Aware Variable Binding
+## Open Phases
 
-### Goal
+### Phase P: Polymorphism & Overloading
 
-Make return-type-driven inference a first-class input to `TypeEnv`, not just a downstream verification path.
+**Plan:** `docs/plans/2026-03-19-feat-polymorphism-overloading-type-resolution-plan.md`
 
-### Problems this phase addresses
+Four incremental phases:
+1. **Parameter type metadata** — extend `SymbolDefinition` with `parameterTypes: string[]` extracted during parsing — **DELIVERED**
+2. **Overload disambiguation** — filter overloaded methods by argument literal types at call sites — **DELIVERED** (Java, Kotlin, C#, C++, TypeScript)
+3. **Constructor-visible virtual dispatch** — `Base b = new Derived(); b.method()` resolves to `Derived#method` when constructor type is a known subclass — **DELIVERED** (Java, C#, TS, C++, Kotlin via `detectConstructorType` hook, C++ smart pointers via `make_shared`/`make_unique`)
+4. **Optional parameter arity resolution** — calls with omitted optional/default args now resolve via `requiredParameterCount` range check — **DELIVERED** (TS, Python, Kotlin, C#, C++, PHP, Ruby)
+5. **Covariant return type awareness** — prefer child's return type over inherited definition
 
-#### 9A. Binding variables from call results
+Languages benefiting: Java, Kotlin, C#, C++, TypeScript (overloading). All OOP languages (virtual dispatch).
 
-```typescript
-const users = repo.getUsers()
-```
-
-Desired binding:
-
-- `users -> List<User>`
-
-#### 9B. Looping directly over call results
-
-```typescript
-for (const user of getUsers()) {
-    user.save()
-}
-```
-
-Desired binding:
-
-- `user -> User`
-
-#### 9C. Broader method-chain inference
-
-```typescript
-repo.getUsers().first()
-```
-
-If return types can propagate more systematically, later chain stages become much more resolvable.
-
-### Engineering direction
-
-- expose return types as reusable inference inputs inside `TypeEnv`
-- distinguish raw textual return types from normalized receiver-usable types
-- make method-call return inference receiver-aware where necessary
-- avoid over-eager propagation when multiple call targets remain ambiguous
-
-### Expected impact
-
-This phase would make the type system feel much closer to a static-analysis substrate rather than a set of local heuristics.
-
-It will especially improve codebases that rely heavily on:
-
-- service-returned collections
-- builder APIs
-- repository methods
-- chain-heavy fluent interfaces
-
-### Risk level
-
-**Medium to High**
-
-The conceptual basis already exists, but generalising it without introducing false bindings requires careful ambiguity rules.
+**Impact: High | Effort: High** (P.1–P.4 delivered; P.5 covariant return types remains open)
 
 ---
 
-## Language-Specific Gaps
+### Phase S: Swift Parity
+
+**Blocked on** tree-sitter-swift Node 22 compatibility.
+
+- For-loop element binding (from Phase 10)
+- Assignment chains: copy, callResult, fieldAccess, methodCallResult (from Phase 11D)
+- `guard let` narrowing (from Phase 13B) — uses scopeEnv path, not `patternOverrides`
+
+**Impact: Medium | Effort: Medium**
+
+---
+
+### Phase 14: Cross-File Binding Propagation ✅
+
+**Shipped in** `feat/phase14-cross-file-binding-propagation`.
+
+Three enrichment mechanisms:
+- **E1:** `seedCrossFileReceiverTypes` — pre-seeds `receiverTypeName` for single-hop imported receivers (zero re-parse)
+- **E2:** `ExportedTypeMap` seeded into `importedBindings` for re-resolution pass
+- **E3:** `buildImportedReturnTypes` — cross-file return types for imported callables (local-first, SymbolTable takes precedence)
+
+Architecture:
+- Topological import ordering via Kahn's BFS (`topologicalLevelSort`, returns `{ levels, cycleCount }`)
+- Cycle-safe: files in cycles grouped in final level, no cross-cycle propagation
+- `runCrossFileBindingPropagation()` extracted as standalone pipeline phase
+- `synthesizeWildcardImportBindings()` expands whole-module imports (Go/Ruby/C/C++/Swift) into per-symbol namedImportMap entries from graph-exported symbols — runs before Phase 14
+- Worker path: `buildExportedTypeMapFromGraph` collects Tier 0 (annotated) exports only
+- Sequential path: `collectExportedBindings` captures full fixpoint-inferred exports
+
+**Per-language Phase 14 coverage:**
+| Language | namedImportMap | ExportedTypeMap (E1/E2) | E3 (importedReturnTypes) | Benefit |
+|----------|:-:|:-:|:-:|---|
+| TypeScript | Full (named imports) | File-scope vars | Full | **High** |
+| JavaScript | Full (named imports) | File-scope vars | Full | **High** |
+| Python | from-imports | File-scope vars | Full | **High** |
+| Kotlin | Top-level fns | Top-level props | Full | **High** |
+| Rust | use clauses | Limited | Full | **High** |
+| Go | Synthesized¹ | Exported symbols | Full | **Medium** |
+| Ruby | Synthesized¹ | Exported symbols | Full | **Medium** |
+| C/C++ | Synthesized¹ | Exported symbols | Full | **Medium** |
+| Swift | Synthesized¹ | Exported symbols | Full | **Low** (Phase S blocked) |
+| PHP | use classes | Inert (class-scope) | Inert (no fn imports) | **Marginal** |
+| Java | Classes + static methods | Inert (no file-scope) | Via SymbolTable | **Medium** |
+| C# | Alias + `using static` | Inert (no file-scope) | Via SymbolTable | **Medium** |
+
+¹ Whole-module import languages: namedImportMap entries synthesized from graph-exported symbols via `synthesizeWildcardImportBindings()` (capped at 1000 per file)
+
+**Named binding extraction details:**
+- Java: `import static X.Y.method` now captured (static modifier detection). Ambiguous static imports (same method from multiple classes) fall through to Tier 2a for arity narrowing.
+- C#: `using static NS.Type;` now captured (last segment as class binding). Non-alias `using NS;` remains unsupported (namespace import requires type inference).
+
+**Resolved limitations (this PR):**
+- ~~Worker path vs sequential path quality split~~ — workers now return file-scope TypeEnv bindings; main thread merges fixpoint-inferred exports into ExportedTypeMap (filtered by graph `isExported`)
+- ~~`lookupRawReturnType` no cross-file fallback~~ — separate `importedRawReturnTypes` map stores raw declared types (e.g., `User[]`) for for-loop element extraction via `extractElementTypeFromString`
+- ~~C++ header method declarations~~ — tree-sitter query fix: `field_identifier` added to declaration pattern alongside `identifier`, plus pointer/reference return type variants
+
+**Impact: High | Effort: High** — delivered
+
+---
+
+## Dependency Graph
+
+```
+Milestone D (Phases A, B, C) ✅ ──┐
+                                   ├──→ Phase 14 (cross-file) ✅
+Phase P (polymorphism) ───────────┤
+                                   │
+Phase S (Swift parity) ───────────┘
+
+Phase P.1–P.4 are delivered. P.5 (covariant return types) remains open.
+Phase P and Phase S are independent of each other and Phase 14.
+Phase 14 is delivered. Remaining open: Phase P.5, Phase S.
+```
+
+---
+
+## Language-Specific Gaps (remaining)
 
 ### Swift
+- For-loop element binding → Phase S
+- Assignment chains (copy, callResult, fieldAccess, methodCallResult) → Phase S
+- `guard let` narrowing → Phase S
 
-Current support remains relatively minimal.
-
-Missing or weak areas include:
-
-- for-loop element binding
-- pattern binding
-- assignment-chain propagation
-- broader expression-based inference
-
-**Priority:** Medium  
-**Reason:** It matters for parity, but the biggest global analysis gains are elsewhere.
-
-### Go
-
-Key remaining gap:
-
-- ~~iterable call expressions in range loops~~ ✓ shipped in Phase 7.3
-
-**Priority:** Medium (chained property access remains for Phase 8)
-
-### PHP
-
-Key remaining gaps:
-
-- ~~file/class-scope iterable propagation~~ ✓ shipped in Phase 7.4 (Strategy C)
-- chained property access
-
-**Priority:** High
-**Reason:** PHP heavily benefits from doc-comment-aware field and property modelling.
-
-### Rust
-
-Key remaining gap:
-
-- struct-pattern field destructuring
-
-**Priority:** Medium  
-**Reason:** Important for completeness, but field-type infrastructure is the real prerequisite.
+### Kotlin
+- ~~Virtual dispatch: `Dog()` uses `call_expression` (no `new` keyword)~~ — **RESOLVED** via `detectConstructorType` hook
 
 ### All languages
-
-Shared missing capabilities:
-
-- field / property type resolution
-- generalised return-type-aware binding in `TypeEnv`
-
-**Priority:** Very High  
-**Reason:** These are the biggest remaining blockers to deeper static analysis.
+- ~~Cross-file binding propagation → Phase 14~~ — **DELIVERED** for all 13 languages via two mechanisms: (1) named import extraction (TS/JS/Python/Kotlin/Rust/PHP/Java/C#), (2) wildcard import synthesis from graph-exported symbols (Go/Ruby/C/C++/Swift). Remaining gap: C# non-alias `using NS;` (namespace import, requires type inference).
 
 ---
 
-## Recommended Delivery Order
+## Milestones
 
-### 1. Generalise existing return and loop inference
+### Milestone A — Inference Expansion ✅ (Phase 7)
 
-This is the best cost-to-value step.
+Loop inference, `ReturnTypeLookup`, PHP Strategy C.
 
-Deliverables:
+### Milestone B — Structural Member Typing ✅ (Phase 8)
 
-- iterable call-expression support
-- wider access to return-type maps
-- file-scope binding visibility where needed
+Field/property maps, deep chains, mixed chains, stdlib passthroughs.
 
-### 2. Add field / property type maps
+### Milestone C — Static-Analysis Foundation ✅ (Phase 9 + 9C)
 
-This unlocks the next class of analysis depth.
+Unified fixpoint loop, call-result binding, field access binding, method-call-result binding, arbitrary-depth chain propagation.
 
-Deliverables:
+### Milestone D — Completeness ✅ (Phases A, B, C)
 
-- per-type field metadata
-- chained property resolution
-- better destructuring support
+Consolidated Phases 10–13 into 3 balanced phases. Loop-fixpoint bridge, MRO-aware inheritance walking, `this`/`self` resolution, object/struct destructuring, null-check narrowing. Kotlin null-check bug fix. Full 11-language integration test coverage.
 
-### 3. Promote return types into first-class `TypeEnv` inputs
+### Milestone E — Cross-Boundary ✅ (Phase 14)
 
-This converts existing downstream validation into a broader inference capability.
+Export-type index, cross-file binding propagation. Full coverage for TS/JS/Python/Kotlin. Marginal for PHP. Inert for Java/C#/Go/Ruby/C/C++ (relies on Phase 9 SymbolTable).
 
-Deliverables:
+### Milestone P — Polymorphism & Overloading (Phase P)
 
-- call-result variable binding
-- loop inference from call results
-- broader chain propagation
+Parameter type metadata, overload disambiguation, constructor-visible virtual dispatch (including Kotlin `detectConstructorType` and C++ smart pointer factories), optional parameter arity resolution, covariant return types (open).
 
-### 4. Broaden branch-sensitive narrowing where low-risk
+### Milestone S — Swift Parity (Phase S)
 
-After the structural work lands, selective branch refinement becomes more valuable and easier to reason about.
+For-loop binding, assignment chains, `guard let` narrowing. Blocked on tree-sitter-swift Node 22.
 
 ---
 
-## What “Production-Grade Static Analysis” Means Here
+## Open Design Questions
 
-For GitNexus, production-grade does **not** mean replacing a language compiler.
-
-A realistic target is:
-
-- strong receiver-constrained call resolution across common language idioms
-- reliable handling of typed loops, constructor-like initializers, and common patterns
-- useful return-type propagation for service/repository style code
-- enough field/property knowledge to support chained-member analysis
-- conservative behavior under ambiguity
-- predictable performance during indexing
-
-That would be sufficient for:
-
-- better call graphs
-- more accurate impact analysis
-- stronger context assembly for AI workflows
-- more trustworthy graph traversal features
+| # | Question | Status |
+|---|----------|--------|
+| 1 | Where should field-type metadata live? | ✅ Resolved: `fieldByOwner` index in SymbolTable |
+| 2 | How should ambiguity be represented? | ✅ Resolved: keep `undefined`. Conservative approach proven through 9 phases. |
+| 3 | How much receiver context for return types? | ✅ Resolved: Phase 9C `resolveMethodReturnType` filters by `ownerId`. |
+| 4 | How much branch sensitivity? | ✅ Resolved: type predicates + null checks only. No control-flow graph. (Phase 13) |
+| 5 | Field typing and chain typing — one phase or two? | ✅ Resolved: incremental delivery within phases (Phase 8/8A precedent). |
+| 6 | Phase 9B vs Phase 10? | ✅ Resolved: Phase 10 supersedes 9B via post-fixpoint replay. |
 
 ---
 
-## Suggested Milestone Definitions
+## What "Production-Grade" Means Here
 
-### Milestone A — Inference Expansion
+For GitNexus, production-grade does **not** mean replacing a language compiler. The target:
 
-Success looks like:
+- Strong receiver-constrained call resolution across common language idioms
+- Reliable handling of typed loops, constructors, and common patterns
+- Return-type propagation for service/repository code
+- Field/property knowledge for chained-member analysis
+- Inheritance-aware lookups
+- Conservative behavior under ambiguity
+- Predictable performance during indexing
 
-- loop inference works for identifier iterables and common call-expression iterables
-- simple call-result assignments benefit from return types more broadly
-- no major regression in ambiguity handling
-
-### Milestone B — Structural Member Typing
-
-Success looks like:
-
-- field/property maps exist for class-like types
-- chained access can resolve at least one segment beyond the base receiver
-- field-aware member-call resolution works in the most important languages
-
-### Milestone C — Static-Analysis Foundation
-
-Success looks like:
-
-- return-type-aware variable binding is a first-class part of environment construction
-- chains, loops, and assignments share a coherent propagation model
-- downstream graph features can rely on more than local receiver heuristics
-
----
-
-## Open Questions for Future Design
-
-These should be resolved before or during implementation of the later phases.
-
-1. **Where should field-type metadata live?**  
-   In `TypeEnv`, in `SymbolTable`, or in a dedicated side structure?
-
-2. **How should ambiguity be represented?**  
-   Is `undefined` sufficient, or do later phases need a richer "known ambiguous" state?
-
-3. **How much receiver context should return-type inference require?**  
-   Some methods only become meaningful once the receiver type is already partially known.
-
-4. **How much branch sensitivity is worth the complexity?**  
-   Some narrowing gives clear value; full control-flow typing likely does not.
-
-5. **Should field typing and chain typing be one phase or two?**  
-   Keeping them separate may reduce risk and make regressions easier to isolate.
+That supports: better call graphs, more accurate impact analysis, stronger AI context assembly, more trustworthy graph traversal.
 
 ---
 
 ## Summary
 
-The next stage of the type system should focus on **generalising what already works** before attempting compiler-like sophistication.
+**Complete:** Phases 7, 8, 9, 9C, Milestone D (A, B, C) — explicit types, constructor inference, loop inference, field/property resolution, deep chains, mixed chains, stdlib passthroughs, comment-based types, unified fixpoint with 4 binding kinds, arbitrary-depth chain propagation, MRO-aware inheritance walking, this/self resolution, object/struct destructuring, null-check narrowing — across 11 languages with full integration test coverage.
 
-The most important path is:
-
-1. extend return-type and iterable inference
-2. add field/property type knowledge
-3. promote return-type-aware inference into `TypeEnv`
-
-That path preserves the current strengths of the system while moving GitNexus materially closer to a robust, production-grade static-analysis foundation.
+**Next:** Phase 14 (cross-file binding propagation) — the architectural capstone. Phase S (Swift parity) is independent and unblocked once tree-sitter-swift Node 22 is resolved.

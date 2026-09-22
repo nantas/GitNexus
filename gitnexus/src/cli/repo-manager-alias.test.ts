@@ -33,7 +33,7 @@ test('registerRepo stores alias and rejects collisions on different paths', asyn
 
     await assert.rejects(
       registerRepo(repoB, makeMeta(repoB, 'def5678'), { repoAlias: 'neonspark-v1-subset' }),
-      /already registered/i,
+      /already (registered|used)/i,
     );
   } finally {
     if (originalHome === undefined) {

@@ -26,7 +26,12 @@ description: "Use when the user wants to review a pull request, understand what 
 6. Summarize findings with risk assessment
 ```
 
-> If "Index is stale" → resolve the pinned npx package spec from `~/.gitnexus/config.json` and run `npx -y <resolved-cli-spec> analyze` in terminal before reviewing.
+> If "Index is stale" → run `gitnexus analyze` when local CLI exists; otherwise resolve the pinned npx package spec from `~/.gitnexus/config.json` and run `npx -y <resolved-cli-spec> analyze` before reviewing.
+
+Conditional triggers:
+- If analysis touches Unity serialized/binding-state interpretation, apply `_shared/unity-resource-binding-contract.md`.
+- If analysis touches UIToolkit visual semantics, apply `_shared/unity-ui-trace-contract.md`.
+- If analysis touches Unity runtime process semantics (runtime chain closure/confidence), apply `_shared/unity-runtime-process-contract.md`.
 
 ## Checklist
 
@@ -161,3 +166,11 @@ Structure your review as:
 ### Recommendation
 APPROVE / REQUEST CHANGES / NEEDS DISCUSSION
 ```
+
+## Runtime-Chain Closure Guard
+
+- Treat runtime-chain outputs as two layers:
+  - `verifier-core`: binary verifier result (`verified_full` | `failed`)
+  - `policy-adjusted`: user-visible result after hydration policy is applied
+- If `hydration_policy=strict` and `hydrationMeta.fallbackToCompact=true`, the result is downgraded policy-adjusted output and is not closure.
+- In that downgraded state, rerun with parity before final conclusions.

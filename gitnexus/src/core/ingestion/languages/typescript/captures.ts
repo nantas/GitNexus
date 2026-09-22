@@ -1,0 +1,1081 @@
+/**
+ * `emitScopeCaptures` for TypeScript.
+ *
+ * Drives the TypeScript scope query against tree-sitter-typescript and groups
+ * raw matches into `CaptureMatch[]` for the central extractor. Layers
+ * synthesized streams on top:
+ *
+ *   1. **Import decomposition** — each `import_statement` / re-export is
+ *      re-emitted with `@import.kind/source/name/alias/type-only` markers so
+ *      `interpretTsImport` can recover the `ParsedImport` shape without
+ *      re-parsing raw text (see `import-decomposer.ts`). Unit 2 adds this;
+ *      until then, raw `@import.statement` matches flow through as-is.
+ *   2. **Dynamic imports** — `import('./m')` is re-emitted as a
+ *      decomposed `@import.statement` with `@import.kind=dynamic` so the
+ *      central extractor treats it uniformly with static imports.
+ *   3. **Function-decl arity metadata** (Unit 5) — `@declaration.parameter-count`
+ *      / `@declaration.required-parameter-count` / `@declaration.parameter-types`
+ *      synthesized onto function-like declarations so the registry can narrow
+ *      overloads.
+ *   4. **Callsite arity metadata** (Unit 5) — `@reference.arity` /
+ *      `@reference.parameter-types` on every callsite.
+ *   5. **Receiver-binding synthesis** (Unit 3) — `this` type anchors on
+ *      instance methods, with arrow-function lexical-this walk-up.
+ *
+ * Pure given the input source text. No I/O, no globals consulted.
+ */
+
+import type { Capture, CaptureMatch } from 'gitnexus-shared';
+import {
+  findNodeAtRange,
+  nodeToCapture,
+  syntheticCapture,
+  type SyntaxNode,
+} from '../../utils/ast-helpers.js';
+import { collectEsmExportEvidence, esmExportVerdict } from '../../ts-js-export-marker.js';
+import { splitImportStatement } from './import-decomposer.js';
+import { getTsParser, getTsScopeQuery, tsCachedTreeMatchesGrammar } from './query.js';
+import { recordCacheHit, recordCacheMiss } from './cache-stats.js';
+import { synthesizeTsReceiverBinding } from './receiver-binding.js';
+import { computeTsArityMetadata } from './arity-metadata.js';
+import { isArrayMethodCallbackArrow } from './array-callback.js';
+import {
+  isShadowedCjsExportAssignment,
+  isUnexportedMemberAssignmentValue,
+  isUndeclarableThisMemberValue,
+} from './cjs-export-assignment.js';
+import { hasKeyword } from '../../field-extractors/configs/helpers.js';
+import { getTreeSitterBufferSize } from '../../constants.js';
+import { parseSourceSafe } from '../../../tree-sitter/safe-parse.js';
+import { synthesizeCallableFlowCaptures } from '../../utils/callable-flow-captures.js';
+import { synthesizeCjsModuleExports } from './cjs-module-exports.js';
+import { synthesizeReceiverChainCapture } from '../../utils/receiver-chain-captures.js';
+import {
+  deriveDefaultExportHocName,
+  isBlockedDefaultExportHoc,
+  isDefaultExportHocFunctionNode,
+} from '../../ts-js-hoc-utils.js';
+
+/** tree-sitter-typescript node types for function-like scopes that may
+ *  carry a synthesized `this` binding. Kept in sync with the
+ *  `@scope.function` patterns in `query.ts`. */
+export const FUNCTION_NODE_TYPES = [
+  'method_definition',
+  'method_signature',
+  'abstract_method_signature',
+  'arrow_function',
+  'function_expression',
+  'function_declaration',
+  'generator_function_declaration',
+  // The EXPRESSION form (`const g = function* () {}`). Both queries capture it
+  // as `@scope.function`, and both `this`-boundary lists already carry it, but
+  // this list did not — so callable-flow synthesis and the body-block filter
+  // treated a generator expression as a non-function.
+  //
+  // Measured: adding it changes no graph output today. A generator-expression
+  // binding still emits a `Const` node rather than a `Function` one, so the
+  // call never resolves either way — that label comes from the definition
+  // rules, not from here, and closing it is a separate change. This entry is
+  // list consistency, enforced by
+  // `test/unit/ts-js-function-node-type-lists.test.ts`.
+  'generator_function',
+  'function_signature',
+] as const;
+
+/** Nodes whose `statement_block` child is their BODY, not a nested block.
+ *  Such a block duplicates the enclosing Function scope — see the emit-side
+ *  filter in `emitTsScopeCaptures`. */
+const FUNCTION_BODY_OWNER_TYPES: ReadonlySet<string> = new Set(FUNCTION_NODE_TYPES);
+
+/** Direct-child node types that create a BINDING in their enclosing block.
+ *  `variable_declaration` (`var`) is deliberately absent: it hoists past the
+ *  block to the function, so a block containing only `var` binds nothing. */
+const BLOCK_BINDING_CHILD_TYPES: ReadonlySet<string> = new Set([
+  'lexical_declaration',
+  'class_declaration',
+  'function_declaration',
+  'generator_function_declaration',
+]);
+
+/** True when `block` directly declares a name, i.e. it is a real environment
+ *  record rather than punctuation. A block that binds nothing is transparent to
+ *  every scope-chain walk — a lookup finds nothing in it and continues to the
+ *  parent — so emitting a scope for it costs tree size and walk depth and buys
+ *  exactly nothing. Only DIRECT children count: a declaration in a nested block
+ *  belongs to that block, which gets its own scope by the same rule. */
+const blockDeclaresBinding = (block: SyntaxNode): boolean => {
+  for (let i = 0; i < block.namedChildCount; i++) {
+    const child = block.namedChild(i);
+    if (child !== null && BLOCK_BINDING_CHILD_TYPES.has(child.type)) return true;
+  }
+  return false;
+};
+
+/** Declaration anchors that carry function-like arity metadata. */
+const FUNCTION_DECL_TAGS = ['@declaration.method', '@declaration.function'] as const;
+
+/** Callsite anchors that should carry `@reference.arity` + param types. */
+const CALL_TAGS = [
+  '@reference.call.free',
+  '@reference.call.member',
+  '@reference.call.constructor',
+] as const;
+
+const TS_CALLABLE_CAPTURE_OPTIONS = {
+  functionNodeTypes: new Set<string>(FUNCTION_NODE_TYPES),
+  callNodeTypes: new Set(['call_expression']),
+  parameterListNodeTypes: new Set(['formal_parameters', 'arguments']),
+  parameterNodeTypes: new Set([
+    'required_parameter',
+    'optional_parameter',
+    'rest_pattern',
+    'identifier',
+  ]),
+  bindingNodeTypes: new Set(['variable_declarator']),
+  assignmentNodeTypes: new Set(['assignment_expression', 'augmented_assignment_expression']),
+  identifierNodeTypes: new Set([
+    'identifier',
+    'property_identifier',
+    'shorthand_property_identifier_pattern',
+    'private_property_identifier',
+  ]),
+} as const;
+
+function pickFirstCapture(grouped: CaptureMatch, tags: readonly string[]): Capture | undefined {
+  for (const tag of tags) {
+    const cap = grouped[tag];
+    if (cap !== undefined) return cap;
+  }
+  return undefined;
+}
+
+function pickFirstNode(
+  grouped: Record<string, SyntaxNode | undefined>,
+  tags: readonly string[],
+): SyntaxNode | undefined {
+  for (const tag of tags) {
+    const node = grouped[tag];
+    if (node !== undefined) return node;
+  }
+  return undefined;
+}
+
+/**
+ * Drop `@reference.read.member` matches whose underlying `member_expression`
+ * is NOT actually a read context:
+ *
+ *   1. The member_expression is the `function:` of a `call_expression`
+ *      (it's a call, already captured as `@reference.call.member`).
+ *   2. The member_expression is the `constructor:` of a `new_expression`
+ *      (already captured as `@reference.call.constructor.qualified`).
+ *   3. The member_expression is the `left:` of an `assignment_expression` /
+ *      `augmented_assignment_expression` (it's a write, already captured
+ *      as `@reference.write.member`).
+ *   4. The member_expression is the `function:` of an `await_expression`
+ *      being called (handled by the member-call capture).
+ *   5. The member_expression is the `name:` of a `jsx_self_closing_element`
+ *      or `jsx_opening_element` (it's a JSX component invocation, already
+ *      captured as `@reference.call.member` by the TSX-only query suffix).
+ *      Without this filter, `<Foo.Bar />` would emit a phantom ACCESSES
+ *      edge to `Foo.Bar` IN ADDITION to the CALLS edge.
+ *
+ * Returns `true` when the capture should be kept as a read reference,
+ * `false` when it should be dropped.
+ */
+function shouldEmitReadMember(memberNode: SyntaxNode): boolean {
+  const parent = memberNode.parent;
+  if (parent === null) return true;
+  switch (parent.type) {
+    case 'call_expression':
+      return parent.childForFieldName('function')?.id !== memberNode.id;
+    case 'new_expression':
+      return parent.childForFieldName('constructor')?.id !== memberNode.id;
+    case 'assignment_expression':
+    case 'augmented_assignment_expression':
+      return parent.childForFieldName('left')?.id !== memberNode.id;
+    case 'jsx_self_closing_element':
+    case 'jsx_opening_element':
+      return parent.childForFieldName('name')?.id !== memberNode.id;
+    default:
+      return true;
+  }
+}
+
+/**
+ * Is this `(this)` node the `this` of a STATIC method?
+ *
+ * `this` in a static method is the class object, so `this.x = new Y()` there
+ * assigns a STATIC property and must never type the instance field of the same
+ * name (#2807). Every other context that rebinds `this` is excluded
+ * structurally, by the query's `class_body → method_definition →
+ * statement_block → expression_statement` nesting; `static` is the one
+ * constraint tree-sitter cannot carry, because it is an ANONYMOUS token with no
+ * field name and patterns cannot negate one.
+ *
+ * The caller only reaches here for a capture the query already pinned inside a
+ * class method, so the `method_definition` lookup is a short walk. Detection is
+ * the shared `hasKeyword`, which is what the TypeScript METHOD EXTRACTOR already
+ * uses to decide the same question — matching on child TEXT, and skipping the
+ * `name` field so a method literally called `static()` is not misread.
+ *
+ * Text, not node type: `static` reaches the tree as an anonymous token in some
+ * grammar versions and as a keyword node in others (see `isStaticMember` in
+ * `receiver-binding.ts`), so a `child.type === 'static'` test silently stops
+ * firing on a grammar bump and every static `this.x = new Y()` starts typing the
+ * instance field of that name. `hasKeyword` scans the whole `method_definition`
+ * rather than stopping at the name, which is safe here because a
+ * `method_definition`'s own children are its modifiers, name, parameters and
+ * body — a mention of `static` inside the BODY is a descendant of the body node,
+ * never a direct child.
+ */
+function isStaticMethodThis(thisNode: SyntaxNode): boolean {
+  const method = findSelfOrAncestorOfType(thisNode, 'method_definition');
+  if (method === null) return false;
+  return hasKeyword(method, 'static');
+}
+
+/** The class-field declaration node a field `@type-binding.*` match anchors on
+ *  in TypeScript/TSX. JavaScript spells the same construct `field_definition`
+ *  and passes its own set in — the predicate below is shared because both
+ *  grammars carry `static` identically, but each language must NAME its own
+ *  node type. Listing both here made `field_definition` a dead literal in the
+ *  typescript grammar, which `grammar-literal-validation` fails on: the gate
+ *  checks every literal against the grammar of the FILE it appears in, and a
+ *  node type that is dead there is exactly how a guard silently stops firing. */
+export const TS_CLASS_FIELD_DEFINITION_TYPES: ReadonlySet<string> = new Set([
+  'public_field_definition',
+]);
+
+/**
+ * Is this type-binding anchored on a **`static`** class field?
+ *
+ * A static member belongs to the CLASS OBJECT; an instance field belongs to
+ * instances. JavaScript and TypeScript keep the two in separate namespaces, so
+ * one class may legally declare both under one name:
+ *
+ *     class Host {
+ *       p = new Right();
+ *       static p = new Wrong();      // legal — a different member
+ *       hit() { return this.p.hit(); }   // `this.p` is Right
+ *     }
+ *
+ * Both field patterns anchor their binding on the same CLASS scope with the
+ * same `constructor-inferred` source, and `scope-extractor` breaks a
+ * same-strength tie with `>=` — last match wins. So the static field silently
+ * RETYPED the instance field of that name and `this.p.hit()` resolved to
+ * `Wrong.hit`: not a missing edge but a wrong one, the failure mode
+ * `scope-resolution/passes/compound-receiver.ts` exists to avoid. The scope
+ * tree has one `typeBindings` map per scope with no static/instance split, so a
+ * static field cannot be recorded separately — it is dropped instead.
+ *
+ * WHAT THAT COSTS, MEASURED rather than assumed (#2807 review, S7). An earlier
+ * version of this comment called the cost "a missed edge beats a wrong one".
+ * Only half of that is true, and the false half is the one that matters:
+ *
+ *   shape                       with the drop     without it
+ *   --------------------------  ----------------  ----------------
+ *   `this.p` (instance twin)    Right  ✓          Wrong  ✗
+ *   `Host.p` (static twin)      Right  ✗ WRONG    Wrong  ✓
+ *   `Host.q` (static, no twin)  — none, missed    Wrong  ✓
+ *
+ * For a class declaring BOTH twins the wrong edge does not disappear, it MOVES:
+ * `Host.p` now reads the INSTANCE twin's binding, because that is what is left
+ * in the map under that name. Only the no-twin case — the common static shape —
+ * is a true missed edge.
+ *
+ * The trade is still the right one, since `this.p` is overwhelmingly the more
+ * common access and a `Host.p` static chain is the cheaper place to be wrong.
+ * It is recorded here as a wrong edge rather than described as a missing one so
+ * that the next person weighing it is weighing the real thing. Closing it
+ * properly needs a static/instance split that the shared receiver fold cannot
+ * express today — `foldReceiverChain` in
+ * `scope-resolution/passes/compound-receiver.ts` explicitly discards whether a
+ * chain's base was a class reference or a value — so it is a separate change
+ * with a `SCHEMA_BUMP`, not a tweak here. Both shapes are pinned by rows in
+ * `test/integration/resolvers/inferred-field-receiver-matrix.test.ts`
+ * (`static-read-of-a-same-name-twin-picks-up-the-instance-type`,
+ * `static-read-without-a-twin-loses-its-type`), so the cost moves visibly.
+ *
+ * Sibling of {@link isStaticMethodThis}, which drops the ASSIGNMENT form
+ * (`this.x = new Y()` inside a static method). Together they cover both ways a
+ * static member can reach the field-typing path. This is an emit-side filter
+ * for the same reason that one is: `static` is an ANONYMOUS token on the
+ * declaration node, and a tree-sitter pattern cannot negate one.
+ *
+ * Detection is the shared `hasKeyword` — matching on child TEXT, never
+ * `child.type === 'static'`, because the token reaches the tree as an anonymous
+ * token in some grammar versions and a keyword node in others (see
+ * `isStaticMember` in `receiver-binding.ts`); a node-type test silently stops
+ * firing on a grammar bump and every static field starts retyping its instance
+ * twin again. Verified against both grammars in use here: `static` is an
+ * anonymous direct child of the caller's field-definition node —
+ * `public_field_definition` in TypeScript, `field_definition` in JavaScript —
+ * ahead of the name. Each language passes its OWN node-type set rather than the
+ * predicate holding both: a literal is only valid in the grammar of the file it
+ * appears in, and `grammar-literal-validation` fails a dead one.
+ *
+ * One deliberate over-fire: `hasKeyword` skips the node's `name` FIELD, and the
+ * JavaScript grammar names a field's name `property:`, not `name:` — so the
+ * legal-but-rare JavaScript field literally called `static`
+ * (`class C { static = new Right(); }`) reads as static and goes untyped. That
+ * is a declined binding, the safe direction of the same trade.
+ */
+export function isStaticClassFieldBinding(
+  anchorNode: SyntaxNode | undefined,
+  fieldDefinitionTypes: ReadonlySet<string>,
+): boolean {
+  if (anchorNode === undefined) return false;
+  if (!fieldDefinitionTypes.has(anchorNode.type)) return false;
+  return hasKeyword(anchorNode, 'static');
+}
+
+/** Walks the parent chain from `node` (inclusive), returning the first node
+ *  whose type matches, or null. Faster than `findNodeAtRange` when the caller
+ *  already holds the anchor node — avoids re-scanning the tree from the root. */
+function findSelfOrAncestorOfType(node: SyntaxNode | undefined, type: string): SyntaxNode | null {
+  if (node === undefined) return null;
+  let current: SyntaxNode | null = node;
+  while (current !== null) {
+    if (current.type === type) return current;
+    current = current.parent;
+  }
+  return null;
+}
+
+/** Walks the parent chain from `node` (inclusive), returning the first node
+ *  whose type is in the set, or null. Plural form of {@link findSelfOrAncestorOfType}. */
+function findSelfOrAncestorOfTypes(
+  node: SyntaxNode | undefined,
+  types: readonly string[],
+): SyntaxNode | null {
+  if (node === undefined) return null;
+  let current: SyntaxNode | null = node;
+  while (current !== null) {
+    if (types.includes(current.type)) return current;
+    current = current.parent;
+  }
+  return null;
+}
+
+export function emitTsScopeCaptures(
+  sourceText: string,
+  filePath: string,
+  cachedTree?: unknown,
+): readonly CaptureMatch[] {
+  // Reuse a pre-parsed Tree when the caller passes one via `cachedTree`; a
+  // miss re-parses. (The cache is currently always empty — its only producer,
+  // the sequential parser, was removed — so this re-parses in practice.) The
+  // cachedTree parameter is typed `unknown` at the LanguageProvider contract
+  // layer; cast here at the use site.
+  //
+  // Grammar selection: `.tsx` files are parsed with the TSX grammar,
+  // `.ts` files with the TypeScript grammar. The two grammars have
+  // separate node-type id spaces, so a Query compiled against one
+  // cannot match a Tree produced by the other. We validate the cached
+  // tree's grammar against the file extension and fall back to a
+  // fresh parse if they disagree (e.g. a worker-mode parse landed
+  // with the wrong grammar pinned).
+  let tree = cachedTree as ReturnType<ReturnType<typeof getTsParser>['parse']> | undefined;
+  if (tree !== undefined && !tsCachedTreeMatchesGrammar(tree, filePath)) {
+    tree = undefined;
+  }
+  if (tree === undefined) {
+    tree = parseSourceSafe(getTsParser(filePath), sourceText, undefined, {
+      bufferSize: getTreeSitterBufferSize(sourceText),
+    });
+    recordCacheMiss();
+  } else {
+    recordCacheHit();
+  }
+
+  const rawMatches = getTsScopeQuery(filePath).matches(tree.rootNode);
+  // Export evidence, read once per file (see `ts-js-export-marker.ts`).
+  const exportEvidence = collectEsmExportEvidence(tree.rootNode, filePath);
+  const out: CaptureMatch[] = [];
+
+  for (const m of rawMatches) {
+    // Group captures by their tag name. Tree-sitter strips the leading
+    // `@`; we put it back so the central extractor's prefix lookups
+    // (`@scope.`, `@declaration.`, …) work.
+    const grouped: Record<string, Capture> = {};
+    const groupedNodes: Record<string, SyntaxNode> = {};
+    for (const c of m.captures) {
+      const tag = '@' + c.name;
+      grouped[tag] = nodeToCapture(tag, c.node);
+      groupedNodes[tag] = c.node;
+    }
+    if (Object.keys(grouped).length === 0) continue;
+
+    // Decompose each `import_statement` / re-export `export_statement`
+    // so `interpretTsImport` sees the kind/source/name/alias markers
+    // it consumes. The raw query anchor carries only @import.statement.
+    // Side-effect imports emit a non-binding marker so finalize can keep
+    // the file-level dependency.
+    if (grouped['@import.statement'] !== undefined) {
+      const stmtCapture = grouped['@import.statement'];
+      const stmtNode =
+        findSelfOrAncestorOfTypes(groupedNodes['@import.statement'], [
+          'import_statement',
+          'export_statement',
+        ]) ??
+        findNodeAtRange(tree.rootNode, stmtCapture.range, 'import_statement') ??
+        findNodeAtRange(tree.rootNode, stmtCapture.range, 'export_statement');
+      if (stmtNode !== null) {
+        const decomposed = splitImportStatement(stmtNode);
+        for (const d of decomposed) out.push(d);
+      }
+      // If decomposition yielded nothing (malformed/bare anchor), drop
+      // the match. Emitting a bare
+      // @import.statement without kind/source would confuse the
+      // central extractor.
+      continue;
+    }
+
+    // Dynamic imports — decompose via the same path. `@import.dynamic`
+    // is anchored on a `call_expression`, which the decomposer's
+    // `splitDynamicImport` branch consumes.
+    if (grouped['@import.dynamic'] !== undefined) {
+      const dynCapture = grouped['@import.dynamic'];
+      const callNode =
+        findSelfOrAncestorOfType(groupedNodes['@import.dynamic'], 'call_expression') ??
+        findNodeAtRange(tree.rootNode, dynCapture.range, 'call_expression');
+      if (callNode !== null) {
+        const decomposed = splitImportStatement(callNode);
+        for (const d of decomposed) out.push(d);
+      }
+      continue;
+    }
+
+    // A `statement_block` that IS a function body adds nothing: the enclosing
+    // Function scope already provides that environment record, so emitting one
+    // here just puts a redundant level inside EVERY function for every
+    // scope-chain walk to step through. Measured on a 762-file TypeScript
+    // corpus, keeping them cost ~6% of total analyze wall time; dropping them
+    // keeps the block scopes that matter (if/else/for/while/try/bare blocks,
+    // where `let`/`const` genuinely shadow) at no measurable cost.
+    //
+    // Semantically safe: nothing can be declared between a function and its
+    // own body, so a binding in either resolves identically.
+    if (grouped['@scope.block'] !== undefined) {
+      const blockNode = groupedNodes['@scope.block'];
+      const parentType = blockNode?.parent?.type;
+      if (parentType !== undefined && FUNCTION_BODY_OWNER_TYPES.has(parentType)) continue;
+      if (blockNode === undefined || !blockDeclaresBinding(blockNode)) continue;
+    }
+
+    // Filter out `@reference.read.member` matches whose AST parent tells
+    // us they are actually calls / writes / constructor invocations. The
+    // tree-sitter pattern is context-free and matches every member_expression;
+    // we rely on this emit-side filter so the query stays simple.
+    if (grouped['@reference.read.member'] !== undefined) {
+      const anchor = grouped['@reference.read.member'];
+      const memberNode =
+        findSelfOrAncestorOfType(groupedNodes['@reference.read.member'], 'member_expression') ??
+        findNodeAtRange(tree.rootNode, anchor.range, 'member_expression');
+      if (memberNode === null || !shouldEmitReadMember(memberNode)) {
+        continue;
+      }
+    }
+
+    // `this.<field> = new …` inside a STATIC method types a static property,
+    // not the instance field of the same name (#2807). Every other `this`-
+    // rebinding context is already excluded by the pattern's nesting — see the
+    // note on it in `query.ts`; `static` is an anonymous token, so no pattern
+    // can negate it and the last case is dropped here.
+    const thisFieldNode = groupedNodes['@type-binding.this-field'];
+    if (thisFieldNode !== undefined && isStaticMethodThis(thisFieldNode)) {
+      continue;
+    }
+
+    // …and a `static` FIELD is a member of the class object, not of instances,
+    // so it must not type the instance field of the same name either — see
+    // `isStaticClassFieldBinding`. Both class-field anchors are tested: the
+    // initializer form (`static p = new Wrong()`, `@type-binding.constructor`)
+    // and the annotated form (`static p: Wrong`, `@type-binding.annotation`),
+    // which collide on the Class scope the same way. The predicate self-gates on
+    // the anchor's node type, so the local `variable_declarator` patterns that
+    // share these tags are untouched.
+    if (
+      isStaticClassFieldBinding(
+        groupedNodes['@type-binding.constructor'],
+        TS_CLASS_FIELD_DEFINITION_TYPES,
+      ) ||
+      isStaticClassFieldBinding(
+        groupedNodes['@type-binding.annotation'],
+        TS_CLASS_FIELD_DEFINITION_TYPES,
+      )
+    ) {
+      continue;
+    }
+
+    // #1876: drop @declaration.function for array higher-order-method
+    // callbacks (`const x = arr.map(a => …)`). The HOC-wrapped-arrow
+    // pattern matches them, but the binding holds a value, not a callable.
+    // The binding keeps its separate @declaration.const / .variable match,
+    // and the arrow's own @scope.function match (a different pattern) is
+    // untouched, so inner-call attribution falls through to the enclosing
+    // scope instead of a phantom Function.
+    const fnDeclAnchor = grouped['@declaration.function'];
+    if (fnDeclAnchor !== undefined) {
+      const arrowNode = findFunctionNode(
+        tree.rootNode,
+        fnDeclAnchor.range,
+        groupedNodes['@declaration.function'],
+      );
+      if (arrowNode !== null && isArrayMethodCallbackArrow(arrowNode)) {
+        continue;
+      }
+      if (arrowNode !== null && isBlockedDefaultExportHoc(arrowNode)) {
+        continue;
+      }
+      // #2723: a CJS export assignment must not register a SECOND module-scope
+      // declaration for a name the file already declares lexically — the name
+      // would become ambiguous and the resolver would drop the intra-module
+      // edge that resolved before #2723.
+      if (arrowNode !== null && isShadowedCjsExportAssignment(arrowNode, tree.rootNode)) {
+        continue;
+      }
+      // #2723 follow-up: the member-assignment rule matches ANY identifier
+      // receiver so an `exports` alias can be recognised. A receiver that is
+      // not the exports object declares nothing at module scope — drop it, or
+      // every `obj.handler = fn` would bind `handler` as a module symbol.
+      if (arrowNode !== null && isUnexportedMemberAssignmentValue(arrowNode, tree.rootNode)) {
+        continue;
+      }
+
+      // A `this.X = fn` declares a module symbol ONLY at the top level of a
+      // CommonJS file, where `this` is `module.exports`. Inside a function it
+      // is an instance member (a Method with an owner, no module binding), and
+      // in ESM top-level `this` is undefined and exports nothing.
+      if (arrowNode !== null && isUndeclarableThisMemberValue(arrowNode, tree.rootNode)) {
+        continue;
+      }
+    }
+
+    if (fnDeclAnchor !== undefined) {
+      const fnNode = findFunctionNode(
+        tree.rootNode,
+        fnDeclAnchor.range,
+        groupedNodes['@declaration.function'],
+      );
+      if (fnNode !== null && isDefaultExportHocFunctionNode(fnNode)) {
+        grouped['@declaration.name'] = syntheticCapture(
+          '@declaration.name',
+          fnNode,
+          deriveDefaultExportHocName(filePath),
+        );
+        // This declaration's name is synthetic, so the later query-name
+        // marker cannot see it. The HOC predicate already proves the export.
+        grouped['@declaration.is-exported'] = syntheticCapture(
+          '@declaration.is-exported',
+          fnNode,
+          'true',
+        );
+      }
+    }
+
+    // Synthesize arity metadata on function-like declaration anchors
+    // before pushing the match. The registry uses these to narrow
+    // overloads — TypeScript supports overload signatures via
+    // function_signature, so `parameterTypes` is populated when
+    // available.
+    const declAnchor = pickFirstCapture(grouped, FUNCTION_DECL_TAGS);
+    const declAnchorNode = pickFirstNode(groupedNodes, FUNCTION_DECL_TAGS);
+    if (declAnchor !== undefined) {
+      const fnNode = findFunctionNode(tree.rootNode, declAnchor.range, declAnchorNode);
+      if (fnNode !== null) {
+        const arity = computeTsArityMetadata(fnNode);
+        if (arity.parameterCount !== undefined) {
+          grouped['@declaration.parameter-count'] = syntheticCapture(
+            '@declaration.parameter-count',
+            fnNode,
+            String(arity.parameterCount),
+          );
+        }
+        if (arity.requiredParameterCount !== undefined) {
+          grouped['@declaration.required-parameter-count'] = syntheticCapture(
+            '@declaration.required-parameter-count',
+            fnNode,
+            String(arity.requiredParameterCount),
+          );
+        }
+        if (arity.parameterTypes !== undefined) {
+          grouped['@declaration.parameter-types'] = syntheticCapture(
+            '@declaration.parameter-types',
+            fnNode,
+            JSON.stringify(arity.parameterTypes),
+          );
+        }
+      }
+    }
+
+    // Synthesize `@reference.arity` on every callsite so the registry's
+    // arity filter can narrow overloads. Count the `argument` named
+    // children of the backing `arguments` node. TypeScript constructor
+    // calls use `new_expression`; regular calls use `call_expression`.
+    //
+    // JSX call anchors (`jsx_self_closing_element` / `jsx_opening_element`
+    // captured by the TSX-only suffix in `query.ts`) intentionally do NOT carry
+    // arity metadata. A JSX component used as a call argument (e.g.
+    // `render(<Foo .../>)`) is itself a @reference.call.* anchor; without a guard
+    // the ascent below would climb from it into the enclosing call_expression and
+    // mis-attribute that call's arity to the component. The early guard skips
+    // arity synthesis for JSX anchors — restoring the pre-#1951 range-based
+    // behavior (the old findNodeAtRange found no call_expression at the JSX
+    // element's range). The guard lives here, not inside findSelfOrAncestorOfTypes
+    // (shared with the import-statement and function-scope ascents). This is
+    // acceptable for React: components are virtually never overloaded in the
+    // current GitNexus graph model, so name-only dispatch matches the single
+    // component definition. A future props-arity-aware synthesizer would count
+    // `jsx_attribute` children of the opening tag instead of `arguments`.
+    const callAnchor = pickFirstCapture(grouped, CALL_TAGS);
+    const callAnchorNode = pickFirstNode(groupedNodes, CALL_TAGS);
+    const anchorIsJsxElement =
+      callAnchorNode?.type === 'jsx_self_closing_element' ||
+      callAnchorNode?.type === 'jsx_opening_element';
+    if (
+      callAnchor !== undefined &&
+      grouped['@reference.arity'] === undefined &&
+      !anchorIsJsxElement
+    ) {
+      const callNode =
+        findSelfOrAncestorOfTypes(callAnchorNode, ['call_expression', 'new_expression']) ??
+        findNodeAtRange(tree.rootNode, callAnchor.range, 'call_expression') ??
+        findNodeAtRange(tree.rootNode, callAnchor.range, 'new_expression');
+      if (callNode !== null) {
+        const argList = callNode.childForFieldName('arguments');
+        const args: SyntaxNode[] =
+          argList === null
+            ? []
+            : argList.namedChildren.filter(
+                (c): c is SyntaxNode => c !== null && c.type !== 'comment',
+              );
+        grouped['@reference.arity'] = syntheticCapture(
+          '@reference.arity',
+          callNode,
+          String(args.length),
+        );
+
+        const argTypes = args.map((arg) => inferArgType(arg));
+        grouped['@reference.parameter-types'] = syntheticCapture(
+          '@reference.parameter-types',
+          callNode,
+          JSON.stringify(argTypes),
+        );
+      }
+    }
+
+    // Structural receiver chain for a call whose receiver is itself an
+    // expression, so resolution can type it by folding over structure
+    // instead of re-parsing the receiver's source text. Self-gating: a
+    // non-call match, an absent receiver, or a chain with no nameable base
+    // all leave `grouped` untouched.
+    // `@declaration.is-exported`: a verdict for every declaration the file's
+    // export surface can decide (see `ts-js-export-marker.ts`); nothing where
+    // it cannot, because absence is the honest answer there.
+    const declNameNode = groupedNodes['@declaration.name'];
+    if (exportEvidence !== undefined && declNameNode !== undefined) {
+      const verdict = esmExportVerdict(declNameNode, exportEvidence);
+      if (verdict !== undefined) {
+        grouped['@declaration.is-exported'] = syntheticCapture(
+          '@declaration.is-exported',
+          declNameNode,
+          verdict ? 'true' : 'false',
+        );
+      }
+    }
+    synthesizeReceiverChainCapture(grouped, groupedNodes['@reference.receiver']);
+    out.push(grouped);
+
+    // Synthesize `this` receiver type-bindings on every function-like
+    // scope that is structurally a class member. `receiver-binding.ts`
+    // handles the walk-up (method, method_signature, abstract
+    // signature, arrow/function-expression assigned to a class field).
+    // Arrow functions nested inside method bodies rely on scope-chain
+    // lookup instead of synthesis — covered by `tsReceiverBinding`.
+    const scopeFnAnchor = grouped['@scope.function'];
+    if (scopeFnAnchor !== undefined) {
+      const fnNode = findFunctionNode(
+        tree.rootNode,
+        scopeFnAnchor.range,
+        groupedNodes['@scope.function'],
+      );
+      if (fnNode !== null) {
+        const synth = synthesizeTsReceiverBinding(fnNode);
+        if (synth !== null) out.push(synth);
+      }
+    }
+  }
+
+  // Synthesize object-destructuring type bindings. The tree-sitter query
+  // alone can't express "give me the field NAME and the RHS identifier
+  // together" in a way that produces usable @type-binding.name /
+  // @type-binding.type captures, so we walk `variable_declarator` nodes
+  // whose `name:` is an `object_pattern` and synthesize per-field
+  // bindings keyed to the receiver-path `rhsName.fieldName`. The
+  // compound-receiver resolver's Case 3b then walks that path when the
+  // destructured local is used as a receiver (e.g. `address.save()`).
+  synthesizeDestructuringBindings(tree.rootNode, out);
+  synthesizeForOfMapTupleBindings(tree.rootNode, out);
+  synthesizeInstanceofNarrowings(tree.rootNode, out);
+  synthesizeTsInheritanceReferences(tree.rootNode, out);
+  out.push(...synthesizeCallableFlowCaptures(tree.rootNode, TS_CALLABLE_CAPTURE_OPTIONS));
+
+  // CommonJS module-export declarations (#2723). Shared with the JavaScript
+  // emitter: a `.ts` file in a CommonJS package uses the same forms, and
+  // without this the default-export NODE was emitted with nothing declaring it
+  // — the "found, zero callers" state this work exists to remove (#2729 F7).
+  synthesizeCjsModuleExports(tree.rootNode, filePath, out);
+
+  return out;
+}
+
+/**
+ * Synthesize `@reference.inherits` captures from TypeScript class heritage so
+ * the registry-primary scope-resolution path emits EXTENDS / IMPLEMENTS edges
+ * (mirrors C# `synthesizeCsharpInheritanceReferences` / JS
+ * `synthesizeJsInheritanceReferences`). Without this, TS inheritance edges came
+ * only from the legacy heritage-capture leg (removed in #942), which the worker
+ * pipeline drops for registry-primary languages — yielding 0 inheritance edges
+ * in worker mode (issue #1951).
+ *
+ * Scope is intentionally limited to a `class_declaration`'s `class_heritage`
+ * `extends_clause` value + `implements_clause` types, matching the legacy
+ * TypeScript heritage query's class scope (TYPESCRIPT_QUERIES). Generic
+ * bases agree across both paths: `extends Base<T>` is captured by the legacy
+ * `extends_clause value: (identifier)` already (the `type_arguments` are a
+ * sibling field), and `implements IFoo<T>` is captured by a legacy clause
+ * widened to read the `generic_type`'s `name:` identifier — so the registry
+ * path keeps parity on SIMPLE (unqualified) generic bases too (#1951).
+ * Qualified bases (`ns.Base`, `ns.Base<T>`, `ns.IFoo<T>`) are ALSO now at parity
+ * (#1956 tri-review U2): the synth resolves them by their member_expression /
+ * nested_type_identifier tail, and the legacy heritage query was widened with
+ * matching arms (member_expression for extends, nested_type_identifier plain +
+ * generic-wrapped for implements).
+ *
+ * `interface_declaration` and `abstract_class_declaration` heritage IS emitted
+ * (#2842 review; both were silently skipped before, so `interface B extends A`
+ * and `abstract class X implements I` produced no edge and every dispatch walk
+ * dead-ended on a bodiless declaration). They reach their bases by different
+ * shapes: an abstract class carries the same `class_heritage` child a concrete
+ * one does, while an interface's bases hang off `extends_type_clause` directly. The EXTENDS-vs-IMPLEMENTS split is decided downstream from the
+ * resolved target's symbol kind in `preEmitInheritanceEdges` (class-extends →
+ * EXTENDS, implements-interface / interface-target → IMPLEMENTS), so all bases
+ * are emitted with the same `inherits` kind here. The base lookup name is
+ * normalized to its bare simple identifier (`BaseModel<string>` → `BaseModel`,
+ * `models.Base` → `Base`) so `findClassBindingInScope` resolves it.
+ */
+function synthesizeTsInheritanceReferences(root: SyntaxNode, out: CaptureMatch[]): void {
+  const stack: SyntaxNode[] = [root];
+  for (;;) {
+    const node = stack.pop();
+    if (node === undefined) break;
+    for (const child of node.namedChildren) {
+      if (child !== null) stack.push(child);
+    }
+
+    // `interface B extends A, C` hangs its bases off an `extends_type_clause`
+    // DIRECTLY on the interface — there is no `class_heritage` wrapper, so the
+    // class path below cannot reach them (#2842 review). The clause's `type`
+    // field is `multiple: true`, so `childForFieldName('type')` would silently
+    // return only `A` and drop `C`; iterate the named children instead.
+    if (node.type === 'interface_declaration') {
+      for (const child of node.namedChildren) {
+        if (child === null || child.type !== 'extends_type_clause') continue;
+        for (const base of child.namedChildren) {
+          emitTsInheritanceBase(base, out);
+        }
+      }
+      continue;
+    }
+
+    // `abstract class X implements I` carries an identical `class_heritage`
+    // child, so the existing body handles it once the node type is admitted.
+    // Omitting it severed the only link between an interface and the concrete
+    // classes below an abstract base — a whole subtree, not a leaf.
+    if (node.type !== 'class_declaration' && node.type !== 'abstract_class_declaration') continue;
+
+    // Find the `class_heritage` child (holds extends / implements clauses).
+    let heritage: SyntaxNode | null = null;
+    for (const child of node.namedChildren) {
+      if (child !== null && child.type === 'class_heritage') {
+        heritage = child;
+        break;
+      }
+    }
+    if (heritage === null) continue;
+
+    for (const clause of heritage.namedChildren) {
+      if (clause === null) continue;
+      if (clause.type === 'extends_clause') {
+        // `extends Foo` / `extends Foo<T>` — the base is the `value:` field
+        // (an identifier; generics live in a sibling `type_arguments`).
+        const value = clause.childForFieldName('value') ?? clause.firstNamedChild;
+        emitTsInheritanceBase(value, out);
+      } else if (clause.type === 'implements_clause') {
+        // `implements IFoo, IBar<T>` — each base type is a direct named child.
+        for (const base of clause.namedChildren) {
+          emitTsInheritanceBase(base, out);
+        }
+      }
+    }
+  }
+}
+
+/** Emit one `@reference.inherits` match for a TS heritage base, normalizing
+ *  the lookup name to its bare simple identifier. No-ops on null / non-type
+ *  nodes or when the bare name can't be derived. */
+function emitTsInheritanceBase(base: SyntaxNode | null, out: CaptureMatch[]): void {
+  if (base === null) return;
+  const nameNode = terminalTsTypeNameNode(base);
+  if (nameNode === null) return;
+  out.push({
+    '@reference.inherits': nodeToCapture('@reference.inherits', base),
+    '@reference.name': nodeToCapture('@reference.name', nameNode),
+  });
+}
+
+/** Resolve a TypeScript heritage base node to its bare simple-identifier node.
+ *  `Foo` → `Foo`, `Foo<T>` (generic_type) → `Foo`, `models.Base`
+ *  (nested_type_identifier / member_expression) → `Base`. Mirrors C#'s
+ *  `terminalTypeNameNode`; returns null when no leaf identifier is reachable. */
+function terminalTsTypeNameNode(node: SyntaxNode): SyntaxNode | null {
+  switch (node.type) {
+    case 'identifier':
+    case 'type_identifier':
+    // `extends ns.Base` parses as a member_expression whose tail is a
+    // `property_identifier` (not a type_identifier) — treat it as a leaf name.
+    case 'property_identifier':
+      return node;
+    case 'generic_type': {
+      // generic_type has a `name:` field (type_identifier / nested_type_identifier);
+      // recurse to strip the type_arguments and reach the bare base identifier.
+      const name = node.childForFieldName('name') ?? node.firstNamedChild;
+      return name === null ? null : terminalTsTypeNameNode(name);
+    }
+    case 'nested_type_identifier':
+    case 'member_expression': {
+      // Qualified `A.B.Base` → tail identifier `Base`.
+      const tail = node.lastNamedChild;
+      return tail === null ? null : terminalTsTypeNameNode(tail);
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Walk the AST and synthesize type-binding captures for object
+ * destructuring of the form `const { field } = rhs` or
+ * `const { field: alias } = rhs`. Pushes one synthetic CaptureMatch
+ * per destructured identifier with:
+ *
+ *   - `@type-binding.name` → the local identifier
+ *   - `@type-binding.type` → the compound path `rhs.field`
+ *   - `@type-binding.destructured` anchor
+ *
+ * Only fires when the RHS is a bare identifier — more complex RHS
+ * shapes (call_expression, member_expression) resolve via the normal
+ * type-alias + chain-follow paths on the RHS first, then the field
+ * walk catches the destructured identifier on a second fixpoint pass.
+ * Left as a follow-up optimization.
+ */
+function synthesizeDestructuringBindings(root: SyntaxNode, out: CaptureMatch[]): void {
+  const stack: SyntaxNode[] = [root];
+  for (;;) {
+    const node = stack.pop();
+    if (node === undefined) break;
+    for (const child of node.namedChildren) {
+      if (child !== null) stack.push(child);
+    }
+    if (node.type !== 'variable_declarator') continue;
+    const nameNode = node.childForFieldName('name');
+    const valueNode = node.childForFieldName('value');
+    if (nameNode === null || valueNode === null) continue;
+    if (nameNode.type !== 'object_pattern') continue;
+    if (valueNode.type !== 'identifier') continue;
+    const rhsName = valueNode.text;
+    for (const fieldNode of nameNode.namedChildren) {
+      if (fieldNode === null) continue;
+      if (fieldNode.type === 'shorthand_property_identifier_pattern') {
+        // `const { address } = user`
+        const localName = fieldNode.text;
+        out.push({
+          '@type-binding.name': syntheticCapture('@type-binding.name', fieldNode, localName),
+          '@type-binding.type': syntheticCapture(
+            '@type-binding.type',
+            fieldNode,
+            `${rhsName}.${localName}`,
+          ),
+          '@type-binding.destructured': syntheticCapture(
+            '@type-binding.destructured',
+            fieldNode,
+            fieldNode.text,
+          ),
+        });
+      } else if (fieldNode.type === 'pair_pattern') {
+        // `const { address: addr } = user`
+        const key = fieldNode.childForFieldName('key');
+        const value = fieldNode.childForFieldName('value');
+        if (key === null || value === null) continue;
+        if (value.type !== 'identifier') continue;
+        const fieldName = key.text;
+        const localName = value.text;
+        out.push({
+          '@type-binding.name': syntheticCapture('@type-binding.name', value, localName),
+          '@type-binding.type': syntheticCapture(
+            '@type-binding.type',
+            fieldNode,
+            `${rhsName}.${fieldName}`,
+          ),
+          '@type-binding.destructured': syntheticCapture(
+            '@type-binding.destructured',
+            fieldNode,
+            fieldNode.text,
+          ),
+        });
+      }
+    }
+  }
+}
+
+/**
+ * `for (const [k, v] of mapId)` over a `Map<K,V>` — synthesize per-slot
+ * type bindings so `v` resolves like a `Map` iterator tuple element.
+ * Uses sentinel `__MAP_TUPLE_i__:rhs` consumed by compound-receiver.
+ */
+function synthesizeForOfMapTupleBindings(root: SyntaxNode, out: CaptureMatch[]): void {
+  const stack: SyntaxNode[] = [root];
+  for (;;) {
+    const node = stack.pop();
+    if (node === undefined) break;
+    for (const child of node.namedChildren) {
+      if (child !== null) stack.push(child);
+    }
+    if (node.type !== 'for_in_statement') continue;
+    const left = node.childForFieldName('left');
+    const right = node.childForFieldName('right');
+    if (left === null || right === null) continue;
+    if (left.type !== 'array_pattern' || right.type !== 'identifier') continue;
+    const rhs = right.text;
+    let slot = 0;
+    for (const child of left.namedChildren) {
+      if (child === null || child.type !== 'identifier') continue;
+      const localName = child.text;
+      out.push({
+        '@type-binding.name': syntheticCapture('@type-binding.name', child, localName),
+        '@type-binding.type': syntheticCapture(
+          '@type-binding.type',
+          child,
+          `__MAP_TUPLE_${slot}__:${rhs}`,
+        ),
+        '@type-binding.map-tuple-entry': syntheticCapture(
+          '@type-binding.map-tuple-entry',
+          child,
+          String(slot),
+        ),
+      });
+      slot++;
+    }
+  }
+}
+
+/**
+ * `if (x instanceof User) { x.save() }` — synthesize a `User` type binding
+ * for `x` anchored in the consequence block so scope-chain lookup inside
+ * the then-branch sees the narrowed type.
+ *
+ * **Known limitation:** the LHS must be a bare `identifier` and the RHS
+ * an `identifier`/`type_identifier`. Member-expression LHS such as
+ * `if (user.address instanceof Address)` is intentionally NOT synthesized
+ * — narrowing a property-access target requires a stable storage key
+ * the binding layer can hold, which member chains don't supply. Field-
+ * type resolution covers the common case for those receivers via
+ * declared types instead.
+ */
+function synthesizeInstanceofNarrowings(root: SyntaxNode, out: CaptureMatch[]): void {
+  const stack: SyntaxNode[] = [root];
+  for (;;) {
+    const node = stack.pop();
+    if (node === undefined) break;
+    for (const child of node.namedChildren) {
+      if (child !== null) stack.push(child);
+    }
+    if (node.type !== 'if_statement') continue;
+    const cond = node.childForFieldName('condition');
+    if (cond === null) continue;
+    const inner = cond.type === 'parenthesized_expression' ? cond.namedChildren[0] : cond;
+    if (inner === null || inner.type !== 'binary_expression') continue;
+    const op = inner.childForFieldName('operator');
+    const left = inner.childForFieldName('left');
+    const right = inner.childForFieldName('right');
+    if (op === null || left === null || right === null) continue;
+    if (op.type !== 'instanceof') continue;
+    if (left.type !== 'identifier') continue;
+    if (right.type !== 'identifier' && right.type !== 'type_identifier') continue;
+    const varName = left.text;
+    const typeName = right.text;
+    const cons = node.childForFieldName('consequence');
+    if (cons === null) continue;
+    out.push({
+      '@type-binding.name': syntheticCapture('@type-binding.name', cons, varName),
+      '@type-binding.type': syntheticCapture('@type-binding.type', right, typeName),
+      '@type-binding.instanceof-narrow': syntheticCapture(
+        '@type-binding.instanceof-narrow',
+        cons,
+        '1',
+      ),
+    });
+  }
+}
+
+/** Infer a TypeScript argument expression's static type from literal
+ *  shapes. Returns `''` when the arg has no statically-derivable type
+ *  (identifiers, member accesses, etc.) — consumers treat unknown as
+ *  any-match during overload narrowing. */
+function inferArgType(argNode: SyntaxNode): string {
+  switch (argNode.type) {
+    case 'number':
+      return 'number';
+    case 'string':
+    case 'template_string':
+      return 'string';
+    case 'true':
+    case 'false':
+      return 'boolean';
+    case 'null':
+      return 'null';
+    case 'undefined':
+      return 'undefined';
+    case 'array':
+      return 'Array';
+    case 'object':
+      return 'object';
+    case 'regex':
+      return 'RegExp';
+    case 'new_expression': {
+      const ctor = argNode.childForFieldName('constructor');
+      return ctor?.text ?? '';
+    }
+    default:
+      return '';
+  }
+}
+
+/** Find the first TypeScript function-like node at the given range.
+ *  The `@scope.function` anchor range covers the whole node, but the
+ *  tag alone doesn't identify which node type among the many TS
+ *  function-likes. */
+function findFunctionNode(
+  rootNode: SyntaxNode,
+  range: Capture['range'],
+  anchorNode?: SyntaxNode,
+): SyntaxNode | null {
+  const fromAnchor = findSelfOrAncestorOfTypes(anchorNode, FUNCTION_NODE_TYPES);
+  if (fromAnchor !== null) return fromAnchor;
+  for (const nodeType of FUNCTION_NODE_TYPES) {
+    const n = findNodeAtRange(rootNode, range, nodeType);
+    if (n !== null) return n;
+  }
+  return null;
+}

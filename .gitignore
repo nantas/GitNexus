@@ -23,6 +23,7 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+docker/.env
 
 # Logs
 *.log
@@ -30,9 +31,13 @@ npm-debug.log*
 
 # Testing
 coverage/
+.tmp-test/
+gitnexus/.tmp-test/
 
 # Misc
 *.local
+HANDOFF.md
+HANDOFF*.md
 
 .vercel
 
@@ -60,6 +65,18 @@ repomix-output*
 # Local workspace metadata
 .codex/
 .obsidian/
+# Playwright artifacts
+gitnexus-web/playwright-report/
+gitnexus-web/test-results/
+
+# Python test artifacts
+eval/.coverage
+eval/.hypothesis/
+
+# Local docs — planning output (gitnexus-plan / gitnexus-work) stays local, not tracked
+docs/*
+!docs/fork/
+!docs/fork/**
 
 gitnexus/test/fixtures/mini-repo/*.md
 gitnexus/test/fixtures/mini-repo/.agents/
@@ -82,3 +99,49 @@ docs/reports/*-test-u3-gates.log
 docs/reports/*-nonunity-context-*.json
 docs/reports/*-nonunity-query-*.json
 docs/reports/neonspark-u2-full-e2e-*/
+# Vendored tree-sitter grammar build artifacts (created at install time,
+# never committed). See docs/plans/2026-04-15-002-fix-tree-sitter-proto-vendor-deps-plan.md
+gitnexus/vendor/**/build/
+gitnexus/vendor/**/node_modules/
+
+/github/scripts/triage/__pycache__/
+
+.claude-flow/
+
+.claude/agents/*
+!.claude/agents/gitnexus-*.md
+.claude/commands/
+.claude/helpers
+.claude/skills/*
+!.claude/skills/gitnexus/
+!.claude/skills/gitnexus-cli/
+!.claude/skills/gitnexus-debugging/
+!.claude/skills/gitnexus-exploring/
+!.claude/skills/gitnexus-guide/
+!.claude/skills/gitnexus-impact-analysis/
+!.claude/skills/gitnexus-refactoring/
+!.claude/skills/gitnexus-pr-swarm-review/
+!.claude/skills/gitnexus-review/
+!.claude/skills/gitnexus-plan/
+!.claude/skills/gitnexus-work/
+!.claude/skills/gitnexus-lfg/
+
+.history/
+
+.swarm/
+
+local_docs/
+
+# Local agent scratch / review prompts (never commit)
+# (.agents/plugins/marketplace.json is the checked-in Codex plugin
+# marketplace registry — the rest of .agents/ stays local scratch.)
+.tmp/
+.agents/*
+!.agents/plugins/
+.agents/plugins/*
+!.agents/plugins/marketplace.json
+.context/
+gitnexus/web/
+
+# Machine-local skill-evolution evidence (consumed by eval/workflow_bench/evolve.py)
+eval/workflow_bench/learnings.jsonl

@@ -4,89 +4,591 @@
  * REST API for browser-based clients to query the local .gitnexus/ index.
  * Also hosts the MCP server over StreamableHTTP for remote AI tool access.
  *
- * Security: binds to 127.0.0.1 by default (use --host to override).
- * CORS is restricted to localhost and the deployed site.
+ * Security: binds to localhost by default (use --host to override).
+ * CORS is restricted to localhost, private/LAN networks, and the deployed site.
  */
 
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs/promises';
-import { loadMeta, listRegisteredRepos } from '../storage/repo-manager.js';
-import { executeQuery, closeLbug, withLbugDb } from '../core/lbug/lbug-adapter.js';
-import { NODE_TABLES } from '../core/lbug/schema.js';
-import { GraphNode, GraphRelationship } from '../core/graph/types.js';
+import {
+  canonicalizePath,
+  cloneDirBelongsToEntry,
+  loadMeta,
+  saveMeta,
+  listRegisteredRepos,
+  registryPathEquals,
+  type RegistryEntry,
+} from '../storage/repo-manager.js';
+import {
+  requireDeletableStoragePath,
+  requireRegisteredStoragePath,
+  STATUS_STORAGE_REQUIREMENTS,
+  StorageDeletionError,
+  StorageRequirementError,
+} from '../storage/storage-resolver.js';
+import {
+  executeQuery,
+  executePrepared,
+  executeWithReusedStatement,
+  streamQuery,
+  flushWAL,
+  closeLbug,
+  withLbugDb,
+  isReadOnlyDbError,
+} from '../core/lbug/lbug-adapter.js';
+import { isValidQueryParams } from '../core/lbug/query-params.js';
+import { NODE_TABLES, type GraphNode, type GraphRelationship } from 'gitnexus-shared';
 import { searchFTSFromLbug } from '../core/search/bm25-index.js';
 import { hybridSearch } from '../core/search/hybrid-search.js';
-// Embedding imports are lazy (dynamic import) to avoid loading onnxruntime-node
-// at server startup — crashes on unsupported Node ABI versions (#89)
+import { ftsDegradedWarning } from '../core/search/fts-indexes.js';
+import {
+  checkoutIsDirectory,
+  contentRetentionFromMeta,
+  isFullSourceAvailable,
+} from '../core/content-retention.js';
+import { LBUG_DIRECTORY } from '../storage/storage-constants.js';
+import { getFtsDisabledReason, type FtsDisabledReason } from '../core/search/fts-policy.js';
 import { LocalBackend } from '../mcp/local/local-backend.js';
-import { mountMCPEndpoints } from './mcp-http.js';
+import { installServeMcpAuth, mountMCPEndpoints } from './mcp-http.js';
+import { fileURLToPath } from 'url';
+import { isTerminalJobStatus, JobManager, type AnalyzeJobPartialOutcome } from './analyze-job.js';
+import { mountSSEProgress } from './sse-progress.js';
+import {
+  resolveEmbedRunOutcome,
+  withMeasuredEmbeddingCount,
+  type EmbedRunFinalizeContext,
+} from './embed-run-outcome.js';
+import { decideEmbeddingResume, mintInterruptedCheckpoint } from '../core/embedding-checkpoint.js';
+import {
+  measurePersistedEmbeddingCount,
+  persistedEmbeddingCountOrUndefined,
+  type PersistedEmbeddingCount,
+} from '../core/embedding-count.js';
+import { assertString, BadRequestError, createRouteLimiter } from './validation.js';
+import { parseGrepQuery, GREP_TIME_BUDGET_MS } from './grep-params.js';
+import { runGrepScanInWorker } from './grep-scan.js';
+import {
+  analyzeCloneOptions,
+  extractWebRepoName,
+  getCloneDir,
+  cloneOrPull,
+  warnIfInsecureAzureConfig,
+  GITHUB_TOKEN_HOSTS,
+} from './git-clone.js';
+import { createAnalyzeUploadHandler } from './analyze-upload.js';
+import { checkStalenessAsync } from '../core/git-staleness.js';
+import { projectRepoDetail, projectRepoListEntry, resolveLastCommit } from './repo-projection.js';
+// Shared with the CLI's `--branch` (via the analyze-config wrapper) so both
+// entry points accept the same refs. Imported from core — not cli/ — so
+// createServer does not close a cycle with cli/serve.ts.
+import { InvalidBranchError, validateBranchName } from '../core/git-ref.js';
+import {
+  assertServeAuthForPublicOrigin,
+  createPublicOriginMatcher,
+  createWriteOriginGuard,
+  logOriginPolicy,
+  PUBLIC_ORIGIN_ENV,
+  resolveTrustProxy,
+  TRUST_PROXY_ENV,
+  warnIfRateLimitKeysCollapse,
+} from './middleware.js';
+import { createLaunchAnalysisWorker } from './analyze-launch.js';
+import { UPLOAD_ROOT } from './upload-paths.js';
+import { sweepStaleUploads } from './upload-sweep.js';
+import { isRfc1918PrivateIpv4 } from './private-ip.js';
+import { logger, flushLoggerSync } from '../core/logger.js';
+import {
+  bindServeUpdateControllerLifecycle,
+  buildServerInfo,
+  createServeUpdateController,
+} from './update-controller.js';
 
-const buildGraph = async (): Promise<{ nodes: GraphNode[]; relationships: GraphRelationship[] }> => {
+export {
+  bindServeUpdateControllerLifecycle,
+  buildServerInfo,
+  createServeUpdateController,
+  type ServerInfoResponse,
+  type ServeUpdateController,
+} from './update-controller.js';
+
+/**
+ * Determine whether an HTTP Origin header value is allowed by CORS policy.
+ *
+ * Permitted origins:
+ * - No origin (non-browser requests such as curl or server-to-server calls)
+ * - http://localhost:<port> — local development
+ * - http://127.0.0.1:<port> — loopback alias
+ * - RFC 1918 private/LAN networks (any port):
+ *     10.0.0.0/8      → 10.x.x.x
+ *     172.16.0.0/12   → 172.16.x.x – 172.31.x.x
+ *     192.168.0.0/16  → 192.168.x.x
+ * - https://gitnexus.vercel.app — the deployed GitNexus web UI
+ * - the origin named by GITNEXUS_PUBLIC_ORIGIN, when set — matched on hostname
+ *   always, and on scheme and port when the configured value carries them
+ *
+ * @param origin - The value of the HTTP `Origin` request header, or `undefined`
+ *                 when the header is absent (non-browser request).
+ * @returns `true` if the origin is allowed, `false` otherwise.
+ */
+export const isAllowedOrigin = (origin: string | undefined): boolean => {
+  if (origin === undefined) {
+    // Non-browser requests (curl, server-to-server) have no Origin header
+    return true;
+  }
+
+  if (
+    origin.startsWith('http://localhost:') ||
+    origin === 'http://localhost' ||
+    origin.startsWith('http://127.0.0.1:') ||
+    origin === 'http://127.0.0.1' ||
+    origin.startsWith('http://[::1]:') ||
+    origin === 'http://[::1]' ||
+    origin === 'https://gitnexus.vercel.app'
+  ) {
+    return true;
+  }
+
+  // RFC 1918 private network ranges — allow any port on these hosts.
+  // We parse the hostname out of the origin URL and check against each range.
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    // Malformed origin — reject
+    return false;
+  }
+
+  // Only allow HTTP(S) origins — reject ftp://, file://, etc.
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+
+  // The matcher is rebuilt per call, so changing the env var takes effect
+  // without a restart. The write guard in middleware.ts snapshots it instead.
+  if (createPublicOriginMatcher(process.env[PUBLIC_ORIGIN_ENV])?.matches(parsed)) return true;
+
+  return isRfc1918PrivateIpv4(parsed.hostname);
+};
+
+type GraphStreamRecord =
+  | { type: 'node'; data: GraphNode }
+  | { type: 'relationship'; data: GraphRelationship }
+  | { type: 'error'; error: string };
+
+export class ClientDisconnectedError extends Error {
+  constructor() {
+    super('Client disconnected during graph stream');
+    this.name = 'ClientDisconnectedError';
+  }
+}
+
+export const isIgnorableGraphQueryError = (err: unknown): boolean => {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes('does not exist') ||
+    message.includes('not found') ||
+    message.includes('No table named')
+  );
+};
+
+export const SPA_FALLBACK_REGEX = /^(?!\/api(?:\/|$))(?!.*\.\w{1,10}$).*/;
+
+export const resolveWebDistDir = async (
+  primaryDir: string,
+  fallbackDir: string,
+): Promise<string | null> => {
+  const envDir = process.env.GITNEXUS_WEB_DIST;
+  const dirs = envDir ? [envDir, primaryDir, fallbackDir] : [primaryDir, fallbackDir];
+  for (const dir of dirs) {
+    try {
+      await fs.access(path.join(dir, 'index.html'));
+      return dir;
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') {
+        logger.warn({ err: err.message }, `[serve] could not access web UI dir ${dir}:`);
+      }
+    }
+  }
+  return null;
+};
+
+export const landingPageHtml = (): string => `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GitNexus</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Outfit,system-ui,-apple-system,sans-serif;background:#06060a;color:#e4e4ed;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem}
+.card{background:#101018;border:1px solid #2a2a3a;border-radius:0.75rem;padding:2rem;max-width:480px;width:100%}
+.logo{font-size:1.5rem;font-weight:700;color:#e4e4ed;letter-spacing:-0.02em;margin-bottom:0.25rem}
+.subtitle{font-size:0.875rem;color:#8888a0;margin-bottom:1.5rem}
+.section-title{font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#5a5a70;margin-bottom:0.75rem}
+.endpoint{margin:0.25rem 0;font-size:0.875rem}
+.endpoint a{color:#7c3aed;text-decoration:none}
+.endpoint a:hover{text-decoration:underline}
+.endpoint code{background:#16161f;padding:0.15em 0.4em;border-radius:0.25rem;font-size:0.8rem;color:#8888a0}
+.divider{height:1px;background:#1e1e2a;margin:1.25rem 0}
+.terminal{background:#0a0a10;border:1px solid #1e1e2a;border-radius:0.5rem;padding:0.75rem 1rem;font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;font-size:0.8rem;color:#8888a0;margin-bottom:1rem;overflow-x:auto}
+.terminal .prompt{color:#7c3aed;user-select:none}
+.terminal .cmd{color:#e4e4ed}
+.link-row{display:flex;align-items:center;gap:0.5rem;font-size:0.875rem;margin-top:0.5rem}
+.link-row svg{flex-shrink:0}
+a.ext{color:#7c3aed;text-decoration:none;display:inline-flex;align-items:center;gap:0.25rem}
+a.ext:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">GitNexus</div>
+  <div class="subtitle">API server is running</div>
+  <div class="section-title">Endpoints</div>
+  <p class="endpoint"><a href="/api/info">/api/info</a> <span style="color:#5a5a70">— Server version &amp; context</span></p>
+  <p class="endpoint"><a href="/api/repos">/api/repos</a> <span style="color:#5a5a70">— Indexed repositories</span></p>
+  <p class="endpoint"><code>/api/health</code> <span style="color:#5a5a70">— Docker/orchestrator healthcheck</span></p>
+  <p class="endpoint"><code>/api/heartbeat</code> <span style="color:#5a5a70">— SSE heartbeat</span></p>
+  <p class="endpoint"><code>/api/graph</code> <code>/api/query</code> <code>/api/search</code> <span style="color:#5a5a70">— Data</span></p>
+  <p class="endpoint"><code>/api/mcp</code> <span style="color:#5a5a70">— MCP over StreamableHTTP</span></p>
+  <div class="divider"></div>
+  <div class="section-title">Web UI not found</div>
+  <div class="terminal"><span class="prompt">$ </span><span class="cmd">cd gitnexus-web &amp;&amp; npm run build</span></div>
+  <div class="link-row">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+    <a class="ext" href="https://gitnexus.vercel.app" target="_blank" rel="noopener noreferrer">gitnexus.vercel.app</a>
+    <span style="color:#5a5a70">— connects to this server</span>
+  </div>
+</div>
+</body>
+</html>`;
+
+export const staticCacheControlSetHeaders = (res: express.Response, filePath: string): void => {
+  if (filePath.endsWith('.html')) {
+    res.setHeader('Cache-Control', 'no-cache');
+  } else {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  }
+};
+
+export const registerWebUI = (app: express.Express, staticDir: string | null): void => {
+  if (staticDir) {
+    app.use(
+      express.static(staticDir, {
+        setHeaders: staticCacheControlSetHeaders,
+      }),
+    );
+    // ⚠ This must remain the LAST route before the global error handler.
+    // The regex excludes /api paths AND paths with file extensions (.js, .css, etc.)
+    // so missing assets get real 404s instead of the SPA HTML.
+    // Adding routes below this will be unreachable for non-API, non-asset paths.
+    // Rate-limited (CodeQL js/missing-rate-limiting): the SPA fallback
+    // serves a constant index.html, but the FS access from a route handler
+    // is enough to trip the analyzer. The limit is generous (300 rpm/IP =
+    // 5 req/s sustained) so that multi-tab browser navigation, prefetch,
+    // and service-worker revalidation do not produce 429s for legitimate
+    // SPA users. At this rate, real browser navigation is extremely
+    // unlikely to hit the limit in practice, so the cosmetic issue of
+    // JSON-on-429 to a browser is a low-likelihood path. Content
+    // negotiation on the 429 (returning the SPA shell to HTML clients
+    // instead of `{ error: '...' }`) would require swapping
+    // express-rate-limit's `message` for a `handler` function and is
+    // deferred to keep this PR focused on closing the CodeQL alert.
+    app.get(SPA_FALLBACK_REGEX, createRouteLimiter({ limit: 300 }), (_req, res) => {
+      res.sendFile(path.join(staticDir, 'index.html'));
+    });
+  } else {
+    app.get('/', (_req, res) => {
+      res.type('html').send(landingPageHtml());
+    });
+  }
+};
+
+const ensureStreamIsWritable = (res: express.Response, signal?: AbortSignal): void => {
+  if (signal?.aborted || res.destroyed || res.writableEnded) {
+    throw new ClientDisconnectedError();
+  }
+};
+
+const waitForDrain = async (res: express.Response, signal?: AbortSignal): Promise<void> => {
+  ensureStreamIsWritable(res, signal);
+
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      res.off('drain', onDrain);
+      res.off('close', onClose);
+      signal?.removeEventListener('abort', onAbort);
+    };
+
+    const onDrain = () => {
+      cleanup();
+      resolve();
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new ClientDisconnectedError());
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(new ClientDisconnectedError());
+    };
+
+    res.once('drain', onDrain);
+    res.once('close', onClose);
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    if (signal?.aborted || res.destroyed || res.writableEnded) {
+      onAbort();
+    }
+  });
+
+  ensureStreamIsWritable(res, signal);
+};
+
+const isClientDisconnectWriteError = (err: unknown): boolean => {
+  if (!(err instanceof Error)) return false;
+  return (
+    (err as NodeJS.ErrnoException).code === 'ERR_STREAM_DESTROYED' ||
+    (err as NodeJS.ErrnoException).code === 'EPIPE' ||
+    (err as NodeJS.ErrnoException).code === 'ECONNRESET' ||
+    err.message.includes('write after end')
+  );
+};
+
+export const writeNdjsonRecord = async (
+  res: express.Response,
+  record: GraphStreamRecord,
+  signal?: AbortSignal,
+): Promise<void> => {
+  ensureStreamIsWritable(res, signal);
+
+  try {
+    const canContinue = res.write(JSON.stringify(record) + '\n');
+    if (!canContinue) {
+      await waitForDrain(res, signal);
+    }
+  } catch (err) {
+    if (isClientDisconnectWriteError(err)) {
+      throw new ClientDisconnectedError();
+    }
+    throw err;
+  }
+};
+
+const ROUTE_NODE_CORE_PROJECTION =
+  'n.id AS id, n.name AS name, n.filePath AS filePath, ' +
+  'n.responseKeys AS responseKeys, n.errorKeys AS errorKeys, n.middleware AS middleware';
+
+const LEGACY_ROUTE_NODE_QUERY = `MATCH (n:\`Route\`) RETURN ${ROUTE_NODE_CORE_PROJECTION}`;
+
+const isMissingRouteRuntimePropertyError = (err: unknown): boolean => {
+  const message = err instanceof Error ? err.message : String(err);
+  const mentionsRuntimeProperty = ['runtimeConfirmed', 'runtimeSource', 'runtimeStatus'].some(
+    (property) => message.includes(property),
+  );
+
+  return (
+    mentionsRuntimeProperty &&
+    (/cannot find property/i.test(message) ||
+      /property .* does not exist/i.test(message) ||
+      /property .* not found/i.test(message))
+  );
+};
+
+export const buildGraph = async (
+  includeContent = false,
+): Promise<{ nodes: GraphNode[]; relationships: GraphRelationship[] }> => {
   const nodes: GraphNode[] = [];
   for (const table of NODE_TABLES) {
     try {
-      let query = '';
-      if (table === 'File') {
-        query = `MATCH (n:File) RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.content AS content`;
-      } else if (table === 'Folder') {
-        query = `MATCH (n:Folder) RETURN n.id AS id, n.name AS name, n.filePath AS filePath`;
-      } else if (table === 'Community') {
-        query = `MATCH (n:Community) RETURN n.id AS id, n.label AS label, n.heuristicLabel AS heuristicLabel, n.cohesion AS cohesion, n.symbolCount AS symbolCount`;
-      } else if (table === 'Process') {
-        query = `MATCH (n:Process) RETURN n.id AS id, n.label AS label, n.heuristicLabel AS heuristicLabel, n.processType AS processType, n.stepCount AS stepCount, n.communities AS communities, n.entryPointId AS entryPointId, n.terminalId AS terminalId`;
-      } else {
-        query = `MATCH (n:${table}) RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.startLine AS startLine, n.endLine AS endLine, n.content AS content`;
-      }
-
-      const rows = await executeQuery(query);
+      const rows = await executeQuery(getNodeQuery(table, includeContent));
       for (const row of rows) {
-        nodes.push({
-          id: row.id ?? row[0],
-          label: table as GraphNode['label'],
-          properties: {
-            name: row.name ?? row.label ?? row[1],
-            filePath: row.filePath ?? row[2],
-            startLine: row.startLine,
-            endLine: row.endLine,
-            content: row.content,
-            heuristicLabel: row.heuristicLabel,
-            cohesion: row.cohesion,
-            symbolCount: row.symbolCount,
-            processType: row.processType,
-            stepCount: row.stepCount,
-            communities: row.communities,
-            entryPointId: row.entryPointId,
-            terminalId: row.terminalId,
-          } as GraphNode['properties'],
-        });
+        nodes.push(mapGraphNodeRow(table, row, includeContent));
       }
-    } catch {
-      // ignore empty tables
+    } catch (err) {
+      if (table === 'Route' && isMissingRouteRuntimePropertyError(err)) {
+        const rows = await executeQuery(LEGACY_ROUTE_NODE_QUERY);
+        for (const row of rows) {
+          nodes.push(mapGraphNodeRow(table, row, includeContent));
+        }
+        continue;
+      }
+      if (!isIgnorableGraphQueryError(err)) {
+        throw err;
+      }
     }
   }
 
   const relationships: GraphRelationship[] = [];
-  const relRows = await executeQuery(
-    `MATCH (a)-[r:CodeRelation]->(b) RETURN a.id AS sourceId, b.id AS targetId, r.type AS type, r.confidence AS confidence, r.reason AS reason, r.step AS step`
-  );
+  const relRows = await executeQuery(GRAPH_RELATIONSHIP_QUERY);
   for (const row of relRows) {
-    relationships.push({
-      id: `${row.sourceId}_${row.type}_${row.targetId}`,
-      type: row.type,
-      sourceId: row.sourceId,
-      targetId: row.targetId,
-      confidence: row.confidence,
-      reason: row.reason,
-      step: row.step,
-    });
+    relationships.push(mapGraphRelationshipRow(row));
   }
 
   return { nodes, relationships };
 };
 
+const GRAPH_RELATIONSHIP_QUERY =
+  `MATCH (a)-[r:CodeRelation]->(b) RETURN a.id AS sourceId, b.id AS targetId, ` +
+  `r.type AS type, r.confidence AS confidence, r.reason AS reason, r.step AS step`;
+
+const quoteNodeTable = (table: string): string => `\`${table.replace(/`/g, '``')}\``;
+
+export const getNodeQuery = (table: string, includeContent: boolean): string => {
+  const tableLabel = quoteNodeTable(table);
+
+  if (table === 'BasicBlock') {
+    // Taint/PDG substrate (issue #2080) — BasicBlock has no name/content
+    // columns. Project only its declared columns: a default `n.name`
+    // projection raises a Ladybug "Cannot find property name" binder error
+    // (not matched by isIgnorableGraphQueryError), which would 500 the graph
+    // endpoint the moment BasicBlock joins NODE_TABLES, even on an empty table.
+    return `MATCH (n:${tableLabel}) RETURN n.id AS id, n.filePath AS filePath, n.startLine AS startLine, n.endLine AS endLine, n.text AS text`;
+  }
+  if (table === 'File') {
+    return includeContent
+      ? `MATCH (n:${tableLabel}) RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.content AS content`
+      : `MATCH (n:${tableLabel}) RETURN n.id AS id, n.name AS name, n.filePath AS filePath`;
+  }
+  if (table === 'Folder') {
+    return `MATCH (n:${tableLabel}) RETURN n.id AS id, n.name AS name, n.filePath AS filePath`;
+  }
+  if (table === 'Community') {
+    return `MATCH (n:${tableLabel}) RETURN n.id AS id, n.label AS label, n.heuristicLabel AS heuristicLabel, n.cohesion AS cohesion, n.symbolCount AS symbolCount`;
+  }
+  if (table === 'Process') {
+    return `MATCH (n:${tableLabel}) RETURN n.id AS id, n.label AS label, n.heuristicLabel AS heuristicLabel, n.processType AS processType, n.stepCount AS stepCount, n.communities AS communities, n.entryPointId AS entryPointId, n.terminalId AS terminalId`;
+  }
+  if (table === 'Route') {
+    return `MATCH (n:${tableLabel}) RETURN ${ROUTE_NODE_CORE_PROJECTION}, n.runtimeConfirmed AS runtimeConfirmed, n.runtimeSource AS runtimeSource, n.runtimeStatus AS runtimeStatus`;
+  }
+  if (table === 'Tool') {
+    return `MATCH (n:${tableLabel}) RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.description AS description`;
+  }
+  if (table === 'Destination') {
+    return `MATCH (n:${tableLabel}) RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.startLine AS startLine, n.endLine AS endLine, n.address AS address, n.broker AS broker, n.resolution AS resolution, n.configKey AS configKey, n.configDefault AS configDefault`;
+  }
+  return includeContent
+    ? `MATCH (n:${tableLabel}) RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.startLine AS startLine, n.endLine AS endLine, n.content AS content`
+    : `MATCH (n:${tableLabel}) RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.startLine AS startLine, n.endLine AS endLine`;
+};
+
+const mapGraphNodeRow = (table: string, row: any, includeContent: boolean): GraphNode => ({
+  id: row.id ?? row[0],
+  label: table as GraphNode['label'],
+  properties: {
+    // `?? ''` keeps NodeProperties.name a `string` even for label rows that
+    // project no name/label column (BasicBlock — taint/PDG substrate #2080).
+    // Without it, BasicBlock rows carry name:undefined (masked by the cast
+    // below) and the web layer (Header search, circles/tree layout) derefs
+    // `.name` unguarded → TypeError once M1 emits blocks. `row.text` gives a
+    // BasicBlock a sensible fallback name before the empty-string floor.
+    name: row.name ?? row.label ?? row.text ?? row[1] ?? '',
+    filePath: row.filePath ?? row[2],
+    startLine: row.startLine,
+    endLine: row.endLine,
+    text: row.text,
+    content: includeContent ? row.content : undefined,
+    responseKeys: row.responseKeys,
+    errorKeys: row.errorKeys,
+    middleware: row.middleware,
+    // Normalize legacy Route projections to the modern contract. Source is
+    // provenance; only runtimeConfirmed === true is authoritative.
+    runtimeConfirmed: table === 'Route' ? (row.runtimeConfirmed ?? false) : undefined,
+    runtimeSource: table === 'Route' ? row.runtimeSource : undefined,
+    runtimeStatus: table === 'Route' ? row.runtimeStatus : undefined,
+    // The Destination overlay written by `pipeline-phases/spring-destinations.ts`.
+    // Gated on the label for the same reason as the Route columns above: no
+    // other node query projects them, so an ungated read would put a key on
+    // every node in the graph.
+    //
+    // `?? undefined` is not decoration. LadybugDB returns NULL columns as
+    // `null`, and `address` is the cross-repository JOIN KEY that a destination
+    // carries ONLY when it resolved. Passing the `null` straight through would
+    // serialize `"address": null` for every unresolved destination, turning an
+    // ABSENT property — which cannot match anything — into a PRESENT one that
+    // every other unresolved destination shares. That is the false connection
+    // the keying rule exists to prevent, reintroduced at the API boundary, so
+    // the null is normalized back to absent for all five columns alike.
+    address: table === 'Destination' ? (row.address ?? undefined) : undefined,
+    broker: table === 'Destination' ? (row.broker ?? undefined) : undefined,
+    resolution: table === 'Destination' ? (row.resolution ?? undefined) : undefined,
+    configKey: table === 'Destination' ? (row.configKey ?? undefined) : undefined,
+    configDefault: table === 'Destination' ? (row.configDefault ?? undefined) : undefined,
+    heuristicLabel: row.heuristicLabel,
+    cohesion: row.cohesion,
+    symbolCount: row.symbolCount,
+    description: row.description,
+    processType: row.processType,
+    stepCount: row.stepCount,
+    communities: row.communities,
+    entryPointId: row.entryPointId,
+    terminalId: row.terminalId,
+  } as GraphNode['properties'],
+});
+
+const mapGraphRelationshipRow = (row: any): GraphRelationship => ({
+  id: `${row.sourceId}_${row.type}_${row.targetId}`,
+  type: row.type,
+  sourceId: row.sourceId,
+  targetId: row.targetId,
+  confidence: row.confidence,
+  reason: row.reason,
+  step: row.step,
+});
+
+export const streamGraphNdjson = async (
+  res: express.Response,
+  includeContent = false,
+  signal?: AbortSignal,
+): Promise<void> => {
+  for (const table of NODE_TABLES) {
+    try {
+      await streamQuery(getNodeQuery(table, includeContent), async (row) => {
+        await writeNdjsonRecord(
+          res,
+          {
+            type: 'node',
+            data: mapGraphNodeRow(table, row, includeContent),
+          },
+          signal,
+        );
+      });
+    } catch (err) {
+      if (table === 'Route' && isMissingRouteRuntimePropertyError(err)) {
+        await streamQuery(LEGACY_ROUTE_NODE_QUERY, async (row) => {
+          await writeNdjsonRecord(
+            res,
+            {
+              type: 'node',
+              data: mapGraphNodeRow(table, row, includeContent),
+            },
+            signal,
+          );
+        });
+        continue;
+      }
+      if (!isIgnorableGraphQueryError(err)) {
+        throw err;
+      }
+    }
+  }
+
+  await streamQuery(GRAPH_RELATIONSHIP_QUERY, async (row) => {
+    await writeNdjsonRecord(
+      res,
+      {
+        type: 'relationship',
+        data: mapGraphRelationshipRow(row),
+      },
+      signal,
+    );
+  });
+};
+
 const statusFromError = (err: any): number => {
+  // Validation helpers throw BadRequestError / ForbiddenError with a typed
+  // .status field — honor it before falling back to message-string matching.
+  if (err instanceof BadRequestError) return err.status;
   const msg = String(err?.message ?? '');
   if (msg.includes('No indexed repositories') || msg.includes('not found')) return 404;
   if (msg.includes('Multiple repositories')) return 400;
@@ -104,70 +606,688 @@ const requestedRepo = (req: express.Request): string | undefined => {
   return undefined;
 };
 
-export const createServer = async (port: number, host: string = '127.0.0.1') => {
-  const app = express();
+const repoParamBasename = (repoName: string): string =>
+  repoName.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? repoName;
 
-  // CORS: only allow localhost origins and the deployed site.
-  // Non-browser requests (curl, server-to-server) have no origin and are allowed.
-  app.use(cors({
-    origin: (origin, callback) => {
-      if (
-        !origin
-        || origin.startsWith('http://localhost:')
-        || origin.startsWith('http://127.0.0.1:')
-        || origin === 'https://gitnexus.vercel.app'
-      ) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
+/**
+ * Resolve a `?repo=` request param against the registry in two tiers:
+ *
+ *   1. Path claim — any input containing a separator ('/' or '\\', which
+ *      cover path.sep on every platform) is treated as a path claim and
+ *      resolved by canonical registry path ONLY. A miss fails closed
+ *      (null, never a basename fallback) so a stale or wrong path can
+ *      never silently retarget a same-named sibling repo (#2419).
+ *      Within this tier, only absolute or Windows-shaped ('\\') claims
+ *      are worth canonicalizing; relative claims like 'org/name' or
+ *      './repo' are rejected immediately WITHOUT touching the filesystem
+ *      — canonicalizing them would run an attacker-influenced
+ *      CWD-relative realpathSync probe on un-rate-limited GET routes,
+ *      and no legitimate caller sends relative paths.
+ *   2. Name fallback — bare names (no separators) keep the legacy
+ *      basename/name match for older callers.
+ */
+export const resolveRegisteredRepoEntry = (
+  repos: RegistryEntry[],
+  repoName?: string,
+): RegistryEntry | null => {
+  if (!repoName) return repos[0] ?? null;
+
+  const looksLikePath =
+    path.isAbsolute(repoName) || repoName.includes('/') || repoName.includes('\\');
+
+  if (looksLikePath) {
+    // Relative path claims fail closed with zero filesystem probes.
+    if (!path.isAbsolute(repoName) && !repoName.includes('\\')) return null;
+
+    const requestedPath = canonicalizePath(repoName);
+    const pathMatch = repos.find((r) =>
+      registryPathEquals(canonicalizePath(r.path), requestedPath),
+    );
+    if (pathMatch) return pathMatch;
+    return null;
+  }
+
+  const normalizedName = repoParamBasename(repoName);
+
+  return (
+    repos.find((r) => r.name === normalizedName) ||
+    repos.find((r) => r.name.toLowerCase() === normalizedName.toLowerCase()) ||
+    null
+  );
+};
+
+export interface SourceAvailability {
+  available: boolean;
+  reason?: 'content-retention' | 'checkout-missing';
+  contentRetention?: ReturnType<typeof contentRetentionFromMeta>;
+}
+
+/** Map a failed storage probe to a catalog status. Missing/empty slots are 404; anything else is 503. */
+export const storageRequirementToHttp = (
+  err: StorageRequirementError,
+): { status: 404 | 503; body: { error: string; code: 'index-unavailable'; state: string } } => {
+  const notPresent = err.inspection.state === 'missing' || err.inspection.state === 'empty';
+  return {
+    status: notPresent ? 404 : 503,
+    body: {
+      error: err.message,
+      code: 'index-unavailable',
+      state: err.inspection.state,
+    },
+  };
+};
+
+const sendStorageRequirementHttp = (
+  err: unknown,
+  res: { status: (code: number) => { json: (body: unknown) => void } },
+): boolean => {
+  if (!(err instanceof StorageRequirementError)) return false;
+  const mapped = storageRequirementToHttp(err);
+  res.status(mapped.status).json(mapped.body);
+  return true;
+};
+
+/** Full-file endpoints require a live checkout; normalized index text is not source-viewer data. */
+export const getSourceAvailability = async (
+  entry: Pick<RegistryEntry, 'path' | 'storagePath'>,
+  loadedMeta?: Awaited<ReturnType<typeof loadMeta>>,
+): Promise<SourceAvailability> => {
+  const meta = loadedMeta === undefined ? await loadMeta(entry.storagePath) : loadedMeta;
+  const contentRetention = contentRetentionFromMeta(meta);
+  if (contentRetention !== 'full') {
+    return { available: false, reason: 'content-retention', contentRetention };
+  }
+  return isFullSourceAvailable(contentRetention, await checkoutIsDirectory(entry.path))
+    ? { available: true, contentRetention }
+    : { available: false, reason: 'checkout-missing', contentRetention };
+};
+
+const sendSourceUnavailable = (
+  res: { status: (code: number) => { json: (body: any) => void } },
+  availability: SourceAvailability,
+): void => {
+  const reason =
+    availability.reason === 'content-retention' ? 'content retention' : 'source checkout';
+  res.status(410).json({
+    error: `Full source is unavailable because the ${reason} is unavailable.`,
+    code: 'source-unavailable',
+    reason: availability.reason,
+  });
+};
+
+/**
+ * Handle a GET /api/file request body. Extracted from createServer's route
+ * registration so it can be unit-tested without spinning up an HTTP server
+ * — calling app.get(...) inside a test triggers CodeQL's
+ * js/missing-rate-limiting query, which is appropriate for production
+ * route handlers but a false positive for tests of the handler logic.
+ *
+ * The function takes the express req and res (typed loosely so test code
+ * can pass minimal mocks) plus the resolved repo path. All path-traversal
+ * containment is done inline at the readFile sink with the canonical
+ * path.relative idiom for CodeQL js/path-injection recognition.
+ */
+export const handleFileRequest = async (
+  req: { query: any },
+  res: {
+    status: (code: number) => { json: (body: any) => void };
+    json: (body: any) => void;
+  },
+  repoPath: string,
+  availability: SourceAvailability = { available: true },
+): Promise<void> => {
+  try {
+    // Type-confusion guard — req.query.path is `string | string[] | ParsedQs`.
+    // Without this, an attacker could pass `?path=a&path=b` to bypass the
+    // length-bound traversal check below (CodeQL js/type-confusion-through-
+    // parameter-tampering, same class as the /api/grep critical fix).
+    const rawFilePath = req.query.path;
+    if (rawFilePath === undefined || rawFilePath === '') {
+      res.status(400).json({ error: 'Missing path' });
+      return;
     }
-  }));
+    const filePath = assertString(rawFilePath, 'path');
+
+    if (!availability.available) {
+      sendSourceUnavailable(res, availability);
+      return;
+    }
+
+    // Path-injection containment — inline at the sink with the canonical
+    // path.relative idiom that CodeQL's js/path-injection sanitizer
+    // recognizes. assertSafePath in validation.ts performs the equivalent
+    // check, but cross-module helpers are not followed by CodeQL's
+    // interprocedural analysis for path-traversal sanitization in JS, so
+    // the barrier must be visible inline at the readFile sink.
+    const repoRoot = path.resolve(repoPath);
+    const fullPath = path.resolve(repoRoot, filePath);
+    const fullRel = path.relative(repoRoot, fullPath);
+    if (fullRel.startsWith('..') || path.isAbsolute(fullRel)) {
+      res.status(403).json({ error: 'Path traversal denied' });
+      return;
+    }
+
+    const raw = await fs.readFile(fullPath, 'utf-8');
+
+    // Optional line-range support: ?startLine=10&endLine=50
+    // Returns only the requested slice (0-indexed), plus metadata.
+    const startLine = req.query.startLine !== undefined ? Number(req.query.startLine) : undefined;
+    const endLine = req.query.endLine !== undefined ? Number(req.query.endLine) : undefined;
+
+    if (startLine !== undefined && Number.isFinite(startLine)) {
+      const lines = raw.split('\n');
+      const start = Math.max(0, startLine);
+      const end =
+        endLine !== undefined && Number.isFinite(endLine)
+          ? Math.min(lines.length, endLine + 1)
+          : lines.length;
+      res.json({
+        content: lines.slice(start, end).join('\n'),
+        startLine: start,
+        endLine: end - 1,
+        totalLines: lines.length,
+      });
+    } else {
+      res.json({ content: raw, totalLines: raw.split('\n').length });
+    }
+  } catch (err: any) {
+    if (err.code === 'ENOENT') {
+      res.status(404).json({ error: 'File not found' });
+    } else {
+      // statusFromError returns err.status for BadRequestError / ForbiddenError
+      // (assertString → 400 on array-form ?path=a&path=b; ForbiddenError → 403
+      // on traversal). Falls back to 500 for unrecognized failures.
+      res.status(statusFromError(err)).json({ error: err.message || 'Failed to read file' });
+    }
+  }
+};
+
+async function loadFtsSession(storagePath: string): Promise<{
+  meta: Awaited<ReturnType<typeof loadMeta>>;
+  ftsDisabledReason: FtsDisabledReason | undefined;
+  skipFts?: true;
+}> {
+  const meta = await loadMeta(storagePath);
+  const ftsDisabledReason = getFtsDisabledReason(meta?.capabilities?.fts);
+  return {
+    meta,
+    ftsDisabledReason,
+    ...skipFtsOption(Boolean(ftsDisabledReason)),
+  };
+}
+
+function skipFtsOption(skipFts?: boolean): { skipFts?: true } {
+  return skipFts ? { skipFts: true } : {};
+}
+
+function readOnlyFtsOptions(skipFts?: true): { readOnly: true; skipFts?: true } {
+  return skipFts ? { readOnly: true, skipFts: true } : { readOnly: true };
+}
+
+export const handleQueryRequest = async (
+  req: express.Request,
+  res: express.Response,
+  resolveRepo: (repoName?: string) => Promise<{ storagePath: string } | undefined>,
+): Promise<void> => {
+  try {
+    const cypher = req.body.cypher as string;
+    if (!cypher) {
+      res.status(400).json({ error: 'Missing "cypher" in request body' });
+      return;
+    }
+    const queryParams = req.body.params;
+    if (queryParams !== undefined && !isValidQueryParams(queryParams)) {
+      res.status(400).json({
+        error: '"params" must be a plain object with scalar values (string/number/boolean/null)',
+      });
+      return;
+    }
+
+    const entry = await resolveRepo(requestedRepo(req));
+    if (!entry) {
+      res.status(404).json({ error: 'Repository not found' });
+      return;
+    }
+    const lbugPath = path.join(entry.storagePath, 'lbug');
+    const { skipFts } = await loadFtsSession(entry.storagePath);
+    const result = await withLbugDb(
+      lbugPath,
+      () => executePrepared(cypher, queryParams ?? {}),
+      readOnlyFtsOptions(skipFts),
+    );
+    res.json({ result });
+  } catch (err: any) {
+    if (sendStorageRequirementHttp(err, res)) return;
+    if (isReadOnlyDbError(err)) {
+      res.status(403).json({ error: 'Write queries are not allowed via the HTTP API' });
+      return;
+    }
+    res.status(500).json({ error: err.message || 'Query failed' });
+  }
+};
+
+/**
+ * Validate the optional `token` field of POST /api/analyze. Returns an
+ * { status, error } to send, or null when the token is absent or valid.
+ *
+ * The token is a GitHub PAT: charset-restricted (blocks CRLF header
+ * smuggling), length-bounded (1–256), and bound to github.com using the SAME
+ * GITHUB_TOKEN_HOSTS allowlist + hostname parse as resolveGitCredential, so a
+ * token the API accepts is exactly the one buildGitEnv will inject — and one
+ * it rejects is never sent off github.com.
+ *
+ * Exported for unit tests (the route validation is otherwise only reachable
+ * by booting the server).
+ */
+export function validateAnalyzeToken(
+  repoToken: unknown,
+  repoUrl: unknown,
+): { status: number; error: string } | null {
+  if (repoToken === undefined) return null;
+  if (typeof repoToken !== 'string') return { status: 400, error: '"token" must be a string' };
+  if (repoToken.length === 0 || repoToken.length > 256)
+    return { status: 400, error: '"token" length must be between 1 and 256' };
+  if (!/^[A-Za-z0-9._~+/=-]+$/.test(repoToken))
+    return { status: 400, error: '"token" contains invalid characters' };
+  if (!repoUrl || typeof repoUrl !== 'string')
+    return { status: 400, error: '"token" requires "url"' };
+  let tokenHost: string;
+  try {
+    tokenHost = new URL(repoUrl).hostname.toLowerCase();
+  } catch {
+    return { status: 400, error: '"url" must be a valid URL when "token" is provided' };
+  }
+  if (!GITHUB_TOKEN_HOSTS.has(tokenHost))
+    return { status: 400, error: '"token" is only supported for github.com URLs' };
+  return null;
+}
+
+export const createServer = async (port: number, host: string = '127.0.0.1') => {
+  // Refuse a public-origin config before anything is opened or bound: `serve`
+  // has no authentication yet, so the setting that makes a public bind usable
+  // must not be usable either. Throws — `serve` reports it and exits non-zero.
+  assertServeAuthForPublicOrigin();
+
+  // Surface a cleartext Azure DevOps PAT config at boot (operators rarely
+  // read per-request logs). Warn-only — http:// self-hosted stays supported.
+  warnIfInsecureAzureConfig();
+
+  const app = express();
+  app.disable('x-powered-by');
+
+  // Which upstream hops may set X-Forwarded-*. Process-wide: every route's
+  // req.ip, and so the per-IP rate limiter, resolves through this.
+  app.set('trust proxy', resolveTrustProxy(process.env[TRUST_PROXY_ENV]));
+  // resolveTrustProxy validates the value in isolation; only here do we know
+  // what we bound, and so whether the default is about to collapse the per-IP
+  // rate limit to one global limit behind a load balancer.
+  warnIfRateLimitKeysCollapse(host);
+
+  // Chromium Private Network Access (required since Chrome 130+). Must run before
+  // cors: the cors middleware ends OPTIONS preflight responses, so this header
+  // has to be set on res before cors writes the preflight reply.
+  app.use((_req, res, next) => {
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
+    next();
+  });
+
+  // CORS: allow localhost, private/LAN networks, and the deployed site.
+  // Non-browser requests (curl, server-to-server) have no origin and are allowed.
+  // Disallowed origins get the response without Access-Control-Allow-Origin,
+  // so the browser blocks it. We pass `false` instead of throwing an Error to
+  // avoid crashing into Express's default error handler (which returned 500).
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        callback(null, isAllowedOrigin(origin));
+      },
+    }),
+  );
+  // Optional protocol-layer auth for the MCP route. Keep this before the
+  // global body parser so rejected requests do not consume the JSON budget.
+  installServeMcpAuth(app);
   app.use(express.json({ limit: '10mb' }));
+
+  // Origin guard for write routes: loopback, the server's own bound host, and
+  // any configured public origin — prevents CSRF from other devices.
+  const requireTrustedOrigin = createWriteOriginGuard(host, port);
+  logOriginPolicy(host);
+
+  // No explicit OPTIONS route is registered. The Chromium Private Network
+  // Access header is set by the global middleware above (pre-cors), and
+  // `cors()` itself handles OPTIONS preflights for every path. Registering a
+  // wildcard OPTIONS catchall here would throw under Express 5's stricter
+  // path parser (the source of the original startup crash this branch fixed).
 
   // Initialize MCP backend (multi-repo, shared across all MCP sessions)
   const backend = new LocalBackend();
   await backend.init();
-  const cleanupMcp = mountMCPEndpoints(app, backend);
+  const cleanupMcp = await mountMCPEndpoints(app, backend);
+  const jobManager = new JobManager();
+  const updateController = createServeUpdateController();
 
-  // Helper: resolve a repo by name from the global registry, or default to first
-  const resolveRepo = async (repoName?: string) => {
-    const repos = await listRegisteredRepos();
-    if (repos.length === 0) return null;
-    if (repoName) return repos.find(r => r.name === repoName) || null;
-    return repos[0]; // default to first
+  // Backstop: remove any upload staging dirs orphaned by a previous crash.
+  void sweepStaleUploads().catch(() => {});
+
+  // Shared repo lock — prevents concurrent analyze + embed on the same repo path,
+  // which would corrupt LadybugDB (analyze calls closeLbug + initLbug while embed has queries in flight).
+  const activeRepoPaths = new Set<string>();
+
+  const acquireRepoLock = (repoPath: string): string | null => {
+    if (activeRepoPaths.has(repoPath)) {
+      return `Another job is already active for this repository`;
+    }
+    activeRepoPaths.add(repoPath);
+    return null;
   };
 
+  const releaseRepoLock = (repoPath: string): void => {
+    activeRepoPaths.delete(repoPath);
+  };
+
+  // Launch the analyze worker for an already-resolved repo directory. Shared by
+  // the JSON /api/analyze route and the multipart /api/analyze/upload route.
+  const launchAnalysisWorker = createLaunchAnalysisWorker({
+    jobManager,
+    backend,
+    acquireRepoLock,
+    releaseRepoLock,
+    closeDbHandle: closeLbug,
+  });
+
+  /**
+   * Maximum time the hold-queue will wait for an active analysis job to complete.
+   * Must stay in sync with the frontend's `fetchRepoInfo({ awaitAnalysis: true })` timeout.
+   */
+  const HOLD_QUEUE_TIMEOUT_SECS = 300; // 5 minutes
+
+  const validateResolvedRepoEntry = async (
+    entry: RegistryEntry | null,
+  ): Promise<RegistryEntry | null> => {
+    if (!entry) return null;
+    await requireRegisteredStoragePath(entry, STATUS_STORAGE_REQUIREMENTS);
+    return entry;
+  };
+
+  // Helper: resolve a repo by name from the global registry, or default to first.
+  // Pass `req` to enable early exit if the client disconnects during the hold-queue wait.
+  // Deletion passes `validateStorage: false` because it has a separate policy that
+  // intentionally permits a missing/empty local slot to be removed.
+  const resolveRepo = async (
+    repoName?: string,
+    isRetry = false,
+    req?: any,
+    options: { validateStorage?: boolean } = {},
+  ): Promise<any> => {
+    const repos = await listRegisteredRepos({
+      validate: options.validateStorage !== false,
+    });
+    const found = resolveRegisteredRepoEntry(repos, repoName);
+    const validate = (entry: RegistryEntry | null): Promise<RegistryEntry | null> =>
+      options.validateStorage === false ? Promise.resolve(entry) : validateResolvedRepoEntry(entry);
+
+    const normalizedName = repoName ? repoParamBasename(repoName) : undefined;
+
+    // If not yet in the registry, check whether a background job is actively cloning or
+    // analyzing this repo. Hold the connection open (up to 5 minutes) until it completes.
+    // We only wait for in-progress jobs ('queued'|'cloning'|'analyzing') — a 'complete' job
+    // whose repo is still missing means the registry sync failed; the fallback below handles it.
+    if (!found && normalizedName) {
+      const lower = normalizedName.toLowerCase();
+
+      // Track client disconnect to cancel the wait early
+      let clientGone = false;
+      req?.on('close', () => {
+        clientGone = true;
+      });
+
+      for (const job of jobManager.listJobs()) {
+        const isMatch =
+          job.repoName?.toLowerCase() === lower ||
+          (job.repoUrl && path.basename(job.repoUrl).replace('.git', '').toLowerCase() === lower) ||
+          (job.repoPath && path.basename(job.repoPath).toLowerCase() === lower);
+
+        if (isMatch && ['queued', 'cloning', 'analyzing'].includes(job.status)) {
+          if (process.env.DEBUG) {
+            // Sanitize user-controlled values to prevent log injection (CodeQL js/log-injection).
+            logger.debug(
+              {
+                jobId: String(job.id).replace(/[\r\n]/g, ' '),
+                repoName: String(normalizedName).replace(/[\r\n]/g, ' '),
+              },
+              '[debug] resolveRepo waiting for active job',
+            );
+          }
+          for (let wait = 0; wait < HOLD_QUEUE_TIMEOUT_SECS; wait++) {
+            if (clientGone) return null; // client disconnected — stop polling
+            const currentJob = jobManager.getJob(job.id);
+            if (!currentJob || currentJob.status === 'failed') break;
+            if (currentJob.status === 'complete') {
+              await backend.init();
+              const freshRepos = await listRegisteredRepos({
+                validate: options.validateStorage !== false,
+              });
+              return validate(resolveRegisteredRepoEntry(freshRepos, repoName));
+            }
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+          // Timed out — signal to the caller with a specific message
+          return { __timedOut: true, repoName: normalizedName };
+        }
+      }
+    }
+
+    // Emergency fallback: re-sync the registry to handle Windows file-system race conditions
+    // (e.g. registry file not yet flushed after clone completes).
+    if (!found && normalizedName && !isRetry) {
+      if (process.env.DEBUG) {
+        // Sanitize user-controlled values to prevent log injection (CodeQL js/log-injection).
+        logger.debug(
+          { repoName: String(normalizedName).replace(/[\r\n]/g, ' ') },
+          '[debug] resolveRepo 404, triggering deep init',
+        );
+      }
+      await backend.init();
+      return await resolveRepo(repoName, true, req, options);
+    }
+
+    return validate(found);
+  };
+
+  // Lightweight healthcheck for Docker/orchestrator probes (#1147).
+  // Returns immediately so container managers do not confuse a long-lived
+  // SSE stream with an unhealthy server.
+  app.get('/api/health', (_req, res) => {
+    res.json({ status: 'ok' });
+  });
+
+  // SSE heartbeat — clients connect to detect server liveness instantly.
+  // When the server shuts down, the TCP connection drops and the client's
+  // EventSource fires onerror immediately (no polling delay).
+  app.get('/api/heartbeat', (_req, res) => {
+    // Use res.set() instead of res.writeHead() to preserve CORS headers from middleware
+    res.set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.flushHeaders();
+    // Send initial ping so the client knows it connected
+    res.write(':ok\n\n');
+
+    // Keep-alive ping every 15s to prevent proxy/firewall timeout
+    const interval = setInterval(() => res.write(':ping\n\n'), 15_000);
+
+    _req.on('close', () => clearInterval(interval));
+  });
+
+  // Server info: version and launch context (npx / global / local dev)
+  app.get('/api/info', (_req, res) => {
+    res.json(buildServerInfo(updateController.snapshot()));
+  });
+
   // List all registered repos
-  app.get('/api/repos', async (_req, res) => {
+  // Rate-limited (CodeQL js/missing-rate-limiting) because this route now spawns
+  // one `git rev-list` per registered repo to answer freshness: an unauthenticated
+  // GET that costs N subprocesses is worth the same 60 rpm/IP ceiling `/api/repo`
+  // already carries. Web callers hit this on connect/switch, never in a loop.
+  app.get('/api/repos', createRouteLimiter(), async (_req, res) => {
     try {
-      const repos = await listRegisteredRepos();
-      res.json(repos.map(r => ({
-        name: r.name, path: r.path, indexedAt: r.indexedAt,
-        lastCommit: r.lastCommit, stats: r.stats,
-      })));
+      const repos = await listRegisteredRepos({ validate: true });
+      // Checked in parallel, for the reason `list_repos` already does it that
+      // way: each check spawns an async `git rev-list`, and the sequential
+      // variant took ~50s across 200 repos (#1363). Projecting inside the map
+      // keeps the entry and its own check together — an index-matched second
+      // array is the shape that silently mispairs them if either is reordered.
+      res.json(
+        await Promise.all(
+          repos.map(async (r) => {
+            const [staleness, availability] = await Promise.all([
+              checkStalenessAsync(r.path, r.lastCommit),
+              getSourceAvailability(r),
+            ]);
+            return projectRepoListEntry(r, staleness, {
+              contentRetention: availability.contentRetention ?? 'full',
+              sourceAvailable: availability.available,
+            });
+          }),
+        ),
+      );
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to list repos' });
     }
   });
 
   // Get repo info
-  app.get('/api/repo', async (req, res) => {
+  // Rate-limited (CodeQL js/missing-rate-limiting): resolveRepo canonicalizes
+  // the attacker-supplied ?repo= param (realpathSync probe for absolute /
+  // Windows-shaped claims). Default 60 rpm/IP — web callers hit this route
+  // only on connect/switch, never in a polling loop.
+  app.get('/api/repo', createRouteLimiter(), async (req, res) => {
     try {
-      const entry = await resolveRepo(requestedRepo(req));
+      const entry = await resolveRepo(requestedRepo(req), false, req);
       if (!entry) {
         res.status(404).json({ error: 'Repository not found. Run: gitnexus analyze' });
         return;
       }
+      // Timed out waiting for an active analysis job
+      if (entry.__timedOut) {
+        res.status(503).json({
+          error: `Repository analysis for "${entry.repoName}" is taking longer than expected. Please try again in a moment.`,
+        });
+        return;
+      }
       const meta = await loadMeta(entry.storagePath);
-      res.json({
-        name: entry.name,
-        repoPath: entry.path,
-        indexedAt: meta?.indexedAt ?? entry.indexedAt,
-        stats: meta?.stats ?? entry.stats ?? {},
-      });
+      const [staleness, availability] = await Promise.all([
+        checkStalenessAsync(entry.path, resolveLastCommit(entry, meta)),
+        getSourceAvailability(entry, meta),
+      ]);
+      res.json(
+        projectRepoDetail(entry, meta, staleness, {
+          contentRetention: availability.contentRetention ?? contentRetentionFromMeta(meta),
+          sourceAvailable: availability.available,
+        }),
+      );
     } catch (err: any) {
+      if (sendStorageRequirementHttp(err, res)) return;
       res.status(500).json({ error: err.message || 'Failed to get repo info' });
+    }
+  });
+
+  // Delete a repo — removes index, clone dir (if any), and unregisters it
+  // Rate-limited (CodeQL js/missing-rate-limiting): destructive operation
+  // doing fs.rm of clone + storage dirs. Default 60 rpm/IP is generous for
+  // delete; tighten if abuse is observed.
+  app.delete('/api/repo', createRouteLimiter(), requireTrustedOrigin, async (req, res) => {
+    try {
+      const repoName = requestedRepo(req);
+      if (!repoName) {
+        res.status(400).json({ error: 'Missing repo name' });
+        return;
+      }
+      const entry = await resolveRepo(repoName, false, undefined, { validateStorage: false });
+      if (!entry) {
+        res.status(404).json({ error: 'Repository not found' });
+        return;
+      }
+      let storagePath: string;
+      try {
+        storagePath = await requireDeletableStoragePath(entry);
+      } catch (err: any) {
+        if (err instanceof StorageDeletionError) {
+          res.status(400).json({ error: err.message });
+          return;
+        }
+        res.status(400).json({ error: err.message || 'Unsafe index storage path' });
+        return;
+      }
+
+      // Acquire repo lock — prevents deleting while analyze/embed is in flight
+      const lockKey = storagePath;
+      const lockErr = acquireRepoLock(lockKey);
+      if (lockErr) {
+        res.status(409).json({ error: lockErr });
+        return;
+      }
+
+      try {
+        // Close any open LadybugDB handle before deleting files
+        try {
+          await closeLbug();
+        } catch {}
+
+        // 1. Delete the .gitnexus index/storage directory
+        await fs.rm(storagePath, { recursive: true, force: true }).catch(() => {});
+
+        // 2. Delete the cloned repo dir if it lives under ~/.gitnexus/repos/.
+        // getCloneDir now throws on names that are not filesystem-safe (e.g.
+        // local repos registered with names like "my project" or "org/repo").
+        // Such repos legitimately have no clone dir, so treat the rejection as
+        // "nothing to clean up" rather than letting it fail the delete handler.
+        let cloneDir: string | null = null;
+        try {
+          cloneDir = getCloneDir(entry.name);
+        } catch {
+          /* repo name not eligible for a clone dir (local repo) */
+        }
+        // Only remove the clone dir when it is *this* entry's path — a local
+        // repo registered under the same name would otherwise take a cloned
+        // sibling's checkout down with it (see cloneDirBelongsToEntry).
+        if (cloneDir && cloneDirBelongsToEntry(cloneDir, entry.path)) {
+          try {
+            const stat = await fs.stat(cloneDir);
+            if (stat.isDirectory()) {
+              await fs.rm(cloneDir, { recursive: true, force: true });
+            }
+          } catch {
+            /* clone dir may not exist */
+          }
+        }
+
+        // 2b. Delete the uploaded repo dir if entry.path lives under
+        // UPLOAD_ROOT. Drive this off entry.path (not a name-rederived dir) so
+        // a same-named clone is never affected.
+        const resolvedEntry = path.resolve(entry.path);
+        const safeUploadRoot = UPLOAD_ROOT.endsWith(path.sep)
+          ? UPLOAD_ROOT
+          : UPLOAD_ROOT + path.sep;
+        if (resolvedEntry === UPLOAD_ROOT || resolvedEntry.startsWith(safeUploadRoot)) {
+          await fs.rm(resolvedEntry, { recursive: true, force: true }).catch(() => {});
+        }
+
+        // 3. Unregister from the global registry
+        const { unregisterRepo } = await import('../storage/repo-manager.js');
+        await unregisterRepo(entry.path);
+
+        // 4. Reinitialize backend to reflect the removal
+        await backend.init().catch(() => {});
+
+        res.json({ deleted: entry.name });
+      } finally {
+        releaseRepoLock(lockKey);
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to delete repo' });
     }
   });
 
@@ -180,36 +1300,84 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
         return;
       }
       const lbugPath = path.join(entry.storagePath, 'lbug');
-      const graph = await withLbugDb(lbugPath, async () => buildGraph());
+      const includeContent = req.query.includeContent === 'true';
+      const stream = req.query.stream === 'true';
+      const { skipFts } = await loadFtsSession(entry.storagePath);
+
+      if (stream) {
+        const abortController = new AbortController();
+        let responseFinished = false;
+        const markFinished = () => {
+          responseFinished = true;
+        };
+        const abortStreaming = () => {
+          if (!responseFinished) {
+            abortController.abort();
+          }
+        };
+
+        res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.flushHeaders();
+
+        req.once('aborted', abortStreaming);
+        res.once('finish', markFinished);
+        res.once('close', abortStreaming);
+
+        try {
+          // Read-only open: /api/graph never writes. Write-mode opens engage
+          // LadybugDB's checkpoint machinery (`.shadow` sidecar), which on
+          // Windows races with the OS file handle release and trips
+          // "Cannot open file ... lbug.shadow - Error 2". See pool-adapter.ts
+          // which already opens read-only for the same reason, and the
+          // /api/query precedent in PR #1655.
+          await withLbugDb(
+            lbugPath,
+            async () => streamGraphNdjson(res, includeContent, abortController.signal),
+            readOnlyFtsOptions(skipFts),
+          );
+          if (!abortController.signal.aborted && !res.writableEnded) {
+            res.end();
+          }
+        } finally {
+          req.off('aborted', abortStreaming);
+          res.off('finish', markFinished);
+          res.off('close', abortStreaming);
+        }
+        return;
+      }
+
+      const graph = await withLbugDb(
+        lbugPath,
+        async () => buildGraph(includeContent),
+        readOnlyFtsOptions(skipFts),
+      );
       res.json(graph);
     } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Failed to build graph' });
+      if (sendStorageRequirementHttp(err, res)) return;
+      if (err instanceof ClientDisconnectedError) {
+        return;
+      }
+      const message = err.message || 'Failed to build graph';
+      if (res.headersSent) {
+        try {
+          res.write(JSON.stringify({ type: 'error', error: message }) + '\n');
+        } catch {
+          // Best-effort only after streaming has started.
+        }
+        res.end();
+        return;
+      }
+      res.status(500).json({ error: message });
     }
   });
 
   // Execute Cypher query
   app.post('/api/query', async (req, res) => {
-    try {
-      const cypher = req.body.cypher as string;
-      if (!cypher) {
-        res.status(400).json({ error: 'Missing "cypher" in request body' });
-        return;
-      }
-
-      const entry = await resolveRepo(requestedRepo(req));
-      if (!entry) {
-        res.status(404).json({ error: 'Repository not found' });
-        return;
-      }
-      const lbugPath = path.join(entry.storagePath, 'lbug');
-      const result = await withLbugDb(lbugPath, () => executeQuery(cypher));
-      res.json({ result });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Query failed' });
-    }
+    await handleQueryRequest(req, res, resolveRepo);
   });
 
-  // Search
+  // Search (supports mode: 'hybrid' | 'semantic' | 'bm25', and optional enrichment)
   app.post('/api/search', async (req, res) => {
     try {
       const query = (req.body.query ?? '').trim();
@@ -225,55 +1393,237 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
       }
       const lbugPath = path.join(entry.storagePath, 'lbug');
       const parsedLimit = Number(req.body.limit ?? 10);
+      const { ftsDisabledReason, skipFts } = await loadFtsSession(entry.storagePath);
       const limit = Number.isFinite(parsedLimit)
         ? Math.max(1, Math.min(100, Math.trunc(parsedLimit)))
         : 10;
+      const mode: string = req.body.mode ?? 'hybrid';
+      const enrich: boolean = req.body.enrich !== false; // default true
 
-      const results = await withLbugDb(lbugPath, async () => {
-        const { isEmbedderReady } = await import('../core/embeddings/embedder.js');
-        if (isEmbedderReady()) {
-          const { semanticSearch } = await import('../core/embeddings/embedding-pipeline.js');
-          return hybridSearch(query, limit, executeQuery, semanticSearch);
-        }
-        // FTS-only fallback when embeddings aren't loaded
-        return searchFTSFromLbug(query, limit);
-      });
-      res.json({ results });
+      const results = await withLbugDb(
+        lbugPath,
+        async () => {
+          let searchResults: any[];
+          let ftsAvailable: boolean | undefined;
+
+          if (mode === 'semantic') {
+            const { isEmbedderReady } = await import('../core/embeddings/embedder.js');
+            if (!isEmbedderReady()) {
+              return { searchResults: [] as any[], ftsAvailable: undefined };
+            }
+            const { semanticSearch: semSearch } =
+              await import('../core/embeddings/embedding-pipeline.js');
+            searchResults = await semSearch(executeQuery, query, limit);
+            // Normalize semantic results to HybridSearchResult shape
+            searchResults = searchResults.map((r: any, i: number) => ({
+              ...r,
+              score: r.score ?? 1 - (r.distance ?? 0),
+              rank: i + 1,
+              sources: ['semantic'],
+            }));
+          } else if (mode === 'bm25') {
+            const ftsResponse = await searchFTSFromLbug(query, limit, undefined, ftsDisabledReason);
+            ftsAvailable = ftsResponse.ftsAvailable;
+            searchResults = ftsResponse.results.map((r: any, i: number) => ({
+              ...r,
+              rank: i + 1,
+              sources: ['bm25'],
+            }));
+          } else {
+            // hybrid (default)
+            const { isEmbedderReady } = await import('../core/embeddings/embedder.js');
+            if (isEmbedderReady()) {
+              const { semanticSearch: semSearch } =
+                await import('../core/embeddings/embedding-pipeline.js');
+              searchResults = await hybridSearch(
+                query,
+                limit,
+                executeQuery,
+                semSearch,
+                ftsDisabledReason,
+              );
+              if (ftsDisabledReason) ftsAvailable = false;
+            } else {
+              const ftsResponse = await searchFTSFromLbug(
+                query,
+                limit,
+                undefined,
+                ftsDisabledReason,
+              );
+              ftsAvailable = ftsResponse.ftsAvailable;
+              searchResults = ftsResponse.results;
+            }
+          }
+
+          if (!enrich) return { searchResults, ftsAvailable };
+
+          // Server-side enrichment: add connections, cluster, processes per result
+          // Uses parameterized queries to prevent Cypher injection via nodeId
+          const validLabel = (label: string): boolean =>
+            (NODE_TABLES as readonly string[]).includes(label);
+
+          const enriched = await Promise.all(
+            searchResults.slice(0, limit).map(async (r: any) => {
+              const nodeId: string = r.nodeId || r.id || '';
+              const nodeLabel = nodeId.split(':')[0];
+              const enrichment: { connections?: any; cluster?: string; processes?: any[] } = {};
+
+              if (!nodeId || !validLabel(nodeLabel)) return { ...r, ...enrichment };
+
+              // Run connections, cluster, and process queries in parallel
+              // Label is validated against NODE_TABLES (compile-time safe identifiers);
+              // nodeId uses $nid parameter binding to prevent injection
+              const [connRes, clusterRes, procRes] = await Promise.all([
+                // determinism: probe — aggregate singleton. Both projections are
+                // `collect(...)` with no grouping key, which yields exactly one
+                // row, and `n` is PK-anchored on `$nid`; the LIMIT never chooses.
+                executePrepared(
+                  `
+              MATCH (n:${nodeLabel} {id: $nid})
+              OPTIONAL MATCH (n)-[r1:CodeRelation]->(dst)
+              OPTIONAL MATCH (src)-[r2:CodeRelation]->(n)
+              RETURN
+                collect(DISTINCT {name: dst.name, type: r1.type, confidence: r1.confidence}) AS outgoing,
+                collect(DISTINCT {name: src.name, type: r2.type, confidence: r2.confidence}) AS incoming
+              LIMIT 1
+            `,
+                  { nid: nodeId },
+                ).catch(() => []),
+                executePrepared(
+                  `
+              MATCH (n:${nodeLabel} {id: $nid})
+              MATCH (n)-[:CodeRelation {type: 'MEMBER_OF'}]->(c:Community)
+              RETURN c.label AS label, c.description AS description
+              ORDER BY c.id
+              LIMIT 1
+            `,
+                  { nid: nodeId },
+                ).catch(() => []),
+                executePrepared(
+                  `
+              MATCH (n:${nodeLabel} {id: $nid})
+              MATCH (n)-[rel:CodeRelation {type: 'STEP_IN_PROCESS'}]->(p:Process)
+              RETURN p.id AS id, p.label AS label, rel.step AS step, p.stepCount AS stepCount
+              ORDER BY rel.step
+            `,
+                  { nid: nodeId },
+                ).catch(() => []),
+              ]);
+
+              if (connRes.length > 0) {
+                const row = connRes[0];
+                const outgoing = (Array.isArray(row) ? row[0] : row.outgoing || [])
+                  .filter((c: any) => c?.name)
+                  .slice(0, 5);
+                const incoming = (Array.isArray(row) ? row[1] : row.incoming || [])
+                  .filter((c: any) => c?.name)
+                  .slice(0, 5);
+                enrichment.connections = { outgoing, incoming };
+              }
+
+              if (clusterRes.length > 0) {
+                const row = clusterRes[0];
+                enrichment.cluster = Array.isArray(row) ? row[0] : row.label;
+              }
+
+              if (procRes.length > 0) {
+                enrichment.processes = procRes
+                  .map((row: any) => ({
+                    id: Array.isArray(row) ? row[0] : row.id,
+                    label: Array.isArray(row) ? row[1] : row.label,
+                    step: Array.isArray(row) ? row[2] : row.step,
+                    stepCount: Array.isArray(row) ? row[3] : row.stepCount,
+                  }))
+                  .filter((p: any) => p.id && p.label);
+              }
+
+              return { ...r, ...enrichment };
+            }),
+          );
+
+          return { searchResults: enriched, ftsAvailable };
+        },
+        readOnlyFtsOptions(skipFts),
+      );
+      const response: any = { results: results.searchResults ?? results };
+      if (results.ftsAvailable === false) {
+        response.warning = ftsDegradedWarning(undefined, ftsDisabledReason);
+      }
+      res.json(response);
     } catch (err: any) {
+      if (sendStorageRequirementHttp(err, res)) return;
       res.status(500).json({ error: err.message || 'Search failed' });
     }
   });
 
   // Read file — with path traversal guard
-  app.get('/api/file', async (req, res) => {
+  // Rate-limited (CodeQL js/missing-rate-limiting): per-request fs.readFile.
+  app.get('/api/file', createRouteLimiter(), async (req, res) => {
     try {
       const entry = await resolveRepo(requestedRepo(req));
       if (!entry) {
         res.status(404).json({ error: 'Repository not found' });
         return;
       }
-      const filePath = req.query.path as string;
-      if (!filePath) {
-        res.status(400).json({ error: 'Missing path' });
-        return;
-      }
-
-      // Prevent path traversal — resolve and verify the path stays within the repo root
-      const repoRoot = path.resolve(entry.path);
-      const fullPath = path.resolve(repoRoot, filePath);
-      if (!fullPath.startsWith(repoRoot + path.sep) && fullPath !== repoRoot) {
-        res.status(403).json({ error: 'Path traversal denied' });
-        return;
-      }
-
-      const content = await fs.readFile(fullPath, 'utf-8');
-      res.json({ content });
+      await handleFileRequest(req, res, entry.path, await getSourceAvailability(entry));
     } catch (err: any) {
-      if (err.code === 'ENOENT') {
-        res.status(404).json({ error: 'File not found' });
-      } else {
-        res.status(500).json({ error: err.message || 'Failed to read file' });
+      if (sendStorageRequirementHttp(err, res)) return;
+      res.status(500).json({ error: err.message || 'Failed to read file' });
+    }
+  });
+
+  // Grep — regex search across file contents in the indexed repo
+  // Uses filesystem-based search for memory efficiency (never loads all files into memory)
+  // Rate-limited (CodeQL js/missing-rate-limiting): scans every file in
+  // the indexed repo per request — heaviest I/O endpoint. Same default 60
+  // rpm/IP for now; consider tightening if real-world load shows abuse.
+  app.get('/api/grep', createRouteLimiter(), async (req, res) => {
+    try {
+      const entry = await resolveRepo(requestedRepo(req));
+      if (!entry) {
+        res.status(404).json({ error: 'Repository not found' });
+        return;
       }
+      const sourceAvailability = await getSourceAvailability(entry);
+      if (!sourceAvailability.available) {
+        sendSourceUnavailable(res, sourceAvailability);
+        return;
+      }
+      // Pattern parsing lives in grep-params.ts (unit-testable without
+      // Express + LadybugDB). Matching runs in a worker so terminate() can
+      // cut a stuck regex.test() when the wall-clock budget expires.
+      const { regex, fileFilter, limit } = parseGrepQuery(req.query as Record<string, unknown>);
+      const repoRoot = path.resolve(entry.path);
+      const { skipFts } = await loadFtsSession(entry.storagePath);
+
+      const lbugPath = path.join(entry.storagePath, 'lbug');
+      const fileRows = await withLbugDb(
+        lbugPath,
+        () =>
+          executeQuery(`MATCH (n:File) WHERE n.content IS NOT NULL RETURN n.filePath AS filePath`),
+        readOnlyFtsOptions(skipFts),
+      );
+
+      const filePaths: string[] = [];
+      for (const row of fileRows) {
+        const filePath: string = row.filePath || '';
+        if (fileFilter && !filePath.toLowerCase().includes(fileFilter)) continue;
+        filePaths.push(filePath);
+      }
+
+      const { results, timedOut } = await runGrepScanInWorker({
+        repoRoot,
+        filePaths,
+        pattern: regex.source,
+        flags: regex.flags,
+        limit,
+        deadlineMs: Date.now() + GREP_TIME_BUDGET_MS,
+      });
+
+      res.json({ results, ...(timedOut ? { timedOut: true } : {}) });
+    } catch (err: any) {
+      if (sendStorageRequirementHttp(err, res)) return;
+      res.status(statusFromError(err)).json({ error: err.message || 'Grep failed' });
     }
   });
 
@@ -303,7 +1653,9 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
       }
       res.json(result);
     } catch (err: any) {
-      res.status(statusFromError(err)).json({ error: err.message || 'Failed to query process detail' });
+      res
+        .status(statusFromError(err))
+        .json({ error: err.message || 'Failed to query process detail' });
     }
   });
 
@@ -333,28 +1685,670 @@ export const createServer = async (port: number, host: string = '127.0.0.1') => 
       }
       res.json(result);
     } catch (err: any) {
-      res.status(statusFromError(err)).json({ error: err.message || 'Failed to query cluster detail' });
+      res
+        .status(statusFromError(err))
+        .json({ error: err.message || 'Failed to query cluster detail' });
     }
   });
 
+  // ── Analyze API ──────────────────────────────────────────────────────
+
+  // POST /api/analyze — start a new analysis job
+  app.post(
+    '/api/analyze',
+    createRouteLimiter({ limit: 10 }),
+    requireTrustedOrigin,
+    async (req, res) => {
+      try {
+        const {
+          url: repoUrl,
+          path: repoLocalPath,
+          force,
+          embeddings,
+          dropEmbeddings,
+          springActuatorPath,
+          asyncApiSpecPath,
+          token: repoToken,
+          branch: repoBranch,
+        } = req.body;
+
+        // Input type validation
+        if (repoUrl !== undefined && typeof repoUrl !== 'string') {
+          res.status(400).json({ error: '"url" must be a string' });
+          return;
+        }
+        if (repoLocalPath !== undefined && typeof repoLocalPath !== 'string') {
+          res.status(400).json({ error: '"path" must be a string' });
+          return;
+        }
+        if (
+          springActuatorPath !== undefined &&
+          (typeof springActuatorPath !== 'string' || springActuatorPath.trim().length === 0)
+        ) {
+          res.status(400).json({ error: '"springActuatorPath" must be a non-empty string' });
+          return;
+        }
+        if (
+          asyncApiSpecPath !== undefined &&
+          (typeof asyncApiSpecPath !== 'string' || asyncApiSpecPath.trim().length === 0)
+        ) {
+          res.status(400).json({ error: '"asyncApiSpecPath" must be a non-empty string' });
+          return;
+        }
+
+        if (!repoUrl && !repoLocalPath) {
+          res.status(400).json({ error: 'Provide "url" (git URL) or "path" (local path)' });
+          return;
+        }
+
+        // Branch: optional index-branch selector, validated with the same rules
+        // as the CLI's `--branch` so both entry points accept the same refs.
+        // Rejecting here (rather than letting the clone fail) keeps a malformed
+        // ref from ever reaching `git`.
+        if (repoBranch !== undefined && typeof repoBranch !== 'string') {
+          res.status(400).json({ error: '"branch" must be a string' });
+          return;
+        }
+        let analyzeBranch: string | undefined;
+        if (repoBranch !== undefined) {
+          try {
+            analyzeBranch = validateBranchName(repoBranch, '"branch"');
+          } catch (err) {
+            if (err instanceof InvalidBranchError) {
+              res.status(400).json({ error: err.message });
+              return;
+            }
+            throw err;
+          }
+        }
+
+        // Token: optional, restricted charset to prevent header smuggling
+        // (CRLF), bound length, and bound to github.com (see validateAnalyzeToken).
+        const tokenError = validateAnalyzeToken(repoToken, repoUrl);
+        if (tokenError) {
+          res.status(tokenError.status).json({ error: tokenError.error });
+          return;
+        }
+
+        // Path validation. The previous `normalize !== resolve` guard was inert
+        // (both collapse `..` identically) and only false-rejected trailing
+        // slashes, so it is dropped. Analyzing a local path the operator names
+        // is the tool's intended capability (same as the CLI); the dangerous
+        // part was cross-origin reach, which is closed by requireTrustedOrigin
+        // on this route (scoped to loopback, the server's own bound host, and a
+        // configured GITNEXUS_PUBLIC_ORIGIN — other LAN devices are NOT
+        // trusted). We only require an absolute path here and
+        // let the analyze worker surface a clear error if it does not exist.
+        // (We do NOT realpath/stat the path in-route: that would be a
+        // user-controlled filesystem read — CodeQL js/path-injection — for no
+        // security gain.)
+        if (repoLocalPath && !path.isAbsolute(repoLocalPath)) {
+          res.status(400).json({ error: '"path" must be an absolute path' });
+          return;
+        }
+
+        const job = jobManager.createJob({
+          repoUrl,
+          repoPath: repoLocalPath,
+          branch: analyzeBranch,
+        });
+
+        // If job was already running (dedup), just return its id. The token is
+        // not part of the dedup identity and is never stored on the job, so a
+        // token on THIS request had no effect — the existing job already
+        // cloned (or is cloning) with whatever credentials its originating
+        // request supplied. Surface `tokenIgnored` so an authenticated caller
+        // isn't misled into thinking their PAT took effect on a reused job.
+        if (job.status !== 'queued') {
+          const body: { jobId: string; status: string; tokenIgnored?: boolean } = {
+            jobId: job.id,
+            status: job.status,
+          };
+          if (repoToken !== undefined) body.tokenIgnored = true;
+          res.status(202).json(body);
+          return;
+        }
+
+        // Mark as active synchronously to prevent race with concurrent requests
+        jobManager.updateJob(job.id, { status: 'cloning' });
+
+        // Start async work — don't await
+        (async () => {
+          let targetPath = repoLocalPath;
+          try {
+            // Clone if URL provided
+            if (repoUrl && !repoLocalPath) {
+              const repoName = extractWebRepoName(repoUrl);
+              // Branch-pinned runs get their own clone dir, so they never share
+              // a working tree with the unpinned one (see getCloneDir).
+              targetPath = getCloneDir(repoName, analyzeBranch);
+
+              jobManager.updateJob(job.id, {
+                status: 'cloning',
+                // url+branch: same value as registryName (dir basename), not
+                // the extractWebRepoName stem used only as getCloneDir's first arg.
+                repoName: analyzeBranch ? path.basename(targetPath) : repoName,
+                progress: { phase: 'cloning', percent: 0, message: `Cloning ${repoUrl}...` },
+              });
+
+              await cloneOrPull(
+                repoUrl,
+                targetPath,
+                (progress) => {
+                  jobManager.updateJob(job.id, {
+                    progress: { phase: progress.phase, percent: 5, message: progress.message },
+                  });
+                },
+                analyzeCloneOptions(repoToken, analyzeBranch),
+              );
+            }
+
+            if (!targetPath) {
+              throw new Error('No target path resolved');
+            }
+
+            await launchAnalysisWorker(job, targetPath, {
+              force,
+              embeddings,
+              dropEmbeddings,
+              springActuatorPath,
+              asyncApiSpecPath,
+              branch: analyzeBranch,
+              // Both clone dirs share an `origin`, so the name `registerRepo`
+              // infers from the remote would be identical and the second one
+              // would fail with RegistryNameCollisionError. Register the pinned
+              // clone under its directory name instead: unique per branch, and
+              // it re-derives through getCloneDir for DELETE /api/repo.
+              //
+              // Gated on the SAME condition as the clone above: when a caller
+              // supplies both `url` and `path` nothing is cloned, and renaming
+              // the operator's own local repo after its directory would be a
+              // surprise unrelated to branch pinning.
+              ...(analyzeBranch && repoUrl && !repoLocalPath
+                ? { registryName: path.basename(targetPath) }
+                : {}),
+            });
+          } catch (err: any) {
+            jobManager.updateJob(job.id, {
+              status: 'failed',
+              error: err.message || 'Analysis failed',
+            });
+          }
+        })();
+
+        res.status(202).json({ jobId: job.id, status: job.status });
+      } catch (err: any) {
+        if (err.message?.includes('already in progress')) {
+          res.status(409).json({ error: err.message });
+        } else {
+          res.status(500).json({ error: err.message || 'Failed to start analysis' });
+        }
+      }
+    },
+  );
+
+  // POST /api/analyze/upload — analyze a browser folder upload.
+  // Securely ingests the multipart upload into a sandbox, promotes it to a
+  // persistent dir, and analyzes it via the shared job/worker machinery.
+  // localhost-only (no cross-origin write reach) + conservative rate limit.
+  app.post(
+    '/api/analyze/upload',
+    createRouteLimiter({ limit: 5 }),
+    requireTrustedOrigin,
+    createAnalyzeUploadHandler({
+      createJob: (params) => jobManager.createJob(params),
+      launch: (job, targetPath, opts) => launchAnalysisWorker(job, targetPath, opts),
+      failJob: (jobId, error) => jobManager.updateJob(jobId, { status: 'failed', error }),
+    }),
+  );
+
+  // GET /api/analyze/:jobId — poll job status
+  app.get('/api/analyze/:jobId', (req, res) => {
+    const job = jobManager.getJob(req.params.jobId);
+    if (!job) {
+      res.status(404).json({ error: 'Job not found' });
+      return;
+    }
+    res.json({
+      id: job.id,
+      status: job.status,
+      repoUrl: job.repoUrl,
+      repoPath: job.repoPath,
+      repoName: job.repoName,
+      progress: job.progress,
+      error: job.error,
+      startedAt: job.startedAt,
+      completedAt: job.completedAt,
+    });
+  });
+
+  // GET /api/analyze/:jobId/progress — SSE stream (shared helper)
+  mountSSEProgress(app, '/api/analyze/:jobId/progress', jobManager);
+
+  // DELETE /api/analyze/:jobId — cancel a running analysis job
+  app.delete('/api/analyze/:jobId', requireTrustedOrigin, (req, res) => {
+    const jobId = req.params.jobId as string;
+    const job = jobManager.getJob(jobId);
+    if (!job) {
+      res.status(404).json({ error: 'Job not found' });
+      return;
+    }
+    if (isTerminalJobStatus(job.status)) {
+      res.status(400).json({ error: `Job already ${job.status}` });
+      return;
+    }
+    jobManager.cancelJob(jobId, 'Cancelled by user');
+    res.json({ id: job.id, status: 'failed', error: 'Cancelled by user' });
+  });
+
+  // ── Embedding endpoints ────────────────────────────────────────────
+
+  const embedJobManager = new JobManager();
+
+  // POST /api/embed — trigger server-side embedding generation
+  app.post(
+    '/api/embed',
+    createRouteLimiter({ limit: 20 }),
+    requireTrustedOrigin,
+    async (req, res) => {
+      try {
+        const entry = await resolveRepo(requestedRepo(req));
+        if (!entry) {
+          res.status(404).json({ error: 'Repository not found' });
+          return;
+        }
+
+        // Re-check the exact registered slot immediately before taking the lock.
+        // The query resolver already validates it, but this closes the gap between
+        // lookup and a long-running metadata-writing job.
+        const storagePath = await requireRegisteredStoragePath(entry, STATUS_STORAGE_REQUIREMENTS);
+
+        // Check shared repo lock — prevent concurrent analyze + embed on same repo
+        const repoLockPath = storagePath;
+        const lockErr = acquireRepoLock(repoLockPath);
+        if (lockErr) {
+          res.status(409).json({ error: lockErr });
+          return;
+        }
+
+        const job = embedJobManager.createJob({ repoPath: storagePath });
+        embedJobManager.updateJob(job.id, {
+          repoName: entry.name,
+          status: 'analyzing' as any,
+          progress: { phase: 'analyzing', percent: 0, message: 'Starting embedding generation...' },
+        });
+        const embedController = new AbortController();
+        embedJobManager.registerAbortController(job.id, embedController);
+
+        // 30-minute timeout for embedding jobs (same as analyze jobs)
+        const EMBED_TIMEOUT_MS = 30 * 60 * 1000;
+        const embedTimeout = setTimeout(() => {
+          const current = embedJobManager.getJob(job.id);
+          if (current && !isTerminalJobStatus(current.status)) {
+            embedJobManager.cancelJob(job.id, 'Embedding timed out (30 minute limit)');
+          }
+        }, EMBED_TIMEOUT_MS);
+
+        // Run embedding pipeline asynchronously
+        (async () => {
+          // Set inside withLbugDb, read after it closes (#2790).
+          let partialRunError: string | undefined;
+          let partialRunDetail: AnalyzeJobPartialOutcome | undefined;
+          try {
+            const lbugPath = path.join(storagePath, LBUG_DIRECTORY);
+            const ftsSession = await loadFtsSession(storagePath);
+            let embeddingMeta = ftsSession.meta;
+            await withLbugDb(
+              lbugPath,
+              async () => {
+                const { runEmbeddingPipeline } =
+                  await import('../core/embeddings/embedding-pipeline.js');
+                const { resolveEmbeddingIdentity } =
+                  await import('../core/embeddings/embedding-identity.js');
+                const embeddingIdentity = resolveEmbeddingIdentity();
+                if (!embeddingMeta) {
+                  throw new Error('Repository metadata is missing; run gitnexus analyze first');
+                }
+                const priorCheckpoint = embeddingMeta.embeddingCheckpoint;
+                // The SAME decision the CLI's resume gate makes
+                // (core/embedding-checkpoint.ts). This route used to hard-throw on
+                // any identity mismatch and ignore `attempts` entirely, so a
+                // `'partial'` marker written by `gitnexus analyze` and resumed
+                // here hit exactly the permanent wedge `kind` exists to remove:
+                // two readers of one record disagreeing about the rule it encodes.
+                // No `force`/`--drop-embeddings` equivalent exists on this route,
+                // so the flag options go unset and `'discard'` is unreachable —
+                // it is folded into the abandon arm rather than given an invented
+                // flag. `maxAttempts` is left to the shared default.
+                const resume = priorCheckpoint
+                  ? decideEmbeddingResume(priorCheckpoint, embeddingIdentity)
+                  : undefined;
+                if (resume?.action === 'abort') throw new Error(resume.error);
+                if (resume?.action === 'abandon' || resume?.action === 'discard') {
+                  logger.warn({ repo: entry.name }, resume.log);
+                }
+                const forceReembedNodeIds: ReadonlySet<string> =
+                  resume?.action === 'resume' ? resume.pendingNodeIds : new Set<string>();
+                const saveEmbeddingCheckpoint = async (
+                  checkpoint: {
+                    nodesProcessed: number;
+                    totalNodes: number;
+                    chunksProcessed: number;
+                  },
+                  pendingNodeIds: string[],
+                  embeddings?: PersistedEmbeddingCount,
+                ): Promise<void> => {
+                  // tri-review NEW-2: re-read immediately before writing (mirrors
+                  // the pattern in run-analyze.ts's --repair-fts stamp) instead of
+                  // spreading the stale `embeddingMeta` snapshot captured once at
+                  // job start. This job can run up to EMBED_TIMEOUT_MS (30 min);
+                  // without a fresh read, a concurrent writer's update (e.g. a
+                  // --repair-fts capability stamp) would be silently reverted on
+                  // every checkpoint save for the job's whole lifetime.
+                  const latestMeta = (await loadMeta(storagePath)) ?? embeddingMeta;
+                  // `stats.embeddings` only moves when the caller MEASURED the
+                  // live count (the post-flush `onCheckpoint`). The window-start
+                  // callback measures nothing and passes nothing: restating the
+                  // old count there would re-publish a stale number and clobber
+                  // what a preceding `onCheckpoint` just wrote (same split as
+                  // run-analyze.ts's checkpoint writer).
+                  embeddingMeta = withMeasuredEmbeddingCount(
+                    {
+                      ...latestMeta,
+                      // In flight ⇒ `kind: 'interrupted'` (embedding-checkpoint.ts).
+                      embeddingCheckpoint: mintInterruptedCheckpoint(
+                        embeddingIdentity,
+                        checkpoint,
+                        pendingNodeIds,
+                      ),
+                    },
+                    embeddings,
+                  );
+                  await requireRegisteredStoragePath(entry, STATUS_STORAGE_REQUIREMENTS);
+                  await saveMeta(storagePath, embeddingMeta);
+                };
+                /**
+                 * Count the persisted rows, or report the answer never arrived.
+                 * The TRI-STATE is carried to the fold rather than collapsed here:
+                 * `unknown` is not 0, and only the fold knows what to carry
+                 * forward instead (core/embedding-count.ts).
+                 */
+                const countPersistedEmbeddings = async (): Promise<PersistedEmbeddingCount> => {
+                  const counted = await measurePersistedEmbeddingCount(executeQuery);
+                  if (counted.kind === 'unknown') {
+                    logger.warn(
+                      { reason: counted.reason },
+                      '[embed] could not count persisted embeddings; leaving stats.embeddings untouched',
+                    );
+                  }
+                  return counted;
+                };
+                // Fetch existing content hashes for incremental embedding.
+                // Delegated to lbug-adapter which owns the DB query logic and legacy-fallback handling.
+                const { fetchExistingEmbeddingHashes } =
+                  await import('../core/lbug/lbug-adapter.js');
+                const existingEmbeddings = await fetchExistingEmbeddingHashes(executeQuery);
+                if (existingEmbeddings && existingEmbeddings.size > 0) {
+                  console.log(
+                    `[embed] ${existingEmbeddings.size} nodes already embedded — incremental run with content-hash comparison`,
+                  );
+                }
+                const pipelineResult = await runEmbeddingPipeline(
+                  executeQuery,
+                  executeWithReusedStatement,
+                  (p) => {
+                    embedJobManager.updateJob(job.id, {
+                      progress: {
+                        // `ready` maps to 'finalizing', NOT 'complete' (#2790).
+                        // The pipeline emits `ready`/100% unconditionally before
+                        // returning — including when it dropped nodes to endpoint
+                        // failures — and the route has not measured the index or
+                        // decided the outcome yet, so 'complete' here would make
+                        // the job record contradict itself (`status: 'analyzing'`,
+                        // `progress.phase: 'complete'`).
+                        phase:
+                          p.phase === 'ready'
+                            ? 'finalizing'
+                            : p.phase === 'error'
+                              ? 'failed'
+                              : p.phase,
+                        percent: p.percent,
+                        message:
+                          p.phase === 'loading-model'
+                            ? 'Loading embedding model...'
+                            : p.phase === 'embedding'
+                              ? `Embedding nodes (${p.percent}%)...`
+                              : p.phase === 'indexing'
+                                ? 'Creating vector index...'
+                                : p.phase === 'ready'
+                                  ? 'Finalizing embeddings...'
+                                  : `${p.phase} (${p.percent}%)`,
+                      },
+                    });
+                  },
+                  {}, // config: use defaults
+                  undefined, // skipNodeIds
+                  existingEmbeddings,
+                  {
+                    signal: embedController.signal,
+                    forceReembedNodeIds,
+                    onCheckpointWindowStart: async ({ nodeIds, ...checkpoint }) => {
+                      await saveEmbeddingCheckpoint(checkpoint, nodeIds);
+                    },
+                    onCheckpoint: async (checkpoint) => {
+                      // Count AFTER the flush, so the number describes rows that
+                      // are durable rather than rows still pending in the WAL.
+                      await flushWAL();
+                      await saveEmbeddingCheckpoint(
+                        checkpoint,
+                        [],
+                        await countPersistedEmbeddings(),
+                      );
+                    },
+                  },
+                );
+
+                // Flush WAL so subsequent /api/search requests see the new
+                // embeddings immediately (#1149). In the CLI path closeLbug()
+                // handles this during process exit, but the server keeps the
+                // connection open for other routes — a CHECKPOINT is enough.
+                await flushWAL();
+                // Measure inside withLbugDb, after the flush and while the
+                // connection is still open — this is the route's only chance to
+                // stamp `stats.embeddings` (embed-run-outcome.ts). A partial run
+                // gets the same stamp: an honest count of a partial index is what
+                // makes it survivable.
+                const measuredEmbeddings = await countPersistedEmbeddings();
+                // Same re-read-before-write reasoning as saveEmbeddingCheckpoint
+                // above — and the outcome decision reads it too: its
+                // `embeddingCheckpoint` is the marker this run's own mid-run
+                // writer saved, which is the only record of the work when the
+                // count query could not answer.
+                const finalMeta = (await loadMeta(storagePath)) ?? embeddingMeta;
+                const finalizeContext: EmbedRunFinalizeContext = {
+                  measuredEmbeddings: persistedEmbeddingCountOrUndefined(measuredEmbeddings),
+                  onDisk: finalMeta,
+                  // The marker the job STARTED from — `finalMeta`'s has since been
+                  // overwritten by the in-flight writer, so only this one carries
+                  // the `'partial'` attempt chain.
+                  resumedFrom: priorCheckpoint,
+                };
+                const outcome = resolveEmbedRunOutcome(
+                  embeddingIdentity,
+                  pipelineResult,
+                  finalizeContext,
+                );
+                partialRunError = outcome.error;
+                partialRunDetail = outcome.partial;
+                embeddingMeta = withMeasuredEmbeddingCount(
+                  { ...finalMeta, embeddingCheckpoint: outcome.checkpoint },
+                  measuredEmbeddings,
+                );
+                await requireRegisteredStoragePath(entry, STATUS_STORAGE_REQUIREMENTS);
+                await saveMeta(storagePath, embeddingMeta);
+              },
+              skipFtsOption(ftsSession.skipFts),
+            );
+
+            // Don't overwrite 'failed' if the job was cancelled while the pipeline was running
+            const current = embedJobManager.getJob(job.id);
+            if (!current || current.status !== 'failed') {
+              // The ONLY terminal event for the job, on both branches — nothing
+              // earlier maps to a terminal status, and `updateJob` synthesizes
+              // exactly one event per terminal status (#2264 P3). The explicit
+              // `progress` keeps the record self-consistent for a poller reading
+              // `progress.phase` (#2790).
+              embedJobManager.updateJob(
+                job.id,
+                partialRunError === undefined
+                  ? {
+                      status: 'complete',
+                      progress: { phase: 'complete', percent: 100, message: 'Embeddings complete' },
+                    }
+                  : {
+                      status: 'failed',
+                      error: partialRunError,
+                      // Lets a client separate "retry these N nodes" from "the
+                      // run produced nothing" without a new status member.
+                      partial: partialRunDetail,
+                      progress: { phase: 'failed', percent: 100, message: partialRunError },
+                    },
+              );
+            }
+          } catch (err: any) {
+            const current = embedJobManager.getJob(job.id);
+            if (!current || current.status !== 'failed') {
+              embedJobManager.updateJob(job.id, {
+                status: 'failed',
+                error: err.message || 'Embedding generation failed',
+              });
+            }
+          } finally {
+            clearTimeout(embedTimeout);
+            releaseRepoLock(repoLockPath);
+          }
+        })();
+
+        res.status(202).json({ jobId: job.id, status: 'analyzing' });
+      } catch (err: any) {
+        if (sendStorageRequirementHttp(err, res)) return;
+        if (err.message?.includes('already in progress')) {
+          res.status(409).json({ error: err.message });
+        } else {
+          res.status(500).json({ error: err.message || 'Failed to start embedding generation' });
+        }
+      }
+    },
+  );
+
+  // GET /api/embed/:jobId — poll embedding job status
+  app.get('/api/embed/:jobId', (req, res) => {
+    const job = embedJobManager.getJob(req.params.jobId);
+    if (!job) {
+      res.status(404).json({ error: 'Job not found' });
+      return;
+    }
+    res.json({
+      id: job.id,
+      status: job.status,
+      repoName: job.repoName,
+      progress: job.progress,
+      error: job.error,
+      // Absent unless the run was a partial one — omitted by JSON.stringify, so
+      // the response shape is unchanged for every other outcome (#2790).
+      partial: job.partial,
+      startedAt: job.startedAt,
+      completedAt: job.completedAt,
+    });
+  });
+
+  // GET /api/embed/:jobId/progress — SSE stream (shared helper)
+  mountSSEProgress(app, '/api/embed/:jobId/progress', embedJobManager);
+
+  // DELETE /api/embed/:jobId — cancel embedding job
+  app.delete('/api/embed/:jobId', requireTrustedOrigin, (req, res) => {
+    const jobId = req.params.jobId as string;
+    const job = embedJobManager.getJob(jobId);
+    if (!job) {
+      res.status(404).json({ error: 'Job not found' });
+      return;
+    }
+    if (isTerminalJobStatus(job.status)) {
+      res.status(400).json({ error: `Job already ${job.status}` });
+      return;
+    }
+    embedJobManager.cancelJob(jobId, 'Cancelled by user');
+    res.json({ id: job.id, status: 'failed', error: 'Cancelled by user' });
+  });
+
+  // ── Web UI (served at root) ───────────────────────────────────────
+
+  // Resolve the gitnexus-web dist directory relative to this file's location.
+  // In the published package: <pkg>/dist/server/api.js → <pkg>/web/
+  // In dev (tsx):            gitnexus/src/server/api.ts → gitnexus-web/dist/
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const webDistDir = path.resolve(__dirname, '..', '..', 'web');
+  const devWebDistDir = path.resolve(__dirname, '..', '..', '..', 'gitnexus-web', 'dist');
+  const staticDir = await resolveWebDistDir(webDistDir, devWebDistDir);
+  registerWebUI(app, staticDir);
+
   // Global error handler — catch anything the route handlers miss
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    console.error('Unhandled error:', err);
+    logger.error({ err }, 'Unhandled error:');
     res.status(500).json({ error: 'Internal server error' });
   });
 
-  const server = app.listen(port, host, () => {
-    console.log(`GitNexus server running on http://${host}:${port}`);
-  });
+  // Wrap listen in a promise so errors (EADDRINUSE, EACCES, etc.) propagate
+  // to the caller instead of crashing with an unhandled 'error' event.
+  await new Promise<void>((resolve, reject) => {
+    const server = app.listen(port, host, () => {
+      const displayHost = host === '::' || host === '0.0.0.0' ? 'localhost' : host;
+      console.log(`GitNexus server running on http://${displayHost}:${port}`);
+      resolve();
+    });
+    server.on('error', (err) => reject(err));
+    // `listening` is the successful startup boundary for notifier work.
+    bindServeUpdateControllerLifecycle(server, updateController);
 
-  // Graceful shutdown — close Express + LadybugDB cleanly
-  const shutdown = async () => {
-    server.close();
-    await cleanupMcp();
-    await closeLbug();
-    await backend.disconnect();
-    process.exit(0);
-  };
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
+    // Graceful shutdown — close Express + LadybugDB cleanly. Pino's default
+    // destination is `sync: false` (buffered); `flushLoggerSync()` before
+    // `process.exit` so records emitted during cleanup reach stderr.
+    const shutdown = async () => {
+      console.log('\nShutting down...');
+      updateController.stop();
+      server.close();
+      jobManager.dispose();
+      embedJobManager.dispose();
+      await cleanupMcp();
+      await closeLbug();
+      await backend.disconnect();
+      const { flushLoggerSync } = await import('../core/logger.js');
+      flushLoggerSync();
+      process.exit(0);
+    };
+    process.once('SIGINT', shutdown);
+    process.once('SIGTERM', shutdown);
+
+    // Catch-all crash guards (mirrors startMCPServer in mcp/server.ts).
+    // Pino v10's default destination is buffered (`sync: false`) — call
+    // `flushLoggerSync()` after logging and before triggering shutdown
+    // so the crash record reaches stderr regardless of how cleanup goes.
+    // Worker-thread transports (pino-pretty under TTY) handle their own
+    // flush on process exit in v10. `pino.final` was removed in v10
+    // because the new transport architecture made it unnecessary.
+    let shuttingDown = false;
+    process.on('uncaughtException', (err) => {
+      logger.error({ err }, 'GitNexus uncaughtException');
+      flushLoggerSync();
+      if (!shuttingDown) {
+        shuttingDown = true;
+        shutdown().catch(() => {});
+      }
+    });
+    process.on('unhandledRejection', (reason: unknown) => {
+      // Availability-first: log the rejection without exiting.
+      const err = reason instanceof Error ? reason : new Error(String(reason));
+      logger.error({ err }, 'GitNexus unhandledRejection');
+    });
+  });
 };

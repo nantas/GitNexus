@@ -42,6 +42,12 @@ For any task involving code understanding, debugging, impact analysis, or refact
 | `cypher`         | Raw graph queries (read `gitnexus://repo/{name}/schema` first)           |
 | `list_repos`     | Discover indexed repos                                                   |
 
+### Query and context inputs
+
+Use `query({search_query: "concept"})`; the handler also accepts legacy `query` callers. Use `context({name: "symbol", file_path: "src/file", kind: "Method"})` to narrow same-name candidates, or `uid` for a direct lookup. Optional `branch` selects a pinned branch index.
+
+Search can return `warning` and `partial` when FTS or enrichment is degraded. These fields remain visible in slim output; absence of a match during degradation is not proof that the code does not exist. `contentAvailability` explains whether requested source content is retained in the index.
+
 ### Unity Retrieval Contract (query/context)
 
 Default `query/context` responses are now slim for agent use:
@@ -145,3 +151,110 @@ RETURN caller.name, caller.filePath
   - `policy-adjusted`: user-visible result after hydration policy is applied
 - If `hydration_policy=strict` and `hydrationMeta.fallbackToCompact=true`, the result is downgraded policy-adjusted output and is not closure.
 - In that downgraded state, rerun with parity before final conclusions.
+
+
+## Upstream tool and schema additions
+
+| Tool             | What it gives you                                                        |
+| ---------------- | ------------------------------------------------------------------------ |
+| `query`          | Process-grouped code intelligence — execution flows related to a concept |
+| `context`        | 360-degree symbol view — categorized refs, processes it participates in  |
+| `impact`         | Symbol blast radius — what breaks at depth 1/2/3 with confidence         |
+| `trace`          | Shortest path between two symbols — "how does A reach B?" in one call     |
+| `detect_changes` | Git-diff impact — what do your current changes affect                    |
+| `rename`         | Multi-file coordinated rename with confidence-tagged edits               |
+| `cypher`         | Raw graph queries (read `gitnexus://repo/{name}/schema` first)           |
+| `explain`        | Persisted taint findings — source→sink data flows (needs `analyze --pdg`) |
+| `pdg_query`      | Control/data dependence — what gates X (CDG) / where Y flows (REACHING_DEF); needs `analyze --pdg` |
+| `check`          | Check graph invariants such as circular imports                          |
+| `route_map`      | API route map — which components/hooks fetch which endpoints, and the handler files that serve them |
+| `shape_check`    | Response-shape drift — keys each route returns vs keys its consumers access (flags MISMATCH) |
+| `api_impact`     | Pre-change report for an API route — consumers, middleware, shape mismatches, risk level |
+| `tool_map`       | MCP/RPC tool definitions and the files that handle them                  |
+| `group_list`     | List configured multi-repo groups, or one group's config                 |
+| `group_sync`     | Rebuild a group's Contract Registry (cross-repo HTTP contract links); run after `group.yaml` changes or member re-index |
+| `list_repos`     | Discover indexed repos (paginated — `limit`/`offset`)                    |
+
+### Paginating `list_repos`
+
+`list_repos` is paginated so a large registry is not truncated by MCP/LLM token limits. It takes optional `limit` (default **50**, max **200**) and `offset`, and returns:
+
+```jsonc
+{
+  "repositories": [
+    { "name": "...", "path": "...", "indexedAt": "...", "lastCommit": "...", "stats": { } }
+  ],
+  "pagination": {
+    "total": 437,
+    "limit": 50,
+    "offset": 0,
+    "returned": 50,
+    "hasMore": true,
+    "nextOffset": 50
+  }
+}
+```
+
+To enumerate **every** repository, keep calling with `offset` set to `pagination.nextOffset` until `hasMore` is `false`:
+
+```text
+list_repos {}               → repos 1–50,    nextOffset 50,  hasMore true
+list_repos { offset: 50 }   → repos 51–100,  nextOffset 100, hasMore true
+…
+list_repos { offset: 400 }  → repos 401–437,                 hasMore false   (done)
+```
+
+Notes: `offset` ≥ `total` returns an empty page (with `total` still reported). Out-of-range or malformed `limit`/`offset` (non-integer, `limit` outside `[1, 200]`, `offset < 0`) are rejected with a clear error — `limit` above the max is rejected, not silently capped. The order is deterministic (lower-cased name, then path), so paging never skips or duplicates an entry while the registry is unchanged.
+
+### Inline staleness signal (`query` / `context` / `impact` / `cypher`)
+
+These four hot read tools attach a non-blocking `staleness` field to their response when the index is not at the checkout's current HEAD — the same `{ status, commitsBehind?, hint? }` shape `list_repos` already reports — so a direct tool call surfaces a stale index without a separate `list_repos` call:
+
+```jsonc
+{ /* …the tool's normal result… */
+  "staleness": { "status": "behind", "commitsBehind": 3, "hint": "⚠️ Index is 3 commits behind HEAD. Run analyze tool to update." }
+}
+```
+
+`commitsBehind` is present only when git counted the gap. When git could not count it but HEAD still resolves to a commit other than the indexed one — usually because the indexed commit is no longer in the clone's history — the index is provably not at HEAD with no countable gap, so no number is reported:
+
+```jsonc
+{ /* …the tool's normal result… */
+  "staleness": { "status": "diverged", "hint": "⚠️ Index is not at HEAD and the commit gap could not be counted — the recorded commit may no longer be in this clone's history. Run analyze tool to update." }
+}
+```
+
+The field is **absent when the index is current**, and these four tools also omit it when the freshness check could not run at all — that case is `status: "unknown"`, which only the `list_repos` listing reports. So its presence means the status is not `current`: read `status` before using `commitsBehind`. It is only ever added to object results — raw-array `cypher` output and error envelopes are returned unchanged. `@group`-targeted calls do not carry it (multi-repo staleness is ill-defined). When you see it, the graph may be behind the working tree — re-run `analyze` before trusting blast-radius or dependence answers.
+
+### Taint findings (`explain`)
+
+`explain` returns taint findings recorded by `gitnexus analyze --pdg` — intra-procedural `TAINTED` edges plus cross-function `TAINT_PATH` hops where the interprocedural taint phase found a function-level source→sink chain. Each finding includes a sink category (command-injection, code-injection, path-traversal, sql-injection, xss), source/sink lines, and the ordered hop path with the variable carried on each hop.
+
+- `explain {}` — enumerate all findings for the repo (bounded by `limit`, deterministic order)
+- `explain { target: "src/vuln.ts" }` — findings in a file (suffix path match accepted)
+- `explain { target: "runUserCommand" }` — findings in a function (resolved like `context`; ambiguous names return ranked candidates)
+
+A repo indexed without `--pdg` returns a clear "no taint layer" note. Caveats: closure/callback, property/field, and implicit flows are not modeled, and interprocedural findings are function-level `TAINT_PATH` hops rather than statement-level path proof, so the absence of a finding is **not** proof of safety. `SANITIZES` (sanitizer-kill) edges are queryable via `cypher`.
+
+### Control & data dependence (`pdg_query`)
+
+`pdg_query` reads the control/data-dependence layers `gitnexus analyze --pdg` records (CDG + REACHING_DEF, basic-block granular) — the control/data analog of `explain`. It is **always anchored** (a `target` file path or symbol, resolved like `context`) and has two modes:
+
+- `pdg_query { mode: "controls", target: "..." }` — CDG: "under what condition does X run?". Each edge is a controlling predicate block → dependent block with the branch sense (`'T'`/`'F'`) in `reason`; an edge into an early `return`/`throw` is flagged `guard: true` (guard-clause discovery — the sense depends on the predicate, so don't filter guards by a fixed label).
+- `pdg_query { mode: "flows", target: "...", variable?: "..." }` — REACHING_DEF def→use edges within the function; pass `variable` to trace one binding.
+
+A repo indexed without `--pdg` returns a "no PDG layer" note (or "status unknown" when the layer can't be confirmed). Intra-procedural only — cross-function flow is taint's domain (`explain`). The raw CDG/REACHING_DEF edges are also queryable via `cypher`. See the `gitnexus-pdg-query` skill for the full query surface.
+
+### Shortest path between two symbols (`trace`)
+
+`trace` answers "how does A reach B?" in one call — the shortest directed path over `CALLS` (plus `HAS_METHOD`, so a class-rooted trace descends into its methods) instead of chaining 3–8 `context`/`impact` hops by hand.
+
+- `trace { from: "validateUser", to: "executeQuery" }` — shortest path between two symbols.
+- Disambiguate common names with `from_uid`/`to_uid` (zero-ambiguity) or `from_file`/`to_file`; an ambiguous name returns ranked candidates.
+- `maxDepth` (default 10, max 30) bounds the search; `includeTests` (default false) lets the traversal pass through test-file symbols.
+
+Returns ordered `hops` (each `{ name, filePath, startLine }`) and an aligned `edges[]` of `{ relType, confidence }`, so call hops and containment (`HAS_METHOD`) hops stay distinguishable. When no path exists it reports the **furthest** reachable node (where the chain breaks) and sets `truncated: true` if a traversal cap was hit first. Every result carries a `status`: `ok` / `no_path` / `ambiguous` / `not_found` / `error`.
+
+Cross-repo (experimental): pass `repo: "@groupName"` to trace across a group's member repos — the path may cross **one** `ContractLink` boundary (reported as a `CONTRACT_LINK` hop with the bridged contract in `crossings[]`). Omit `to` entirely to follow `from`'s outgoing HTTP call to whatever provider endpoint it lands on. Groups are configured via `group_list` / `group_sync`.
+
+Read `gitnexus://repo/{name}/schema` before writing Cypher. Fork Unity tools and narrowing-first slim/full rules above remain available.

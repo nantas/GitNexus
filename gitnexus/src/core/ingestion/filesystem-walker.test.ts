@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
-import { walkRepositoryPaths, walkUnityResourcePaths } from './filesystem-walker.js';
+import { walkUnityResourcePaths } from './unity-resource-scan.js';
+import { walkRepositoryPaths } from './filesystem-walker.js';
 
 test('walkUnityResourcePaths includes large Unity resources while walkRepositoryPaths skips them', async () => {
   const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-fswalker-'));
@@ -42,7 +43,11 @@ test('walkUnityResourcePaths only returns prefab/unity/asset files and still hon
     await fs.writeFile(path.join(repoRoot, 'Assets/Scene/Keep.prefab'), 'prefab', 'utf-8');
     await fs.writeFile(path.join(repoRoot, 'Assets/Scene/Keep.unity'), 'scene', 'utf-8');
     await fs.writeFile(path.join(repoRoot, 'Assets/Scene/Keep.asset'), 'asset', 'utf-8');
-    await fs.writeFile(path.join(repoRoot, 'Assets/Scene/Ignore.cs'), 'public class Ignore {}', 'utf-8');
+    await fs.writeFile(
+      path.join(repoRoot, 'Assets/Scene/Ignore.cs'),
+      'public class Ignore {}',
+      'utf-8',
+    );
     await fs.writeFile(path.join(repoRoot, 'node_modules/pkg/Hidden.prefab'), 'hidden', 'utf-8');
 
     const unityPaths = await walkUnityResourcePaths(repoRoot);

@@ -1,0 +1,325 @@
+import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { loadGroupConfig, parseGroupConfig } from '../../../src/core/group/config-parser.js';
+
+const VALID_YAML = `
+version: 1
+name: company
+description: "All company microservices"
+repos:
+  hr/hiring/backend: hr-hiring-backend
+  hr/hiring/ui: hr-hiring-ui
+links:
+  - from: hr/hiring/backend
+    to: hr/hiring/ui
+    type: http
+    contract: "/api/users"
+    role: provider
+packages:
+  hr/common:
+    npm: "@hr/common"
+detect:
+  http: true
+  grpc: false
+  topics: false
+  shared_libs: true
+  embedding_fallback: false
+matching:
+  bm25_threshold: 0.7
+  embedding_threshold: 0.65
+  max_candidates_per_step: 3
+`;
+
+describe('parseGroupConfig', () => {
+  it('parses valid group.yaml', () => {
+    const config = parseGroupConfig(VALID_YAML);
+    expect(config.name).toBe('company');
+    expect(config.version).toBe(1);
+    expect(Object.keys(config.repos)).toHaveLength(2);
+    expect(config.repos['hr/hiring/backend']).toBe('hr-hiring-backend');
+    expect(config.links).toHaveLength(1);
+    expect(config.links[0].type).toBe('http');
+    expect(config.links[0].role).toBe('provider');
+    expect(config.packages['hr/common'].npm).toBe('@hr/common');
+    expect(config.detect.http).toBe(true);
+    expect(config.detect.grpc).toBe(false);
+    expect(config.detect.graphql).toBe(false);
+  });
+
+  it('applies defaults for missing optional fields', () => {
+    const minimal = `
+version: 1
+name: test
+repos:
+  app: my-app
+`;
+    const config = parseGroupConfig(minimal);
+    expect(config.description).toBe('');
+    expect(config.links).toEqual([]);
+    expect(config.packages).toEqual({});
+    expect(config.detect.http).toBe(true);
+    expect(config.matching.exclude_links_paths).toEqual([]);
+    expect(config.matching.exclude_links_param_only_paths).toBe(false);
+  });
+
+  it('still parses a legacy config carrying the removed matching knobs', () => {
+    // `bm25_threshold`, `embedding_threshold` and `detect.embedding_fallback`
+    // were written into every generated group.yaml but read by no matcher, so
+    // they are gone from the schema and the template. Every group.yaml already
+    // on disk still has them, and must keep loading without complaint.
+    const legacy = `
+version: 1
+name: test
+repos:
+  app: my-app
+detect:
+  http: true
+  embedding_fallback: true
+  shared_libs: true
+matching:
+  bm25_threshold: 0.7
+  embedding_threshold: 0.65
+  max_candidates_per_step: 3
+`;
+    const config = parseGroupConfig(legacy);
+    expect(config.name).toBe('test');
+    expect(config.repos).toEqual({ app: 'my-app' });
+    expect(config.detect.http).toBe(true);
+
+    // Pinned behavior: PRESERVE, not strip. The parser spreads the raw block
+    // over its defaults (`{ ...DEFAULT_MATCHING, ...raw.matching }`), so a key
+    // it no longer knows about survives into the returned config.
+    //
+    // Every assertion above is satisfied by the defaults alone, so without this
+    // the test only proves "does not throw" — it would stay green under a
+    // future strict validator that silently DROPPED the operator's legacy keys.
+    // That is not a harmless drop: `group add` and `group remove` in
+    // gitnexus/src/cli/group.ts round-trip the file through `loadGroupConfig`
+    // → `yaml.dump` → write, so anything the parser discards is deleted from
+    // the operator's checked-in group.yaml the next time they add a repo.
+    expect((config.matching as unknown as Record<string, unknown>).bm25_threshold).toBe(0.7);
+    expect((config.matching as unknown as Record<string, unknown>).embedding_threshold).toBe(0.65);
+    expect((config.detect as unknown as Record<string, unknown>).embedding_fallback).toBe(true);
+    // The two keys this commit removes, pinned the same way and for the same
+    // reason: an operator's group.yaml carries them today because
+    // `gitnexus group create` wrote them there.
+    expect((config.matching as unknown as Record<string, unknown>).max_candidates_per_step).toBe(3);
+    expect((config.detect as unknown as Record<string, unknown>).shared_libs).toBe(true);
+  });
+
+  it('defaults thrift detection to true', () => {
+    const minimal = `
+version: 1
+name: test
+repos:
+  app: my-app
+`;
+    const config = parseGroupConfig(minimal);
+    expect(config.detect.thrift).toBe(true);
+  });
+
+  // PR #1156 Codex follow-up: include extraction is opt-in. Existing
+  // group.yaml files that do not declare `detect.includes` must not gain
+  // a wave of new include::* contracts on the next sync after upgrade.
+  describe('detect.includes opt-in default', () => {
+    it('defaults includes detection to false when detect block omits it', () => {
+      const minimal = `
+version: 1
+name: test
+repos:
+  app: my-app
+`;
+      const config = parseGroupConfig(minimal);
+      expect(config.detect.includes).toBe(false);
+    });
+
+    it('defaults includes detection to false when detect block is present but omits the key', () => {
+      const yaml = `
+version: 1
+name: test
+repos:
+  app: my-app
+detect:
+  http: true
+  grpc: false
+`;
+      const config = parseGroupConfig(yaml);
+      expect(config.detect.includes).toBe(false);
+    });
+
+    it('honors explicit detect.includes: true (opt-in works)', () => {
+      const yaml = `
+version: 1
+name: test
+repos:
+  app: my-app
+detect:
+  includes: true
+`;
+      const config = parseGroupConfig(yaml);
+      expect(config.detect.includes).toBe(true);
+    });
+
+    it('honors explicit detect.includes: false', () => {
+      const yaml = `
+version: 1
+name: test
+repos:
+  app: my-app
+detect:
+  includes: false
+`;
+      const config = parseGroupConfig(yaml);
+      expect(config.detect.includes).toBe(false);
+    });
+  });
+
+  describe('detect.graphql opt-in default', () => {
+    it('defaults GraphQL extraction to false', () => {
+      const config = parseGroupConfig(`version: 1\nname: test\nrepos: { app: my-app }\n`);
+      expect(config.detect.graphql).toBe(false);
+    });
+
+    it('honors explicit GraphQL extraction', () => {
+      const config = parseGroupConfig(
+        `version: 1\nname: test\nrepos: { app: my-app }\ndetect:\n  graphql: true\n`,
+      );
+      expect(config.detect.graphql).toBe(true);
+    });
+
+    it('rejects string-like detect booleans instead of silently changing behavior', () => {
+      expect(() =>
+        parseGroupConfig(
+          `version: 1\nname: test\nrepos: { app: my-app }\ndetect:\n  graphql: yes\n`,
+        ),
+      ).toThrow(/detect\.graphql must be true or false/i);
+      expect(() =>
+        parseGroupConfig(
+          `version: 1\nname: test\nrepos: { app: my-app }\ndetect:\n  http: "false"\n`,
+        ),
+      ).toThrow(/detect\.http must be true or false/i);
+    });
+
+    it('rejects GraphQL manifest links until they can resolve real endpoint symbols', () => {
+      const yaml = `
+version: 1
+name: test
+repos:
+  web: web-repo
+  api: api-repo
+links:
+  - from: web
+    to: api
+    type: graphql
+    contract: query::health
+    role: consumer
+`;
+      expect(() => parseGroupConfig(yaml)).toThrow(/type "graphql" is invalid/i);
+    });
+  });
+
+  it('parses thrift manifest links', () => {
+    const yaml = `
+version: 1
+name: test
+repos:
+  gateway: gateway-repo
+  orders: orders-repo
+links:
+  - from: gateway
+    to: orders
+    type: thrift
+    contract: billing.v1.OrderService/PlaceOrder
+    role: consumer
+`;
+    const config = parseGroupConfig(yaml);
+    expect(config.links[0].type).toBe('thrift');
+    expect(config.links[0].contract).toBe('billing.v1.OrderService/PlaceOrder');
+  });
+
+  it('throws on missing required fields', () => {
+    expect(() => parseGroupConfig('version: 1')).toThrow(/name.*required/i);
+    expect(() => parseGroupConfig('name: test')).toThrow(/version.*required/i);
+    expect(() => parseGroupConfig('version: 1\nname: test')).toThrow(/repos.*required/i);
+  });
+
+  it('throws when a repos value is not a string (YAML number/boolean)', () => {
+    expect(() =>
+      parseGroupConfig(`version: 1
+name: test
+repos:
+  app: 12
+`),
+    ).toThrow(/non-empty registry name string/);
+  });
+
+  it('trims padded registry aliases so they match the registry name', () => {
+    const config = parseGroupConfig(`version: 1
+name: test
+repos:
+  app: "  my-app  "
+`);
+    expect(config.repos.app).toBe('my-app');
+  });
+
+  it('allows empty repos object (fresh group before first add)', () => {
+    const yaml = `version: 1
+name: new-group
+repos: {}
+`;
+    const config = parseGroupConfig(yaml);
+    expect(Object.keys(config.repos)).toHaveLength(0);
+  });
+
+  it('loadGroupConfig reads group.yaml from disk', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gn-group-load-'));
+    const yaml = `version: 1
+name: disk-test
+repos:
+  a: repo-a
+`;
+    await fs.writeFile(path.join(dir, 'group.yaml'), yaml, 'utf-8');
+    const config = await loadGroupConfig(dir);
+    expect(config.name).toBe('disk-test');
+    expect(config.repos.a).toBe('repo-a');
+  });
+
+  it('throws on invalid version', () => {
+    expect(() => parseGroupConfig('version: 2\nname: test\nrepos:\n  a: b')).toThrow(/version/i);
+  });
+
+  it('throws on invalid link role', () => {
+    const yaml = `
+version: 1
+name: test
+repos:
+  a: repo-a
+  b: repo-b
+links:
+  - from: a
+    to: b
+    type: http
+    contract: "/api"
+    role: invalid
+`;
+    expect(() => parseGroupConfig(yaml)).toThrow(/role/i);
+  });
+
+  it('throws when link references non-existent repo path', () => {
+    const yaml = `
+version: 1
+name: test
+repos:
+  a: repo-a
+links:
+  - from: a
+    to: nonexistent
+    type: http
+    contract: "/api"
+    role: provider
+`;
+    expect(() => parseGroupConfig(yaml)).toThrow(/nonexistent/i);
+  });
+});

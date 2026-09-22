@@ -1,16 +1,13 @@
-export enum SupportedLanguages {
-    JavaScript = 'javascript',
-    TypeScript = 'typescript',
-    Python = 'python',
-    Java = 'java',
-    C = 'c',
-    CPlusPlus = 'cpp',
-    CSharp = 'csharp',
-    Go = 'go',
-    Ruby = 'ruby',
-    Rust = 'rust',
-    PHP = 'php',
-    Kotlin = 'kotlin',
-    Swift = 'swift',
-    GDScript = 'gdscript',
-}
+/**
+ * Re-export SupportedLanguages from gitnexus-shared (single source of truth).
+ *
+ * HOW TO ADD A NEW LANGUAGE:
+ *
+ * 1. Add the enum member in gitnexus-shared/src/languages.ts
+ * 2. Run `tsc --noEmit` — compiler errors guide you to every dispatch table
+ * 3. Use the checklist in each ingestion file for what to add
+ * 4. Add tree-sitter-<lang> to gitnexus/package.json dependencies
+ * 5. Add file extension mapping in utils.ts getLanguageFromFilename()
+ * 6. Run full test suite
+ */
+export { SupportedLanguages } from 'gitnexus-shared';

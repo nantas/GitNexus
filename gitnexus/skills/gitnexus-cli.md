@@ -23,6 +23,7 @@ Rules:
   - Codex MCP config: `~/.codex/config.toml`
   - Skills: `~/.agents/skills/gitnexus/`
 - `--scope global` does not overwrite repo-local `.agents/skills` or `.codex/config.toml`.
+- `--coding-agent <agents>` selects the upstream detected-editor installer explicitly; it is separate from fork `--scope` / `--agent` wiring.
 - Never rely on setup defaults for scope; pass `--scope` explicitly to avoid global/project mismatch.
 
 ```bash
@@ -54,115 +55,30 @@ fi
 
 ### analyze — Build or refresh the index
 
-```bash
-$GN analyze
+Run `$GN analyze` from the repository root. Recurring defaults live in a committed `.gitnexusrc`; explicit CLI flags override them. `gitnexus.json` (with a legacy `meta.json` mirror) is index state and does not supply analyze option defaults.
+
+Unity example `.gitnexusrc`:
+
+```json
+{
+  "name": "my-unity-project",
+  "includeExtensions": [".cs", ".meta"],
+  "scopeRules": ["Assets/", "Packages/com.veewo.*"],
+  "csharpDefineCsproj": "Assembly-CSharp.csproj"
+}
 ```
 
-Run from the project root. This parses all source files, builds the knowledge graph, writes it to `.gitnexus/`, and generates CLAUDE.md / AGENTS.md context files unless `--no-ai-context` is set.
-
-Analyze options are resolved with two-layer priority: **CLI arguments** > **stored options** in `meta.json.analyzeOptions`. On first run, pass CLI flags; they are persisted automatically for subsequent runs.
-
-| Flag | Effect |
-|------|--------|
-| `--force` | Force full re-index even if up to date |
-| `--no-reuse-options` | Do not reuse stored analyze options from previous index |
-| `--no-ai-context` | Skip writing `AGENTS.md` / `CLAUDE.md` and installing repo-local GitNexus skills |
-| `--embeddings` | Enable embedding generation (off by default) |
-| `--extensions <list>` | Comma-separated file extensions (e.g. `.cs,.ts`) |
-| `--scope <rules>` | Comma-separated scope path-prefix rules (e.g. `Assets/,Packages/com.veewo.*`) |
-| `--repo-alias <name>` | Override indexed repository name with a stable alias |
-| `--csharp-define-csproj <path>` | Load C# `DefineConstants` from `.csproj` for `#if` normalization |
-| `--skills` | Generate repo-specific skill files from detected communities |
-| `-v, --verbose` | Enable verbose ingestion warnings |
-
-**Option persistence:** `--extensions`, `--scope`, `--repo-alias`, `--embeddings`, `--csharp-define-csproj`, and the effective AI-context setting are automatically saved to `meta.json.analyzeOptions` after a successful run. On subsequent runs, these stored values are reused unless you pass new CLI flags or use `--no-reuse-options`.
-
-When `--no-ai-context` is saved, later `analyze` runs continue skipping AGENTS/CLAUDE generation until you explicitly re-enable AI context (for example by passing `--ai-context` through a direct CLI invocation or clearing the stored setting with `--no-reuse-options`).
-
-#### Scope rules
-
-Scope rules control which files are included in the index. When no scope rules are stored, **all files** in the repo are indexed. Use `--scope` on first run to set scope rules; they are persisted automatically.
-
-**Scope rule semantics:**
-- Each rule is a **path prefix** — `Assets/` matches all files under `Assets/`
-- Trailing `*` is a **wildcard prefix** — `Packages/com.veewo.*` matches `Packages/com.veewo.stat/...`
-- No glob support: `Assets/**/*.cs` will not work
-- Empty scope = full repo scan (all files)
+`csharpDefineCsproj` resolves relative to the target repository and selects active C# conditional-compilation branches while preserving source offsets. Scope rules are path prefixes; trailing `*` means prefix wildcard, not general glob syntax.
 
 ```bash
-# Scope to specific directories
-$GN analyze --force --scope "Assets/,Packages/"
-
-# Wildcard scope
-$GN analyze --force --scope "Assets/NEON/Code,Packages/com.veewo.*"
-
-# No --scope = full repo (or reuse stored scope rules)
 $GN analyze --force
+# Temporary overrides:
+$GN analyze --extensions .cs,.meta --scope Assets/,Packages/ --csharp-define-csproj Assembly-CSharp.csproj
 ```
 
-#### Unity project recommended parameters
+Use `$GN analyze --help` for available flags. `--index-only` skips context and skill generation; `--skip-agents-md` and `--skip-skills` control those outputs separately. `--name` selects a registry name; `--repo-alias` is a compatibility alias.
 
-Unity projects benefit from a specific combination of parameters to ensure correct C# parsing and optimal scope:
-
-```bash
-# Unity project — first-time index (recommended)
-$GN analyze --force \
-  --extensions ".cs,.meta" \
-  --scope "Assets/,Packages/" \
-  --repo-alias <repo-alias> \
-  --csharp-define-csproj <path-to-Assembly-CSharp.csproj>
-
-# Subsequent rebuilds (all options are reused automatically)
-$GN analyze --force
-```
-
-| Parameter | Recommended value | Why |
-|-----------|------------------|-----|
-| `--extensions` | `.cs,.meta` | C# scripts + Unity `.meta` asset files for resource binding |
-| `--scope` | `Assets/,Packages/` | Limit to Unity project directories; skip `Library/`, `Temp/`, `obj/` |
-| `--csharp-define-csproj` | `path/to/Assembly-CSharp.csproj` | Normalize `#if` / `#elif` conditional compilation using project's `DefineConstants` |
-| `--repo-alias` | e.g. `neonspark-core` | Stable alias for MCP repo lookup regardless of directory name |
-
-**C# preprocessing detail:** Unity projects commonly use conditional compilation (`#if UNITY_EDITOR`, `#if NEON_DEBUG`, etc.). Without `--csharp-define-csproj`, tree-sitter parses each `#if` branch as-is, often producing incorrect AST for the active branch. The csproj path is persisted and reused automatically after first specification.
-
-**Scope for large Unity repos:** For repos where only specific packages matter, narrow scope instead of indexing all of `Assets/`:
-
-```bash
-$GN analyze --force \
-  --scope "Assets/NEON/Code,Packages/com.veewo.*" \
-  --extensions ".cs,.meta" \
-  --repo-alias neonspark-core
-```
-
-#### Other project examples
-
-```bash
-# Generic TypeScript project
-$GN analyze --force --extensions ".ts,.tsx" --repo-alias my-project
-
-# Subsequent rebuilds (stored options are reused automatically)
-$GN analyze --force
-```
-
-#### Rebuild recovery — when analyze hangs or crashes
-
-If `analyze --force` hangs (no progress after 5+ minutes) or crashes leaving a corrupted index:
-
-```bash
-# 1. Clean the corrupted index
-$GN clean --force
-
-# 2. Rebuild (re-specify CLI options since meta.json was deleted)
-$GN analyze --force --extensions ".cs,.meta" --repo-alias neonspark-core
-```
-
-**When to clean before rebuild:**
-- Previous run left `.gitnexus/csv/` with no `relations.csv` (crash mid-streaming)
-- `.gitnexus/lbug.wal` exists but `lbug` is tiny (LadybugDB in unrecovered state)
-- Any `analyze` run hangs indefinitely in the "Loading into LadybugDB..." phase
-- After `gitnexus clean`, always run `analyze --force` to rebuild
-
-**When to run:** First time in a project, after major code changes, or when `gitnexus://repo/{name}/context` reports the index is stale.
+After a failed or timed-out analyze, report the exact error and inspect the cause before another run. For Unity runtime validation, use the shared runtime-process and hydration contracts below.
 
 ### status — Check index freshness
 
@@ -178,7 +94,7 @@ Shows whether the current repo has a GitNexus index, when it was last updated, a
 $GN clean --force
 ```
 
-Removes the entire `.gitnexus/` directory (including `meta.json` and all index data). After cleaning, you must re-specify analyze options on the next `analyze` run since stored options are deleted.
+Removes index data while preserving `.gitnexus/config.json`, `.gitnexus/meta.json`, and `.gitnexus/.gitnexusignore`. Recurring analyze defaults remain in the repository `.gitnexusrc`; the next analyze rebuilds derived data.
 
 | Flag      | Effect                                            |
 | --------- | ------------------------------------------------- |
@@ -273,3 +189,10 @@ $GN unity-ui-trace "Assets/NEON/VeewoUI/Uxml/BarScreen/Patch/PatchItemPreview.ux
   - `policy-adjusted`: user-visible result after hydration policy is applied
 - If `hydration_policy=strict` and `hydrationMeta.fallbackToCompact=true`, the result is downgraded policy-adjusted output and is not closure.
 - In that downgraded state, rerun with parity before final conclusions.
+
+
+## Additional analyze modes
+
+- `--pdg` enables the control/data dependence and taint layers used by `pdg_query` and `explain`.
+- `--asyncapi-spec <path>` imports an AsyncAPI contract alongside code analysis.
+- `node .gitnexus/run.cjs <command>` selects an available runner and preserves a configured package pin. Before the runner exists, resolve `cliPackageSpec` / `cliVersion` from `~/.gitnexus/config.json`; `bunx <resolved-spec> analyze` is an alternative bootstrap when only Bun is installed.

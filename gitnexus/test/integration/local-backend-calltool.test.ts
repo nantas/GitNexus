@@ -5,804 +5,979 @@
  * instance, verifying cypher, context, impact, and query tools work
  * end-to-end against seeded graph data with FTS indexes.
  */
+import fs from 'fs/promises';
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { LocalBackend } from '../../src/mcp/local/local-backend.js';
-import { readResource } from '../../src/mcp/resources.js';
-import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
+import { listRegisteredRepos, saveMeta } from '../../src/storage/repo-manager.js';
 import { withTestLbugDB } from '../helpers/test-indexed-db.js';
-import { LOCAL_BACKEND_SEED_DATA, LOCAL_BACKEND_FTS_INDEXES } from '../fixtures/local-backend-seed.js';
+import {
+  LOCAL_BACKEND_SEED_DATA,
+  LOCAL_BACKEND_FTS_INDEXES,
+} from '../fixtures/local-backend-seed.js';
 
-vi.mock('../../src/storage/repo-manager.js', () => ({
+// Partial mock: registry access is faked, but everything else — critically
+// `loadMeta`, which the staleness check in LocalBackend.ensureInitialized
+// calls on every throttled window — stays REAL. A factory that omitted
+// loadMeta made that call site throw a TypeError that the staleness check's
+// catch silently swallowed, so the code path was never actually exercised.
+vi.mock('../../src/storage/repo-manager.js', async (importActual) => ({
+  ...(await importActual<typeof import('../../src/storage/repo-manager.js')>()),
   listRegisteredRepos: vi.fn().mockResolvedValue([]),
   cleanupOldKuzuFiles: vi.fn().mockResolvedValue({ found: false, needsReindex: false }),
+  findSiblingClones: vi.fn().mockResolvedValue([]),
 }));
 
 // ─── Block 2: callTool dispatch tests ────────────────────────────────
 
-withTestLbugDB('local-backend-calltool', (handle) => {
+withTestLbugDB(
+  'local-backend-calltool',
+  (handle) => {
+    describe('callTool dispatch with real DB', () => {
+      let backend: LocalBackend;
 
-  describe('callTool dispatch with real DB', () => {
-    let backend: LocalBackend;
-
-    beforeAll(async () => {
-      // backend is created in afterSetup and attached to the handle
-      const ext = handle as typeof handle & { _backend?: LocalBackend };
-      if (!ext._backend) {
-        throw new Error('LocalBackend not initialized — afterSetup did not attach _backend to handle');
-      }
-      backend = ext._backend;
-    });
-
-    it('cypher tool returns function names', async () => {
-      const result = await backend.callTool('cypher', {
-        query: 'MATCH (n:Function) RETURN n.name AS name ORDER BY n.name',
+      beforeAll(async () => {
+        // backend is created in afterSetup and attached to the handle
+        const ext = handle as typeof handle & { _backend?: LocalBackend };
+        if (!ext._backend) {
+          throw new Error(
+            'LocalBackend not initialized — afterSetup did not attach _backend to handle',
+          );
+        }
+        backend = ext._backend;
       });
-      // cypher tool wraps results as markdown
-      expect(result).toHaveProperty('markdown');
-      expect(result).toHaveProperty('row_count');
-      expect(result.row_count).toBeGreaterThanOrEqual(3);
-      expect(result.markdown).toContain('login');
-      expect(result.markdown).toContain('validate');
-      expect(result.markdown).toContain('hash');
-    });
 
-    it('cypher tool blocks write queries', async () => {
-      const result = await backend.callTool('cypher', {
-        query: "CREATE (n:Function {id: 'x', name: 'x', filePath: '', startLine: 0, endLine: 0, isExported: false, content: '', description: ''})",
+      it('cypher tool returns function names', async () => {
+        const result = await backend.callTool('cypher', {
+          query: 'MATCH (n:Function) RETURN n.name AS name ORDER BY n.name',
+        });
+        // cypher tool wraps results as markdown
+        expect(result).toHaveProperty('markdown');
+        expect(result).toHaveProperty('row_count');
+        expect(result.row_count).toBeGreaterThanOrEqual(3);
+        expect(result.markdown).toContain('login');
+        expect(result.markdown).toContain('validate');
+        expect(result.markdown).toContain('hash');
       });
-      expect(result).toHaveProperty('error');
-      expect(result.error).toMatch(/write operations/i);
-    });
 
-    it('context tool returns symbol info with callers and callees', async () => {
-      const result = await backend.callTool('context', {
- response_profile: 'full', name: 'login' });
-      expect(result).not.toHaveProperty('error');
-      expect(result.status).toBe('found');
-      // Should have the symbol identity
-      expect(result.symbol).toBeDefined();
-      expect(result.symbol.name).toBe('login');
-      expect(result.symbol.filePath).toBe('src/auth.ts');
-      // login calls validate and hash — should appear in outgoing.calls
-      expect(result.outgoing).toBeDefined();
-      expect(result.outgoing.calls).toBeDefined();
-      expect(result.outgoing.calls.length).toBeGreaterThanOrEqual(2);
-      const calleeNames = result.outgoing.calls.map((c: any) => c.name);
-      expect(calleeNames).toContain('validate');
-      expect(calleeNames).toContain('hash');
-    });
-
-    it('context tool aggregates method-level relations for class symbols and keeps direct relations separate', async () => {
-      const result = await backend.callTool('context', {
- response_profile: 'full', name: 'AuthService' });
-      expect(result).not.toHaveProperty('error');
-      expect(result.status).toBe('found');
-      expect(result.symbol.name).toBe('AuthService');
-
-      // Aggregated via HAS_METHOD -> method CALLS graph
-      expect(result.incoming?.calls?.map((r: any) => r.name)).toContain('login');
-      expect(result.outgoing?.calls?.map((r: any) => r.name)).toContain('validate');
-
-      // Direct class-level relations remain available and separate.
-      expect(result.directIncoming).toBeDefined();
-      expect(result.directOutgoing).toBeDefined();
-      expect(result.directIncoming.calls || []).toHaveLength(0);
-      expect(result.directOutgoing.calls || []).toHaveLength(0);
-    });
-
-    it('context tool projects method-level process participation for class symbols', async () => {
-      const result = await backend.callTool('context', {
- response_profile: 'full', name: 'AuthService' });
-
-      expect(result.processes?.length).toBeGreaterThan(0);
-      expect(result.processes.some((p: any) => p.evidence_mode === 'method_projected')).toBe(true);
-      expect(result.processes.every((p: any) => ['high', 'medium'].includes(p.confidence))).toBe(true);
-      expect(result.processes.some((p: any) => p.evidence_mode === 'direct_step')).toBe(false);
-    });
-
-    it('impact tool returns upstream dependents', async () => {
-      const result = await backend.callTool('impact', {
-        target: 'validate',
-        direction: 'upstream',
+      it('cypher no-match write probe returns read-only error or empty rows', async () => {
+        const result = await backend.callTool('cypher', {
+          query:
+            "MATCH (n:Function) WHERE n.name = '__missing__' SET n.name = 'x' RETURN n.name AS name",
+        });
+        if (result?.error) {
+          expect(result.error).toMatch(/write operations|read-only/i);
+          return;
+        }
+        expect(result).toEqual([]);
       });
-      expect(result).not.toHaveProperty('error');
-      // validate is called by login, so login should appear at depth 1
-      expect(result.impactedCount).toBeGreaterThanOrEqual(1);
-      expect(result.byDepth).toBeDefined();
-      const directDeps = result.byDepth[1] || result.byDepth['1'] || [];
-      expect(directDeps.length).toBeGreaterThanOrEqual(1);
-      const depNames = directDeps.map((d: any) => d.name);
-      expect(depNames).toContain('login');
-    });
 
-    it('impact honors target_uid disambiguation over target name', async () => {
-      const result = await backend.callTool('impact', {
-        target: 'definitely-not-a-real-symbol-name',
-        target_uid: 'func:validate',
-        direction: 'upstream',
+      it('context tool returns symbol info with callers and callees', async () => {
+        const result = await backend.callTool('context', {
+          response_profile: 'full',
+          name: 'login',
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.status).toBe('found');
+        // Should have the symbol identity
+        expect(result.symbol).toBeDefined();
+        expect(result.symbol.name).toBe('login');
+        expect(result.symbol.filePath).toBe('src/auth.ts');
+        // login calls validate and hash — should appear in outgoing.calls
+        expect(result.outgoing).toBeDefined();
+        expect(result.outgoing.calls).toBeDefined();
+        expect(result.outgoing.calls.length).toBeGreaterThanOrEqual(2);
+        const calleeNames = result.outgoing.calls.map((c: any) => c.name);
+        expect(calleeNames).toContain('validate');
+        expect(calleeNames).toContain('hash');
       });
-      expect(result).not.toHaveProperty('error');
-      expect(result.target.id).toBe('func:validate');
-      expect(result.target.name).toBe('validate');
-    });
 
-    it('impact honors file_path disambiguation for duplicate symbol names', async () => {
-      const result = await backend.callTool('impact', {
-        target: 'authenticate',
-        file_path: 'src/base.ts',
-        direction: 'downstream',
-        relationTypes: ['OVERRIDES'],
+      it('impact tool returns upstream dependents', async () => {
+        const result = await backend.callTool('impact', {
+          target: 'validate',
+          direction: 'upstream',
+        });
+        expect(result).not.toHaveProperty('error');
+        // validate is called by login, so login should appear at depth 1
+        expect(result.impactedCount).toBeGreaterThanOrEqual(1);
+        expect(result.byDepth).toBeDefined();
+        const directDeps = result.byDepth[1] || result.byDepth['1'] || [];
+        expect(directDeps.length).toBeGreaterThanOrEqual(1);
+        const depNames = directDeps.map((d: any) => d.name);
+        expect(depNames).toContain('login');
       });
-      expect(result).not.toHaveProperty('error');
-      expect(result.target.name).toBe('authenticate');
-      expect(result.target.filePath).toBe('src/base.ts');
-    });
 
-    it('query tool returns results for keyword search', async () => {
-      const result = await backend.callTool('query', {
- response_profile: 'full', query: 'login' });
-      expect(result).not.toHaveProperty('error');
-      // Should have some combination of processes, process_symbols, or definitions
-      expect(result).toHaveProperty('processes');
-      expect(result).toHaveProperty('definitions');
-      // The search should find something (FTS or graph-based)
-      const totalResults =
-        (result.processes?.length || 0) +
-        (result.process_symbols?.length || 0) +
-        (result.definitions?.length || 0);
-      expect(totalResults).toBeGreaterThanOrEqual(1);
-    });
-
-    it('query tool projects class hits into processes via method STEP_IN_PROCESS', async () => {
-      const result = await backend.callTool('query', {
- response_profile: 'full', query: 'AuthService' });
-
-      expect(result.processes?.length).toBeGreaterThan(0);
-      expect(result.process_symbols.some((s: any) => s.name === 'AuthService')).toBe(true);
-      expect(result.processes.some((p: any) => p.evidence_mode === 'method_projected')).toBe(true);
-    });
-
-    it('query keeps direct evidence as high confidence when available', async () => {
-      const result = await backend.callTool('query', {
- response_profile: 'full', query: 'authenticate' });
-      const directHigh = result.process_symbols.find(
-        (s: any) => s.process_evidence_mode === 'direct_step' && s.process_confidence === 'high',
+      it.each(['name', 'symbol'] as const)(
+        'impact tool resolves the %s compatibility alias against a real index',
+        async (alias) => {
+          const result = await backend.callTool('impact', {
+            [alias]: 'validate',
+            direction: 'upstream',
+          });
+          expect(result).not.toHaveProperty('error');
+          expect(result.target?.name).toBe('validate');
+          const directDeps = result.byDepth[1] || result.byDepth['1'] || [];
+          expect(directDeps.map((d: any) => d.name)).toContain('login');
+        },
       );
 
-      expect(directHigh).toBeDefined();
-    });
-
-    it('phase1 process_ref readable', async () => {
-      const out = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'login',
-      });
-
-      expect(out.processes.length).toBeGreaterThan(0);
-      expect(out.processes.every((p: any) => p.process_ref && p.process_ref.readable === true)).toBe(true);
-
-      const persistentReaderUris = out.processes
-        .map((p: any) => p?.process_ref)
-        .filter((ref: any) => ref?.kind === 'persistent' && typeof ref.reader_uri === 'string')
-        .map((ref: any) => ref.reader_uri);
-      expect(persistentReaderUris.length).toBeGreaterThan(0);
-
-      for (const uri of persistentReaderUris) {
-        const content = await readResource(uri, backend);
-        expect(content).toContain('trace:');
-      }
-    });
-
-    it('phase1 process detail supports direct id read', async () => {
-      const detail = await backend.queryProcessDetail('proc:login-flow', 'test-repo');
-      expect(detail.error).toBeUndefined();
-      expect(detail.process?.id).toBe('proc:login-flow');
-    });
-
-    it('phase1 no opaque heuristic id leak', async () => {
-      const out = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'Reload',
-        unity_resources: 'on',
-        unity_hydration_mode: 'compact',
-      });
-
-      expect(out.processes.some((p: any) => String(p.id || '').startsWith('proc:heuristic:'))).toBe(false);
-    });
-
-    it('phase5 confidence fields and verification hints', async () => {
-      const original = process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS;
-      process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS = 'on';
-      try {
-        const on = await backend.callTool('context', {
- response_profile: 'full', name: 'AuthService' });
-        expect(on.processes.length).toBeGreaterThan(0);
-        expect(on.processes.every((p: any) => ['high', 'medium', 'low'].includes(p.confidence))).toBe(true);
-        expect(on.processes.some((p: any) => Object.prototype.hasOwnProperty.call(p, 'verification_hint'))).toBe(true);
-
-        const low = on.processes.find((p: any) => p.confidence === 'low');
-        if (low) {
-          expect(low.verification_hint).toHaveProperty('action');
-          expect(low.verification_hint).toHaveProperty('target');
-          expect(low.verification_hint).toHaveProperty('next_command');
-        }
-      } finally {
-        if (original === undefined) {
-          delete process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS;
-        } else {
-          process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS = original;
-        }
-      }
-    });
-
-    it('phase5 flag-off preserves legacy response shape', async () => {
-      const original = process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS;
-      process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS = 'off';
-      try {
-        const off = await backend.callTool('context', {
- response_profile: 'full', name: 'AuthService' });
-        expect(off.processes.length).toBeGreaterThan(0);
-        expect(off.processes.every((p: any) => p.verification_hint === undefined)).toBe(true);
-        expect(off.processes.every((p: any) => typeof p.step_count === 'number')).toBe(true);
-      } finally {
-        if (original === undefined) {
-          delete process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS;
-        } else {
-          process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS = original;
-        }
-      }
-    });
-
-    it('query no longer injects heuristic rows when processRows is empty', async () => {
-      const original = process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS;
-      process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS = 'on';
-      try {
-        const result = await backend.callTool('query', {
-          query: 'Reload',
+      it('context tool resolves the file compatibility alias against a real index', async () => {
+        const result = await backend.callTool('context', {
           response_profile: 'full',
-          unity_resources: 'on',
-          unity_hydration_mode: 'compact',
+          name: 'authenticate',
+          file: 'src/base.ts',
         });
-
-        expect(result.processes.some((p: any) => p.evidence_mode === 'resource_heuristic')).toBe(false);
-        expect(Array.isArray(result.resource_hints || result.next_hops || [])).toBe(true);
-      } finally {
-        if (original === undefined) {
-          delete process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS;
-        } else {
-          process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS = original;
-        }
-      }
-    });
-
-    it('context no longer injects heuristic rows when processRows is empty', async () => {
-      const original = process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS;
-      process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS = 'on';
-      try {
-        const out = await backend.callTool('context', {
-          name: 'ReloadBase',
-          file_path: 'Assets/NEON/Code/Game/Graph/Nodes/Reloads/ReloadBase.cs',
-          response_profile: 'full',
-          unity_resources: 'on',
-          unity_hydration_mode: 'parity',
-        });
-
-        expect(out.processes.some((p: any) => p.evidence_mode === 'resource_heuristic')).toBe(false);
-        expect(Array.isArray(out.resource_hints || out.next_hops || [])).toBe(true);
-      } finally {
-        if (original === undefined) {
-          delete process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS;
-        } else {
-          process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS = original;
-        }
-      }
-    });
-
-    it('context returns graph-backed Unity scene-prefab-script resource chains', async () => {
-      const out = await backend.callTool('context', {
-        name: 'BattleMode',
-        file_path: 'Assets/NEON/Code/Game/GameModes/BattleMode/BattleMode.cs',
-        response_profile: 'full',
-        unity_resources: 'on',
-        unity_hydration_mode: 'parity',
-        resource_path_prefix: 'Assets/NEON/Scene/BattleModeScenes/BattleMode.unity',
+        expect(result).not.toHaveProperty('error');
+        expect(result.status).toBe('found');
+        expect(result.symbol?.name).toBe('authenticate');
+        expect(result.symbol?.filePath).toBe('src/base.ts');
       });
 
-      expect(out.status).toBe('found');
-      expect(out.resource_chains).toHaveLength(1);
-      expect(out.resource_chains[0]).toMatchObject({
-        sourceResourcePath: 'Assets/NEON/Scene/BattleModeScenes/BattleMode.unity',
-        relationType: 'UNITY_ASSET_GUID_REF',
-        intermediateResourcePath: 'Assets/NEON/Prefab/Systems/BattleMode.prefab',
-        nextRelationType: 'UNITY_GRAPH_NODE_SCRIPT_REF',
-        targetSymbol: {
-          name: 'BattleMode',
-          filePath: 'Assets/NEON/Code/Game/GameModes/BattleMode/BattleMode.cs',
-        },
-      });
-    });
-
-    it('query returns exact graph-backed Unity resource chain for symbol-like queries', async () => {
-      const out = await backend.callTool('query', {
-        query: 'BattleMode',
-        response_profile: 'full',
-        unity_resources: 'on',
-        unity_hydration_mode: 'parity',
-        resource_path_prefix: 'Assets/NEON/Scene/BattleModeScenes/BattleMode.unity',
-      });
-
-      expect(out.resource_chains).toHaveLength(1);
-      expect(out.resource_chains[0].targetSymbol).toMatchObject({
-        name: 'BattleMode',
-        filePath: 'Assets/NEON/Code/Game/GameModes/BattleMode/BattleMode.cs',
-      });
-    });
-
-    it('v1 dual layer confidence fields', async () => {
-      const original = process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS;
-      process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS = 'on';
-      try {
-        const q = await backend.callTool('query', {
-response_profile: 'full',
-          query: 'Reload',
-          unity_resources: 'on',
-          unity_hydration_mode: 'parity',
-        });
-        expect(Array.isArray(q.processes)).toBe(true);
-        if (q.processes.length > 0) {
-          expect(q.processes.some((p: any) => p.runtime_chain_evidence_level)).toBe(true);
-        }
-
-        const c = await backend.callTool('context', {
-response_profile: 'full',
-          name: 'ReloadBase',
-          file_path: 'Assets/NEON/Code/Game/Graph/Nodes/Reloads/ReloadBase.cs',
-          unity_resources: 'on',
-          unity_hydration_mode: 'parity',
-        });
-        expect(Array.isArray(c.processes)).toBe(true);
-        if (c.processes.length > 0) {
-          expect(c.processes.some((p: any) => p.runtime_chain_evidence_level)).toBe(true);
-        }
-      } finally {
-        if (original === undefined) {
-          delete process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS;
-        } else {
-          process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS = original;
-        }
-      }
-    });
-
-    it('v1 low confidence hints remain actionable', async () => {
-      const original = process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS;
-      process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS = 'on';
-      try {
+      it('query tool returns results for keyword search', async () => {
         const result = await backend.callTool('query', {
-response_profile: 'full',
-          query: 'Reload',
-          unity_resources: 'on',
-          unity_hydration_mode: 'parity',
+          response_profile: 'full',
+          query: 'login',
         });
-        const low = result.processes.find((p: any) => p.confidence === 'low');
-        if (low) {
-          expect(low.verification_hint?.action).toBeTruthy();
-          expect(low.verification_hint?.target).toBeTruthy();
-          expect(low.verification_hint?.next_command).toBeTruthy();
-        } else {
-          expect(result.processes.some((p: any) => p.evidence_mode === 'resource_heuristic')).toBe(false);
+        expect(result).not.toHaveProperty('error');
+        expect(result).toHaveProperty('processes');
+        expect(result).toHaveProperty('definitions');
+        expect(result.processes.map((p: any) => p.id)).toContain('proc:login-flow');
+        expect(result.process_symbols.map((s: any) => s.id)).toContain('func:login');
+
+        // #553: query response carries per-phase timing metadata.
+        expect(result.timing).toBeDefined();
+        expect(typeof result.timing.wall).toBe('number');
+        expect(result.timing.wall).toBeGreaterThanOrEqual(0);
+        // At least one of the search phases must have fired for any
+        // non-error response — bm25 and/or vector always runs.
+        expect(result.timing.bm25 ?? result.timing.vector).toBeGreaterThanOrEqual(0);
+
+        // Success path (FTS present + Process/Community tables exist): no degraded
+        // signal. Guards R6 — the response shape stays byte-identical when nothing
+        // fails (the `warning`/`partial` fields appear only on degradation).
+        expect(result).not.toHaveProperty('warning');
+        expect(result).not.toHaveProperty('partial');
+      });
+
+      // #2175: end-to-end proof that the renamed parameters work against a real
+      // index (Claude Code drops a tool arg named exactly "query").
+      it('query tool returns results via the new search_query param (#2175)', async () => {
+        const result = await backend.callTool('query', {
+          response_profile: 'full',
+          search_query: 'login',
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result).toHaveProperty('processes');
+        expect(result.processes.map((p: any) => p.id)).toContain('proc:login-flow');
+        expect(result.process_symbols.map((s: any) => s.id)).toContain('func:login');
+      });
+
+      it('cypher tool executes via the new statement param (#2175)', async () => {
+        const result = await backend.callTool('cypher', {
+          statement: 'MATCH (n:Function) RETURN n.name AS name ORDER BY n.name',
+        });
+        expect(result).toHaveProperty('markdown');
+        expect(result).toHaveProperty('row_count');
+        expect(result.row_count).toBeGreaterThanOrEqual(3);
+        expect(result.markdown).toContain('login');
+      });
+
+      // PR #222 port: the query tool batches per-symbol process/cohesion/content
+      // lookups (N+1 → 2-3 `WHERE n.id IN $nodeIds` queries). These assertions
+      // guard the batch-adaptation hazards that a naive cherry-pick would break:
+      // (1) each symbol keeps ITS OWN community (the per-node first-row pick that
+      //     replaced the per-symbol `LIMIT 1`), and (2) content maps to the right
+      //     node — both depend on the +1 positional-index shift after prepending
+      //     `n.id AS nodeId`. func:login is MEMBER_OF comm:auth ("Authentication");
+      //     func:validate has no community, so it must NOT inherit login's.
+      it('query batches per-symbol enrichment without cross-assigning community/content', async () => {
+        const findSym = (res: any, id: string) =>
+          (res.process_symbols ?? []).find((s: any) => s.id === id) ??
+          (res.definitions ?? []).find((s: any) => s.id === id);
+
+        const loginRes = await backend.callTool('query', {
+          response_profile: 'full',
+          query: 'login',
+          include_content: true,
+        });
+        expect(loginRes).not.toHaveProperty('error');
+        const login = findSym(loginRes, 'func:login');
+        expect(login).toBeDefined();
+        // Community correctly associated to its own node (not dropped, not leaked).
+        expect(login.module).toBe('Authentication');
+        // Content correctly mapped to its own node (positional [1] after nodeId).
+        expect(login.content).toBe('function login() {}');
+
+        const validateRes = await backend.callTool('query', {
+          response_profile: 'full',
+          query: 'validate',
+          include_content: true,
+        });
+        expect(validateRes).not.toHaveProperty('error');
+        const validate = findSym(validateRes, 'func:validate');
+        expect(validate).toBeDefined();
+        // validate has no MEMBER_OF edge — a flat batched `LIMIT 1` would have
+        // leaked some other node's community onto it. It must have none.
+        expect(validate.module).toBeUndefined();
+        expect(validate.content).toBe('function validate() {}');
+      });
+
+      it('reports content capability for the default full profile', async () => {
+        const query = await backend.callTool('query', {
+          response_profile: 'full',
+          query: 'login',
+          include_content: true,
+        });
+        const context = await backend.callTool('context', {
+          response_profile: 'full',
+          name: 'login',
+          include_content: true,
+        });
+
+        expect(query.contentAvailability).toEqual({
+          requested: true,
+          profile: 'full',
+          available: true,
+          scope: 'full',
+        });
+        expect(context.contentAvailability).toEqual(query.contentAvailability);
+        expect(context.symbol.content).toBe('function login() {}');
+      });
+
+      it('does not disclose lingering source text when metadata says retention is none', async () => {
+        const storagePath = handle.tmpHandle.dbPath;
+        await saveMeta(storagePath, {
+          repoPath: '/test/repo',
+          storagePath,
+          lastCommit: 'abc123',
+          indexedAt: new Date().toISOString(),
+          contentRetention: 'none',
+          contentRetentionSchemaVersion: 1,
+          ftsProfile: 'name-only',
+        });
+        try {
+          const query = await backend.callTool('query', {
+            response_profile: 'full',
+            query: 'login',
+            include_content: true,
+          });
+          const context = await backend.callTool('context', {
+            response_profile: 'full',
+            name: 'login',
+            include_content: true,
+          });
+          const login = (query.process_symbols ?? []).find(
+            (symbol: any) => symbol.id === 'func:login',
+          );
+
+          expect(query.contentAvailability).toEqual({
+            requested: true,
+            profile: 'none',
+            available: false,
+            scope: 'none',
+            reason: 'Source-derived content is not retained by this index.',
+          });
+          expect(login?.content).toBeUndefined();
+          expect(context.contentAvailability).toEqual(query.contentAvailability);
+          expect(context.symbol.content).toBeUndefined();
+        } finally {
+          await Promise.all([
+            fs.rm(`${storagePath}/gitnexus.json`, { force: true }),
+            fs.rm(`${storagePath}/meta.json`, { force: true }),
+          ]);
         }
-      } finally {
-        if (original === undefined) {
-          delete process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS;
-        } else {
-          process.env.GITNEXUS_UNITY_PROCESS_CONFIDENCE_FIELDS = original;
+      });
+
+      it('does not disclose lingering source text when retention metadata is invalid', async () => {
+        const storagePath = handle.tmpHandle.dbPath;
+        await saveMeta(storagePath, {
+          repoPath: '/test/repo',
+          storagePath,
+          lastCommit: 'abc123',
+          indexedAt: new Date().toISOString(),
+          contentRetention: 'invalid' as never,
+          contentRetentionSchemaVersion: 1,
+          ftsProfile: 'name-only',
+        });
+        try {
+          const query = await backend.callTool('query', {
+            response_profile: 'full',
+            query: 'login',
+            include_content: true,
+          });
+          const context = await backend.callTool('context', {
+            response_profile: 'full',
+            name: 'login',
+            include_content: true,
+          });
+          const login = (query.process_symbols ?? []).find(
+            (symbol: any) => symbol.id === 'func:login',
+          );
+
+          expect(query.contentAvailability).toMatchObject({
+            requested: true,
+            profile: 'none',
+            available: false,
+            scope: 'none',
+          });
+          expect(login?.content).toBeUndefined();
+          expect(context.contentAvailability).toEqual(query.contentAvailability);
+          expect(context.symbol.content).toBeUndefined();
+        } finally {
+          await Promise.all([
+            fs.rm(`${storagePath}/gitnexus.json`, { force: true }),
+            fs.rm(`${storagePath}/meta.json`, { force: true }),
+          ]);
         }
-      }
-    });
-
-    it('v1 runtime chain verify on demand', async () => {
-      const out = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'Reload NEON.Game.Graph.Nodes.Reloads',
-        unity_resources: 'on',
-        unity_hydration_mode: 'parity',
-        runtime_chain_verify: 'on-demand',
-      });
-      expect(out.runtime_chain).toBeDefined();
-      expect(Array.isArray(out.runtime_chain.hops)).toBe(true);
-      expect(out.runtime_claim).toBeDefined();
-      expect([
-        'rule_not_matched',
-        'rule_matched_but_evidence_missing',
-        'rule_matched_but_verification_failed',
-      ]).toContain(out.runtime_claim.reason);
-    });
-
-    it('phase2 runtime_claim contract', async () => {
-      const out = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'Reload NEON.Game.Graph.Nodes.Reloads',
-        unity_resources: 'on',
-        unity_hydration_mode: 'parity',
-        runtime_chain_verify: 'on-demand',
       });
 
-      expect(out.runtime_claim).toBeDefined();
-      expect(out.runtime_claim.rule_id).toBe('graph-only.runtime-closure.v1');
-      expect(out.runtime_claim.rule_version).toBeTruthy();
-      expect(out.runtime_claim.scope).toBeDefined();
-      expect(Array.isArray(out.runtime_claim.guarantees)).toBe(true);
-      expect(Array.isArray(out.runtime_claim.non_guarantees)).toBe(true);
-      expect(out.runtime_claim.non_guarantees.length).toBeGreaterThan(0);
-      expect([
-        'rule_not_matched',
-        'rule_matched_but_evidence_missing',
-        'rule_matched_but_verification_failed',
-      ]).toContain(out.runtime_claim.reason);
-      expect(out.runtime_claim.next_action).toBeTruthy();
-      expect(['verified_full', 'failed']).toContain(out.runtime_claim.verification_core_status);
-      expect(out.runtime_claim.verification_core_evidence_level).toBeTruthy();
-      expect(typeof out.runtime_claim.policy_adjusted).toBe('boolean');
-    });
+      // PR #222 port: a symbol in MULTIPLE processes is what fully exercises the
+      // +1 positional shift in the batched STEP_IN_PROCESS aggregation — with a
+      // single process row, `row.pid ?? row[1]` succeeds whether the shift is
+      // right or wrong. func:validate is a step in BOTH proc:login-flow (step 2)
+      // and proc:beta-flow (step 3), so both rows for the one node must be parsed
+      // (pid=row[1], step=row[6]); an off-by-one would drop a process or mis-pair
+      // pid↔step. Also pins process ranking (totalScore via the regroup-by-nodeId).
+      it('query batches a multi-process symbol and ranks processes (positional shift across rows)', async () => {
+        const res = await backend.callTool('query', {
+          response_profile: 'full',
+          query: 'validate',
+        });
+        expect(res).not.toHaveProperty('error');
+        const processIds = (res.processes ?? []).map((p: any) => p.id);
+        // Both of validate's processes must appear — both STEP_IN_PROCESS rows
+        // were parsed and grouped by the correct pid (row[1]).
+        expect(processIds).toContain('proc:login-flow');
+        expect(processIds).toContain('proc:beta-flow');
 
+        // process_symbols dedups by id, so validate appears once carrying the
+        // pid+step of its top-ranked process — they must come from the SAME
+        // shifted row: login-flow⇒step 2, beta-flow⇒step 3.
+        const v = (res.process_symbols ?? []).find((s: any) => s.id === 'func:validate');
+        expect(v).toBeDefined();
+        expect(v.step_index).toBe(v.process_id === 'proc:beta-flow' ? 3 : 2);
 
-
-    it('phase2 failure classifications', async () => {
-      const unmatched = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'UnrelatedUnityChain',
-        unity_resources: 'on',
-        runtime_chain_verify: 'on-demand',
-      });
-      const allowedReasons = [
-        'rule_not_matched',
-        'rule_matched_but_evidence_missing',
-        'rule_matched_but_verification_failed',
-      ];
-      expect(unmatched.runtime_claim?.status).toBe('failed');
-      expect(allowedReasons).toContain(unmatched.runtime_claim?.reason);
-      if (unmatched.runtime_claim?.reason === 'rule_matched_but_evidence_missing') {
-        expect(Array.isArray(unmatched.runtime_claim?.gaps)).toBe(true);
-        expect(unmatched.runtime_claim?.gaps?.length || 0).toBeGreaterThan(0);
-      }
-      expect(unmatched.runtime_claim?.next_action).toBeTruthy();
-    });
-
-    it('phase2 no cross-repo bootstrap fallback', async () => {
-      const out = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'Reload',
-        unity_resources: 'on',
-        runtime_chain_verify: 'on-demand',
-      });
-      expect(out.runtime_claim?.rule_id).toBe('graph-only.runtime-closure.v1');
-      expect([
-        'rule_not_matched',
-        'rule_matched_but_evidence_missing',
-        'rule_matched_but_verification_failed',
-      ]).toContain(out.runtime_claim?.reason);
-    });
-
-    it('phase3 evidence mode', async () => {
-      const out = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'Reload',
-        unity_resources: 'on',
-        unity_evidence_mode: 'summary',
-        max_bindings: 1,
-        max_reference_fields: 1,
-      });
-      expect(out.evidence_meta?.truncated).toBe(true);
-      expect(out.evidence_meta?.omitted_count).toBeGreaterThan(0);
-      expect(out.evidence_meta?.next_fetch_hint).toMatch(/unity_evidence_mode=full/i);
-    });
-
-    it('phase3 minimum evidence contract (no project rules => rule_not_matched)', async () => {
-      const out = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'Reload',
-        unity_resources: 'on',
-        unity_evidence_mode: 'summary',
-        max_bindings: 1,
-        max_reference_fields: 1,
-        runtime_chain_verify: 'on-demand',
-      });
-      expect(out.runtime_claim?.status).toBe('failed');
-      expect([
-        'rule_not_matched',
-        'rule_matched_but_evidence_missing',
-      ]).toContain(out.runtime_claim?.reason);
-    });
-
-    it('phase4 hydration policy', async () => {
-      const strict = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'Reload',
-        unity_resources: 'on',
-        hydration_policy: 'strict',
-        unity_hydration_mode: 'compact',
-        runtime_chain_verify: 'on-demand',
-      });
-      expect(strict.hydrationMeta?.requestedMode).toBe('parity');
-      expect(typeof strict.hydrationMeta?.effectiveMode).toBe('string');
-      expect(String(strict.hydrationMeta?.reason || '')).toMatch(/strict/i);
-      expect(['verified_full', 'failed']).toContain(strict.runtime_claim?.verification_core_status);
-      expect(strict.runtime_claim?.verification_core_evidence_level).toBeTruthy();
-      expect(typeof strict.runtime_claim?.policy_adjusted).toBe('boolean');
-      if (strict.hydrationMeta?.fallbackToCompact && strict.runtime_claim?.status !== 'failed') {
-        expect(strict.runtime_claim?.verification_core_status).toBe('verified_full');
-        expect(strict.runtime_claim?.status).toBe('verified_partial');
-        expect(strict.runtime_claim?.evidence_level).toBe('verified_segment');
-        expect(strict.runtime_claim?.policy_adjusted).toBe(true);
-      }
-      expect(Array.isArray(strict.missing_evidence)).toBe(true);
-
-      const balancedParity = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'Reload',
-        unity_resources: 'on',
-        hydration_policy: 'balanced',
-        unity_hydration_mode: 'parity',
-      });
-      expect(balancedParity.hydrationMeta?.requestedMode).toBe('parity');
-
-      const fastParity = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'Reload',
-        unity_resources: 'on',
-        hydration_policy: 'fast',
-        unity_hydration_mode: 'parity',
-      });
-      expect(fastParity.hydrationMeta?.requestedMode).toBe('compact');
-      expect(String(fastParity.hydrationMeta?.reason || '')).toMatch(/fast/i);
-    });
-
-    it('runtime claim core vs adjusted metadata is stable in context()', async () => {
-      const out = await backend.callTool('context', {
-response_profile: 'full',
-        name: 'ReloadBase',
-        unity_resources: 'on',
-        hydration_policy: 'strict',
-        unity_hydration_mode: 'compact',
-        runtime_chain_verify: 'on-demand',
+        // Ranking: 'login' surfaces proc:login-flow as the top process.
+        const loginRes = await backend.callTool('query', {
+          response_profile: 'full',
+          query: 'login',
+        });
+        expect((loginRes.processes ?? [])[0]?.id).toBe('proc:login-flow');
       });
 
-      expect(out.runtime_claim).toBeDefined();
-      expect(['verified_full', 'failed']).toContain(out.runtime_claim?.verification_core_status);
-      expect(out.runtime_claim?.verification_core_evidence_level).toBeTruthy();
-      expect(typeof out.runtime_claim?.policy_adjusted).toBe('boolean');
-      if (out.hydrationMeta?.fallbackToCompact && out.runtime_claim?.status !== 'failed') {
-        expect(out.runtime_claim?.verification_core_status).toBe('verified_full');
-        expect(out.runtime_claim?.status).toBe('verified_partial');
-        expect(out.runtime_claim?.evidence_level).toBe('verified_segment');
-        expect(out.runtime_claim?.policy_adjusted).toBe(true);
-      }
-    });
+      it('tool_map returns per-tool flows without cross-attributing same-file tools', async () => {
+        const result = await backend.callTool('tool_map', {});
+        expect(result).not.toHaveProperty('error');
 
-    it('phase4 missing_evidence and needsParityRetry', async () => {
-      const fast = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'Reload',
-        unity_resources: 'on',
-        hydration_policy: 'fast',
+        const tools = new Map(result.tools.map((tool: any) => [tool.name, tool]));
+        expect(tools.get('alpha')?.description).toBe('Calls chain A.');
+        expect(tools.get('beta')?.description).toBe('Calls chain B.');
+        expect(tools.get('alpha')?.flows).toEqual(['AlphaFlow']);
+        expect(tools.get('beta')?.flows).toEqual(['BetaFlow']);
       });
-      expect(Array.isArray(fast.missing_evidence)).toBe(true);
-      if (fast.hydrationMeta?.isComplete === false) {
-        expect(typeof fast.hydrationMeta.needsParityRetry).toBe('boolean');
-      }
-    });
 
-    it('v1 runtime chain verify always runs when requested', async () => {
-      const out = await backend.callTool('query', {
-response_profile: 'full',
-        query: 'Reload NEON.Game.Graph.Nodes.Reloads',
-        unity_resources: 'on',
-        unity_hydration_mode: 'parity',
-        runtime_chain_verify: 'on-demand',
+      it('unknown tool throws', async () => {
+        await expect(backend.callTool('nonexistent_tool', {})).rejects.toThrow(/unknown tool/i);
       });
-      expect(out.runtime_chain).toBeDefined();
-      expect(out.runtime_claim).toBeDefined();
     });
 
-    it('returns lifecycle process metadata without breaking legacy fields', async () => {
-      const queryResult = await backend.callTool('query', {
- response_profile: 'full', query: 'login' });
-      expect(queryResult.processes.some((p: any) => p.process_subtype === 'unity_lifecycle')).toBe(true);
-      expect(queryResult.processes.every((p: any) => typeof p.step_count === 'number')).toBe(true);
-      expect(queryResult.processes.every((p: any) => typeof p.process_type === 'string')).toBe(true);
+    describe('impact tool relationTypes filtering', () => {
+      let backend: LocalBackend;
 
-      const contextResult = await backend.callTool('context', {
- response_profile: 'full', name: 'login' });
-      expect(contextResult.processes.some((p: any) => p.process_subtype === 'unity_lifecycle')).toBe(true);
-      expect(contextResult.processes.every((p: any) => typeof p.step_count === 'number')).toBe(true);
-    });
-
-    it('unknown tool throws', async () => {
-      await expect(
-        backend.callTool('nonexistent_tool', {}),
-      ).rejects.toThrow(/unknown tool/i);
-    });
-  });
-
-  describe('impact tool relationTypes filtering', () => {
-    let backend: LocalBackend;
-
-    beforeAll(async () => {
-      const ext = handle as typeof handle & { _backend?: LocalBackend };
-      if (!ext._backend) {
-        throw new Error('LocalBackend not initialized — afterSetup did not attach _backend to handle');
-      }
-      backend = ext._backend;
-    });
-
-    it('filters by HAS_METHOD only', async () => {
-      const result = await backend.callTool('impact', {
-        target: 'AuthService',
-        direction: 'downstream',
-        relationTypes: ['HAS_METHOD'],
+      beforeAll(async () => {
+        const ext = handle as typeof handle & { _backend?: LocalBackend };
+        if (!ext._backend) {
+          throw new Error(
+            'LocalBackend not initialized — afterSetup did not attach _backend to handle',
+          );
+        }
+        backend = ext._backend;
       });
-      expect(result).not.toHaveProperty('error');
-      expect(result.impactedCount).toBeGreaterThanOrEqual(1);
-      const d1 = result.byDepth[1] || result.byDepth['1'] || [];
-      const names = d1.map((d: any) => d.name);
-      expect(names).toContain('authenticate');
-      // Should NOT include CALLS-reachable symbols like validate/hash
-      expect(names).not.toContain('validate');
-      expect(names).not.toContain('hash');
-    });
 
-    it('filters by OVERRIDES only', async () => {
-      const result = await backend.callTool('impact', {
-        target: 'authenticate',
-        direction: 'downstream',
-        relationTypes: ['OVERRIDES'],
+      it('filters by HAS_METHOD only', async () => {
+        const result = await backend.callTool('impact', {
+          target: 'AuthService',
+          direction: 'downstream',
+          relationTypes: ['HAS_METHOD'],
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.impactedCount).toBeGreaterThanOrEqual(1);
+        const d1 = result.byDepth[1] || result.byDepth['1'] || [];
+        const names = d1.map((d: any) => d.name);
+        expect(names).toContain('authenticate');
+        // Should NOT include CALLS-reachable symbols like validate/hash
+        expect(names).not.toContain('validate');
+        expect(names).not.toContain('hash');
       });
-      expect(result).not.toHaveProperty('error');
-      // AuthService.authenticate overrides BaseService.authenticate
-      expect(result.impactedCount).toBeGreaterThanOrEqual(1);
-      const d1 = result.byDepth[1] || result.byDepth['1'] || [];
-      const names = d1.map((d: any) => d.name);
-      expect(names).toContain('authenticate');
-    });
 
-    it('does not return HAS_METHOD results when filtering by CALLS only', async () => {
-      const result = await backend.callTool('impact', {
-        target: 'AuthService',
-        direction: 'downstream',
-        relationTypes: ['CALLS'],
+      it('filters by OVERRIDES only', async () => {
+        // The seed has two Method nodes named 'authenticate' (AuthService's
+        // override and BaseService's base). Per #470, `impact` now returns
+        // a ranked-ambiguous response when the target name hits multiple
+        // symbols, so we must disambiguate with file_path to get the
+        // AuthService override (the one with the outgoing METHOD_OVERRIDES
+        // edge we want to follow downstream).
+        const result = await backend.callTool('impact', {
+          target: 'authenticate',
+          file_path: 'src/auth.ts',
+          direction: 'downstream',
+          relationTypes: ['METHOD_OVERRIDES'],
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.status).not.toBe('ambiguous');
+        // AuthService.authenticate overrides BaseService.authenticate
+        expect(result.impactedCount).toBeGreaterThanOrEqual(1);
+        const d1 = result.byDepth[1] || result.byDepth['1'] || [];
+        const names = d1.map((d: any) => d.name);
+        expect(names).toContain('authenticate');
       });
-      expect(result).not.toHaveProperty('error');
-      // AuthService has no outgoing CALLS edges, only HAS_METHOD
-      expect(result.impactedCount).toBe(0);
-    });
 
-    it('bridges class-target upstream traversal through HAS_METHOD by default', async () => {
-      const result = await backend.callTool('impact', {
-        target: 'AuthService',
-        direction: 'upstream',
+      it('expands legacy OVERRIDES to include METHOD_OVERRIDES (dual-read)', async () => {
+        // Pass the LEGACY alias 'OVERRIDES' — impactByUid should flatMap-expand
+        // it to ['OVERRIDES', 'METHOD_OVERRIDES'] so the METHOD_OVERRIDES edge
+        // between BaseService.authenticate and AuthService.authenticate is found.
+        // file_path hint disambiguates the two 'authenticate' methods per #470.
+        const result = await backend.callTool('impact', {
+          target: 'authenticate',
+          file_path: 'src/auth.ts',
+          direction: 'downstream',
+          relationTypes: ['OVERRIDES'],
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.status).not.toBe('ambiguous');
+        expect(result.impactedCount).toBeGreaterThanOrEqual(1);
+        const d1 = result.byDepth[1] || result.byDepth['1'] || [];
+        const names = d1.map((d: any) => d.name);
+        expect(names).toContain('authenticate');
       });
-      expect(result).not.toHaveProperty('error');
-      const d1 = result.byDepth[1] || result.byDepth['1'] || [];
-      const names = d1.map((d: any) => d.name);
-      expect(names).toContain('login');
-    });
-  });
 
-  describe('tool parameter edge cases', () => {
-    let backend: LocalBackend;
-
-    beforeAll(async () => {
-      const ext = handle as typeof handle & { _backend?: LocalBackend };
-      if (!ext._backend) {
-        throw new Error('LocalBackend not initialized — afterSetup did not attach _backend to handle');
-      }
-      backend = ext._backend;
-    });
-
-    it('context tool returns error for nonexistent symbol', async () => {
-      const result = await backend.callTool('context', {
- response_profile: 'full', name: 'nonexistent_xyz_symbol_999' });
-      expect(result).toHaveProperty('error');
-      expect(result.error).toMatch(/not found/i);
-    });
-
-    it('query tool returns error for empty query', async () => {
-      const result = await backend.callTool('query', {
- response_profile: 'full', query: '' });
-      expect(result).toHaveProperty('error');
-      expect(result.error).toMatch(/required/i);
-    });
-
-    it('query tool returns error for missing query param', async () => {
-      const result = await backend.callTool('query', {
-response_profile: 'full',});
-      expect(result).toHaveProperty('error');
-    });
-
-    it('cypher tool returns error for invalid Cypher syntax', async () => {
-      const result = await backend.callTool('cypher', { query: 'THIS IS NOT VALID CYPHER AT ALL' });
-      expect(result).toHaveProperty('error');
-    });
-
-    it('context tool returns error when no name or uid provided', async () => {
-      const result = await backend.callTool('context', {
-response_profile: 'full',});
-      expect(result).toHaveProperty('error');
-      expect(result.error).toMatch(/required/i);
-    });
-
-    // ─── impact error handling tests (#321) ───────────────────────────
-    // Verify that impact() returns structured JSON instead of crashing
-
-    it('impact tool returns structured error for unknown symbol', async () => {
-      const result = await backend.callTool('impact', {
-        target: 'nonexistent_symbol_xyz_999',
-        direction: 'upstream',
-      });
-      // Must return structured JSON, not throw
-      expect(result).toBeDefined();
-      // Should have either an error field (not found) or impactedCount 0
-      // Either outcome is valid — the key is it doesn't crash
-      if (result.error) {
-        expect(typeof result.error).toBe('string');
-      } else {
+      it('does not return HAS_METHOD results when filtering by CALLS only', async () => {
+        const result = await backend.callTool('impact', {
+          target: 'AuthService',
+          direction: 'downstream',
+          relationTypes: ['CALLS'],
+        });
+        expect(result).not.toHaveProperty('error');
+        // AuthService has no outgoing CALLS edges, only HAS_METHOD
         expect(result.impactedCount).toBe(0);
-      }
-    });
-
-    it('impact error response has consistent target shape', async () => {
-      const result = await backend.callTool('impact', {
-        target: 'nonexistent_symbol_xyz_999',
-        direction: 'downstream',
       });
-      // When an error is returned, target must be an object (not raw string)
-      // so downstream API consumers can safely access result.target.name
-      if (result.error && result.target !== undefined) {
-        expect(typeof result.target).toBe('object');
-        expect(result.target).not.toBeNull();
-      }
     });
 
-    it('impact partial results: traversalComplete flag when depth fails', async () => {
-      // Even if traversal fails at some depth, partial results should be returned
-      // and partial:true should only be set when some results were collected
-      const result = await backend.callTool('impact', {
-        target: 'validate',
-        direction: 'upstream',
-        maxDepth: 10, // Large depth to trigger multi-level traversal
+    describe('tool parameter edge cases', () => {
+      let backend: LocalBackend;
+
+      beforeAll(async () => {
+        const ext = handle as typeof handle & { _backend?: LocalBackend };
+        if (!ext._backend) {
+          throw new Error(
+            'LocalBackend not initialized — afterSetup did not attach _backend to handle',
+          );
+        }
+        backend = ext._backend;
       });
-      // Should succeed (validate exists in seed data)
-      expect(result).not.toHaveProperty('error');
-      if (result.partial) {
-        // If partial, must still have some results
-        expect(result.impactedCount).toBeGreaterThan(0);
-      }
+
+      it('context tool returns error for nonexistent symbol', async () => {
+        const result = await backend.callTool('context', {
+          response_profile: 'full',
+          name: 'nonexistent_xyz_symbol_999',
+        });
+        expect(result).toHaveProperty('error');
+        expect(result.error).toMatch(/not found/i);
+      });
+
+      it('query tool returns error for empty query', async () => {
+        const result = await backend.callTool('query', { response_profile: 'full', query: '' });
+        expect(result).toHaveProperty('error');
+        expect(result.error).toMatch(/required/i);
+      });
+
+      it('query tool returns error for missing query param', async () => {
+        const result = await backend.callTool('query', { response_profile: 'full' });
+        expect(result).toHaveProperty('error');
+      });
+
+      it('cypher tool returns error for invalid Cypher syntax', async () => {
+        const result = await backend.callTool('cypher', {
+          query: 'THIS IS NOT VALID CYPHER AT ALL',
+        });
+        expect(result).toHaveProperty('error');
+      });
+
+      it('context tool returns error when no name or uid provided', async () => {
+        const result = await backend.callTool('context', { response_profile: 'full' });
+        expect(result).toHaveProperty('error');
+        expect(result.error).toMatch(/required/i);
+      });
+
+      // ─── impact error handling tests (#321) ───────────────────────────
+      // Verify that impact() returns structured JSON instead of crashing
+
+      it('impact tool returns structured error for unknown symbol', async () => {
+        const result = await backend.callTool('impact', {
+          target: 'nonexistent_symbol_xyz_999',
+          direction: 'upstream',
+        });
+        // Must return structured JSON, not throw
+        expect(result).toBeDefined();
+        // Should have either an error field (not found) or impactedCount 0
+        // Either outcome is valid — the key is it doesn't crash
+        if (result.error) {
+          expect(typeof result.error).toBe('string');
+        } else {
+          expect(result.impactedCount).toBe(0);
+        }
+      });
+
+      it('impact error response has consistent target shape', async () => {
+        const result = await backend.callTool('impact', {
+          target: 'nonexistent_symbol_xyz_999',
+          direction: 'downstream',
+        });
+        // When an error is returned, target must be an object (not raw string)
+        // so downstream API consumers can safely access result.target.name
+        if (result.error && result.target !== undefined) {
+          expect(typeof result.target).toBe('object');
+          expect(result.target).not.toBeNull();
+        }
+      });
+
+      it('impact partial results: traversalComplete flag when depth fails', async () => {
+        // Even if traversal fails at some depth, partial results should be returned
+        // and partial:true should only be set when some results were collected
+        const result = await backend.callTool('impact', {
+          target: 'validate',
+          direction: 'upstream',
+          maxDepth: 10, // Large depth to trigger multi-level traversal
+        });
+        // Should succeed (validate exists in seed data)
+        expect(result).not.toHaveProperty('error');
+        if (result.partial) {
+          // If partial, must still have some results
+          expect(result.impactedCount).toBeGreaterThan(0);
+        }
+      });
     });
-  });
 
-}, {
-  seed: LOCAL_BACKEND_SEED_DATA,
-  ftsIndexes: LOCAL_BACKEND_FTS_INDEXES,
-  poolAdapter: true,
-  afterSetup: async (handle) => {
-    // Configure listRegisteredRepos mock with handle values
-    vi.mocked(listRegisteredRepos).mockResolvedValue([
-      {
-        name: 'test-repo',
-        path: '/test/repo',
-        storagePath: handle.tmpHandle.dbPath,
-        indexedAt: new Date().toISOString(),
-        lastCommit: 'abc123',
-        stats: { files: 2, nodes: 3, communities: 1, processes: 1 },
-      },
-    ]);
+    // ─── impact disambiguation + label-scoped resolution (#1907) ─────────
+    // Covers the disambiguation surface the CLI --uid/--file/--kind flags
+    // wire through to, and guards the label-scoped resolver against the
+    // binder failure that motivated the fix.
+    describe('impact disambiguation (#1907)', () => {
+      let backend: LocalBackend;
 
-    const backend = new LocalBackend();
-    await backend.init();
-    // Stash backend on handle so tests can access it
-    (handle as any)._backend = backend;
+      beforeAll(async () => {
+        const ext = handle as typeof handle & { _backend?: LocalBackend };
+        if (!ext._backend) {
+          throw new Error(
+            'LocalBackend not initialized — afterSetup did not attach _backend to handle',
+          );
+        }
+        backend = ext._backend;
+      });
+
+      it('reports an ambiguous target with disambiguation guidance', async () => {
+        // Two Methods named 'authenticate' (AuthService + BaseService).
+        const result = await backend.callTool('impact', {
+          target: 'authenticate',
+          direction: 'upstream',
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.status).toBe('ambiguous');
+        expect(result.message).toMatch(/disambiguate/i);
+        const uids = (result.candidates ?? []).map((c: any) => c.uid);
+        expect(uids).toContain('method:AuthService.authenticate');
+        expect(uids).toContain('method:BaseService.authenticate');
+      });
+
+      it('resolves the ambiguous target via target_uid (the --uid flag path)', async () => {
+        const result = await backend.callTool('impact', {
+          target: 'authenticate',
+          target_uid: 'method:BaseService.authenticate',
+          direction: 'upstream',
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.status).not.toBe('ambiguous');
+        // target_uid selects the exact symbol, bypassing the name ranker.
+        expect(result.target?.id).toBe('method:BaseService.authenticate');
+        expect(result.target?.filePath).toBe('src/base.ts');
+      });
+
+      it('resolves the ambiguous target via file_path (the --file flag path)', async () => {
+        const result = await backend.callTool('impact', {
+          target: 'authenticate',
+          file_path: 'src/base.ts',
+          direction: 'upstream',
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.status).not.toBe('ambiguous');
+        expect(result.target?.id).toBe('method:BaseService.authenticate');
+      });
+
+      it('does not crash when a name collides across symbol and non-symbol labels', async () => {
+        // 'alpha' exists as both a Function and a Tool sharing src/tools.py.
+        // The Tool node table has no startLine/endLine columns, so the
+        // resolver's `RETURN n.startLine` projection only binds because the
+        // candidate set also contains a label that *does* have those columns
+        // (lenient multi-table binding). This guards that the disambiguation
+        // path keeps tolerating non-symbol node types — and would catch a
+        // future naive label-scoping that reintroduces the #1907 binder error
+        // ("Cannot find property … for n") by matching property-poor tables
+        // in isolation.
+        const result = await backend.callTool('impact', {
+          target: 'alpha',
+          direction: 'upstream',
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.status).toBe('ambiguous');
+        const uids = (result.candidates ?? []).map((c: any) => c.uid);
+        expect(uids).toContain('func:alpha');
+        expect(uids).toContain('Tool:alpha');
+      });
+
+      it('context resolves the same cross-label collision without crashing', async () => {
+        const result = await backend.callTool('context', {
+          response_profile: 'full',
+          name: 'alpha',
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.status).toBe('ambiguous');
+        const uids = (result.candidates ?? []).map((c: any) => c.uid);
+        expect(uids).toContain('func:alpha');
+        // Assert the non-symbol Tool node stays in the candidate set, not just
+        // that nothing crashed — a regression that silently dropped Tool from
+        // the lenient-binding match would otherwise pass the non-crash check.
+        expect(uids).toContain('Tool:alpha');
+      });
+
+      it('retries unfiltered and still ranks by kind when the hint matches no id prefix (the --kind flag path, #2787 review F5)', async () => {
+        // WHY THIS FIXTURE TAKES THE FALLBACK, NOT THE FILTER (#2787 review F5):
+        // `kind` is no longer a pure scoring term — it filters with
+        // `n.id STARTS WITH 'Function:'`, which relies on the production node-id
+        // convention `Label:filePath:qualifiedName`. This fixture predates that
+        // convention: its Function node is `func:alpha` (lowercase, in
+        // test/fixtures/local-backend-seed.ts), so NO row in this DB satisfies
+        // the `Function:` prefix and the filtered window comes back EMPTY.
+        // `kind` is a free-form string on the tool schema, so an empty filtered
+        // window must not degrade a real name to `not_found`: the resolver
+        // retries UNFILTERED and the hint reverts to scoreCandidate's +0.20
+        // ranking term. That fallback — not the filter — is what this pins.
+        // The filtering path is covered against production-shaped ids by the
+        // `resolver-kind-filter-2787` suite below.
+        const result = await backend.callTool('impact', {
+          target: 'alpha',
+          kind: 'Function',
+          direction: 'upstream',
+        });
+        expect(result).not.toHaveProperty('error');
+
+        // The unfiltered retry ran: BOTH candidates are back, including the
+        // Tool the filter would have excluded. Without the fallback this is
+        // `{ error: "Symbol 'alpha' not found" }`.
+        expect(result.status).toBe('ambiguous');
+        const candidates = result.candidates ?? [];
+        expect(candidates.map((c: any) => c.uid).sort()).toEqual(['Tool:alpha', 'func:alpha']);
+
+        // …and the hint still ranks, exactly as it did before the filter
+        // existed: 0.50 + 0.20 = 0.70, below the 0.95 confident gate, so the
+        // response stays ambiguous with the Function promoted.
+        expect(candidates[0]).toMatchObject({ uid: 'func:alpha', kind: 'Function' });
+        const tool = candidates.find((c: any) => c.uid === 'Tool:alpha');
+        expect(candidates[0]?.score).toBeGreaterThan(tool?.score);
+      });
+    });
   },
+  {
+    seed: LOCAL_BACKEND_SEED_DATA,
+    ftsIndexes: LOCAL_BACKEND_FTS_INDEXES,
+    poolAdapter: true,
+    afterSetup: async (handle) => {
+      // Configure listRegisteredRepos mock with handle values
+      vi.mocked(listRegisteredRepos).mockResolvedValue([
+        {
+          name: 'test-repo',
+          path: '/test/repo',
+          storagePath: handle.tmpHandle.dbPath,
+          indexedAt: new Date().toISOString(),
+          lastCommit: 'abc123',
+          stats: { files: 2, nodes: 3, communities: 1, processes: 1 },
+        },
+      ]);
+
+      const backend = new LocalBackend();
+      await backend.init();
+      // Stash backend on handle so tests can access it
+      (handle as any)._backend = backend;
+    },
+  },
+);
+
+// ─── impact BFS bound parameters (#1907 review F5) ───────────────────────
+// Isolated DB (not the shared seed) with a frontier node whose id contains a
+// single quote. Under the old string-interpolated query this id had to be
+// hand-escaped; the parameterized query (executeParameterized with bound
+// $frontierIds/$relTypes) carries it as data. Guards that a quote-bearing id
+// traverses without a Prepare/parser error, and that a no-caller symbol
+// returns an empty result rather than erroring.
+withTestLbugDB(
+  'local-backend-impact-param',
+  (handle) => {
+    describe('impact BFS bound parameters (#1907 F5)', () => {
+      let backend: LocalBackend;
+
+      beforeAll(() => {
+        const ext = handle as typeof handle & { _backend?: LocalBackend };
+        if (!ext._backend) {
+          throw new Error('LocalBackend not initialized — afterSetup did not attach _backend');
+        }
+        backend = ext._backend;
+      });
+
+      it('traverses a caller whose id contains a single quote without a query error', async () => {
+        const result = await backend.callTool('impact', { target: 'sink', direction: 'upstream' });
+        expect(result).not.toHaveProperty('error');
+        const d1 = result.byDepth?.[1] || result.byDepth?.['1'] || [];
+        const callerIds = d1.map((d: any) => d.uid ?? d.id);
+        expect(callerIds).toContain("func:o'd");
+      });
+
+      it('returns an empty result (not an error) for a symbol with no callers', async () => {
+        const result = await backend.callTool('impact', {
+          target: 'sink',
+          direction: 'downstream',
+        });
+        expect(result).not.toHaveProperty('error');
+        expect(result.impactedCount).toBe(0);
+      });
+    });
+  },
+  {
+    seed: [
+      `CREATE (a:Function {id: "func:o'd", name: 'odd', filePath: 'src/q.ts', startLine: 1, endLine: 3, isExported: true, content: 'function odd() {}', description: 'caller with a quote in its id'})`,
+      `CREATE (b:Function {id: 'func:sink', name: 'sink', filePath: 'src/q.ts', startLine: 5, endLine: 8, isExported: true, content: 'function sink() {}', description: 'callee'})`,
+      `MATCH (a:Function), (b:Function) WHERE a.id = "func:o'd" AND b.id = 'func:sink'
+       CREATE (a)-[:CodeRelation {type: 'CALLS', confidence: 1.0, reason: 'direct', step: 0}]->(b)`,
+    ],
+    poolAdapter: true,
+    afterSetup: async (handle) => {
+      vi.mocked(listRegisteredRepos).mockResolvedValue([
+        {
+          name: 'param-repo',
+          path: '/param/repo',
+          storagePath: handle.tmpHandle.dbPath,
+          indexedAt: new Date().toISOString(),
+          lastCommit: 'abc123',
+          stats: { files: 1, nodes: 2, communities: 0, processes: 0 },
+        },
+      ]);
+      const backend = new LocalBackend();
+      await backend.init();
+      (handle as any)._backend = backend;
+    },
+  },
+);
+
+// ─── resolver `kind` hint FILTERS (#2787 review F5) ──────────────────────
+// See `resolveSymbolCandidates` (#2787 F5) for why the id order is label-major
+// and why the hint is therefore a WHERE-clause filter on BOTH the window and
+// its COUNT rather than a scoring term.
+//
+// This suite is deliberately seeded with PRODUCTION-shaped ids, unlike the
+// shared `local-backend-seed` fixture whose Function is `func:alpha` — that
+// legacy shape exercises the unfiltered-retry fallback instead (see the
+// "retries unfiltered…" test above).
+const KIND_RUNNER_METHOD_ID = 'Method:src/pipeline.ts:Runner.run';
+const KIND_RUN_FUNCTION_IDS = ['Function:src/cli/exec.ts:run', 'Function:src/pipeline.ts:run'];
+
+withTestLbugDB(
+  'resolver-kind-filter-2787',
+  (handle) => {
+    describe('resolver kind hint filters rather than scores (#2787 review F5)', () => {
+      let backend: LocalBackend;
+
+      beforeAll(() => {
+        const ext = handle as typeof handle & { _backend?: LocalBackend };
+        if (!ext._backend) {
+          throw new Error('LocalBackend not initialized — afterSetup did not attach _backend');
+        }
+        backend = ext._backend;
+      });
+
+      it('narrows a 3-way name collision to a confident resolution', async () => {
+        // Three symbols are named `run`: two Functions and one Method. As a
+        // scoring term the Method could only reach 0.50 + 0.20 = 0.70, far
+        // below the 0.95 confident gate, so this came back `ambiguous` and the
+        // caller had to round-trip for a uid. As a filter the window contains
+        // exactly one row, which resolves outright.
+        const result = await backend.callTool('impact', {
+          target: 'run',
+          kind: 'Method',
+          direction: 'upstream',
+        });
+
+        expect(result).not.toHaveProperty('error');
+        expect(result.status).not.toBe('ambiguous');
+        expect(result.target).toMatchObject({ id: KIND_RUNNER_METHOD_ID, name: 'run' });
+        // The BFS still ran on the filtered pick: `boot` calls Runner.run.
+        expect(result.impactedCount).toBeGreaterThanOrEqual(1);
+      });
+
+      it('excludes non-matching kinds from the candidate set AND from the match count', async () => {
+        // The load-bearing difference between filtering and scoring: with
+        // kind:'Function' the Method must be ABSENT, not merely ranked last —
+        // and `totalCandidates` (the COUNT leg) must agree with the page, or a
+        // filtered window ships alongside the unfiltered population.
+        const result = await backend.callTool('context', {
+          response_profile: 'full',
+          name: 'run',
+          kind: 'Function',
+        });
+
+        expect(result).toMatchObject({ status: 'ambiguous', totalCandidates: 2 });
+        expect((result.candidates as Array<{ uid: string }>).map((c) => c.uid).sort()).toEqual(
+          KIND_RUN_FUNCTION_IDS,
+        );
+        expect(result).not.toHaveProperty('totalIsLowerBound');
+      });
+    });
+  },
+  {
+    seed: [
+      `CREATE (:Function {id: 'Function:src/pipeline.ts:run', name: 'run', filePath: 'src/pipeline.ts', startLine: 1, endLine: 9, isExported: true, content: 'export function run() {}', description: 'pipeline entry'})`,
+      `CREATE (:Function {id: 'Function:src/cli/exec.ts:run', name: 'run', filePath: 'src/cli/exec.ts', startLine: 1, endLine: 9, isExported: true, content: 'export function run() {}', description: 'cli entry'})`,
+      `CREATE (:Method {id: '${KIND_RUNNER_METHOD_ID}', name: 'run', filePath: 'src/pipeline.ts', startLine: 20, endLine: 30, isExported: false, content: 'run() {}', description: 'Runner.run'})`,
+      `CREATE (:Function {id: 'Function:src/main.ts:boot', name: 'boot', filePath: 'src/main.ts', startLine: 1, endLine: 5, isExported: true, content: 'function boot() {}', description: 'caller of Runner.run'})`,
+      `MATCH (a:Function), (b:Method) WHERE a.id = 'Function:src/main.ts:boot' AND b.id = '${KIND_RUNNER_METHOD_ID}'
+       CREATE (a)-[:CodeRelation {type: 'CALLS', confidence: 0.9, reason: 'direct', step: 0}]->(b)`,
+    ],
+    poolAdapter: true,
+    afterSetup: async (handle) => {
+      vi.mocked(listRegisteredRepos).mockResolvedValue([
+        {
+          name: 'kind-filter-repo',
+          path: '/kind/repo',
+          storagePath: handle.tmpHandle.dbPath,
+          indexedAt: new Date().toISOString(),
+          lastCommit: 'abc123',
+          stats: { files: 4, nodes: 4, communities: 0, processes: 0 },
+        },
+      ]);
+      const backend = new LocalBackend();
+      await backend.init();
+      (handle as any)._backend = backend;
+    },
+  },
+);
+
+// ─── context ref window must SPREAD across categories (#2787 review F1) ──
+// See the incoming-ref window in `_contextImpl` (#2787 F1) for why the 30-row
+// page is keyed `ORDER BY uid, relType` and not category-major.
+//
+// Shape below: 40 incoming refs on one Method — 35 CALLS, 3 ACCESSES, 1 USES,
+// 1 HAS_METHOD (the owning class, which is how `context` names the owner).
+//   relType-major → ACCESSES(3) + CALLS(27); HAS_METHOD and USES gone.
+//   uid-major     → HAS_METHOD(1) + ACCESSES(3) + USES(1) + CALLS(25).
+// The caller ids are spread through the id space on purpose (`a1` in f05, `u1`
+// in f10, `a2` in f15, `a3` in f25), so the rare categories are NOT stacked at
+// the front of the uid order — they survive because the key interleaves them,
+// not because they were placed first.
+const REF_TARGET_ID = 'Method:src/owner.ts:Owner.handle';
+const REF_OWNER_ID = 'Class:src/owner.ts:Owner';
+const REF_ACCESSES_IDS = [
+  'Function:src/f05.ts:a1',
+  'Function:src/f15.ts:a2',
+  'Function:src/f25.ts:a3',
+];
+const REF_USES_ID = 'Function:src/f10.ts:u1';
+
+const refCaller = (id: string, name: string, filePath: string): string =>
+  `CREATE (:Function {id: '${id}', name: '${name}', filePath: '${filePath}', startLine: 1, endLine: 3, isExported: true, content: '', description: ''})`;
+
+const refEdge = (fromLabel: string, fromId: string, relType: string): string =>
+  `MATCH (a:${fromLabel}), (b:Method) WHERE a.id = '${fromId}' AND b.id = '${REF_TARGET_ID}'
+   CREATE (a)-[:CodeRelation {type: '${relType}', confidence: 0.9, reason: 'direct', step: 0}]->(b)`;
+
+const REF_CALLS_IDS = Array.from({ length: 35 }, (_, i) => {
+  const nn = String(i + 1).padStart(2, '0');
+  return `Function:src/f${nn}.ts:c${nn}`;
 });
+
+withTestLbugDB(
+  'context-ref-window-2787',
+  (handle) => {
+    describe('context incoming-ref window spreads across categories (#2787 review F1)', () => {
+      let backend: LocalBackend;
+
+      beforeAll(() => {
+        const ext = handle as typeof handle & { _backend?: LocalBackend };
+        if (!ext._backend) {
+          throw new Error('LocalBackend not initialized — afterSetup did not attach _backend');
+        }
+        backend = ext._backend;
+      });
+
+      it('keeps single-edge categories that a category-major ORDER BY starved', async () => {
+        const result = await backend.callTool('context', {
+          response_profile: 'full',
+          uid: REF_TARGET_ID,
+        });
+
+        expect(result).not.toHaveProperty('error');
+        expect(result.status).toBe('found');
+
+        // The rare categories are present at all — this is the assertion the
+        // pre-fix key fails: HAS_METHOD and USES sort after CALLS, whose 35 rows
+        // overflow the window on their own.
+        expect(Object.keys(result.incoming).sort()).toEqual([
+          'accesses',
+          'calls',
+          'has_method',
+          'uses',
+        ]);
+        expect(result.incoming.has_method.map((r: { uid: string }) => r.uid)).toEqual([
+          REF_OWNER_ID,
+        ]);
+        expect(result.incoming.uses.map((r: { uid: string }) => r.uid)).toEqual([REF_USES_ID]);
+        expect(result.incoming.accesses.map((r: { uid: string }) => r.uid)).toEqual(
+          REF_ACCESSES_IDS,
+        );
+
+        // …and the window is still exactly 30 rows: the fix REDISTRIBUTES the
+        // page, it does not widen it. The dominant category gives up the 5 slots
+        // the starved ones need.
+        expect(result.incoming.calls).toHaveLength(25);
+        expect(Object.values(result.incoming).flat()).toHaveLength(30);
+      });
+    });
+  },
+  {
+    seed: [
+      `CREATE (:Method {id: '${REF_TARGET_ID}', name: 'handle', filePath: 'src/owner.ts', startLine: 10, endLine: 20, isExported: false, content: '', description: ''})`,
+      `CREATE (:Class {id: '${REF_OWNER_ID}', name: 'Owner', filePath: 'src/owner.ts', startLine: 1, endLine: 40, isExported: true, content: '', description: ''})`,
+      ...REF_CALLS_IDS.map((id, i) => {
+        const nn = String(i + 1).padStart(2, '0');
+        return refCaller(id, `c${nn}`, `src/f${nn}.ts`);
+      }),
+      ...REF_ACCESSES_IDS.map((id, i) => refCaller(id, `a${i + 1}`, id.split(':')[1])),
+      refCaller(REF_USES_ID, 'u1', 'src/f10.ts'),
+      ...REF_CALLS_IDS.map((id) => refEdge('Function', id, 'CALLS')),
+      ...REF_ACCESSES_IDS.map((id) => refEdge('Function', id, 'ACCESSES')),
+      refEdge('Function', REF_USES_ID, 'USES'),
+      refEdge('Class', REF_OWNER_ID, 'HAS_METHOD'),
+    ],
+    poolAdapter: true,
+    afterSetup: async (handle) => {
+      vi.mocked(listRegisteredRepos).mockResolvedValue([
+        {
+          name: 'ref-window-repo',
+          path: '/ref/repo',
+          storagePath: handle.tmpHandle.dbPath,
+          indexedAt: new Date().toISOString(),
+          lastCommit: 'abc123',
+          stats: { files: 41, nodes: 41, communities: 0, processes: 0 },
+        },
+      ]);
+      const backend = new LocalBackend();
+      await backend.init();
+      (handle as any)._backend = backend;
+    },
+  },
+);

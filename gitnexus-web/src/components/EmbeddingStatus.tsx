@@ -1,24 +1,18 @@
-import { Brain, Loader2, Check, AlertCircle, Zap, FlaskConical } from 'lucide-react';
+import { Brain, Loader2, Check, AlertCircle, Zap } from '@/lib/lucide-icons';
 import { useAppState } from '../hooks/useAppState';
 import { useState } from 'react';
 import { WebGPUFallbackDialog } from './WebGPUFallbackDialog';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Embedding status indicator and trigger button
  * Shows in header when graph is loaded
  */
 export const EmbeddingStatus = () => {
-  const {
-    embeddingStatus,
-    embeddingProgress,
-    startEmbeddings,
-    graph,
-    viewMode,
-    serverBaseUrl,
-    testArrayParams,
-  } = useAppState();
+  const { t } = useTranslation('graph');
+  const { embeddingStatus, embeddingProgress, startEmbeddings, graph, viewMode, serverBaseUrl } =
+    useAppState();
 
-  const [testResult, setTestResult] = useState<string | null>(null);
   const [showFallbackDialog, setShowFallbackDialog] = useState(false);
 
   // Only show when exploring a loaded graph; hide in backend mode (no WASM DB)
@@ -26,13 +20,15 @@ export const EmbeddingStatus = () => {
 
   const nodeCount = graph.nodes.length;
 
-  const handleStartEmbeddings = async (forceDevice?: 'webgpu' | 'wasm') => {
+  const handleStartEmbeddings = async (_forceDevice?: 'webgpu' | 'wasm') => {
     try {
-      await startEmbeddings(forceDevice);
+      await startEmbeddings();
     } catch (error: any) {
       // Check if it's a WebGPU not available error
-      if (error?.name === 'WebGPUNotAvailableError' || 
-          error?.message?.includes('WebGPU not available')) {
+      if (
+        error?.name === 'WebGPUNotAvailableError' ||
+        error?.message?.includes('WebGPU not available')
+      ) {
         setShowFallbackDialog(true);
       } else {
         console.error('Embedding failed:', error);
@@ -48,18 +44,6 @@ export const EmbeddingStatus = () => {
   const handleSkipEmbeddings = () => {
     setShowFallbackDialog(false);
     // Just close - user can try again later if they want
-  };
-  
-  const handleTestArrayParams = async () => {
-    setTestResult('Testing...');
-    const result = await testArrayParams();
-    if (result.success) {
-      setTestResult('✅ Array params WORK!');
-      console.log('✅ Array params test passed!');
-    } else {
-      setTestResult(`❌ ${result.error}`);
-      console.error('❌ Array params test failed:', result.error);
-    }
   };
 
   // WebGPU fallback dialog - rendered independently of state
@@ -78,26 +62,14 @@ export const EmbeddingStatus = () => {
     return (
       <>
         <div className="flex items-center gap-2">
-          {/* Test button (dev only) */}
-          {import.meta.env.DEV && (
-            <button
-              onClick={handleTestArrayParams}
-              className="flex items-center gap-1 px-2 py-1.5 bg-surface border border-border-subtle rounded-lg text-xs text-text-muted hover:bg-hover hover:text-text-secondary transition-all"
-              title="Test if LadybugDB supports array params"
-            >
-              <FlaskConical className="w-3 h-3" />
-              {testResult || 'Test'}
-            </button>
-          )}
-          
           <button
             onClick={() => handleStartEmbeddings()}
-            className="flex items-center gap-2 px-3 py-1.5 bg-surface border border-border-subtle rounded-lg text-sm text-text-secondary hover:bg-hover hover:text-text-primary hover:border-accent/50 transition-all group"
-            title="Generate embeddings for semantic search"
+            className="group flex items-center gap-2 rounded-lg border border-border-subtle bg-surface px-3 py-1.5 text-sm text-text-secondary transition-all hover:border-accent/50 hover:bg-hover hover:text-text-primary"
+            title={t('embedding.generateTitle')}
           >
-            <Brain className="w-4 h-4 text-node-interface group-hover:text-accent transition-colors" />
-            <span className="hidden sm:inline">Enable Semantic Search</span>
-            <Zap className="w-3 h-3 text-text-muted" />
+            <Brain className="h-4 w-4 text-node-interface transition-colors group-hover:text-accent" />
+            <span className="hidden sm:inline">{t('embedding.enable')}</span>
+            <Zap className="h-3 w-3 text-text-muted" />
           </button>
         </div>
         {fallbackDialog}
@@ -107,16 +79,16 @@ export const EmbeddingStatus = () => {
 
   // Loading model
   if (embeddingStatus === 'loading') {
-    const downloadPercent = embeddingProgress?.modelDownloadPercent ?? 0;
+    const downloadPercent = embeddingProgress?.percent ?? 0;
     return (
       <>
-        <div className="flex items-center gap-2.5 px-3 py-1.5 bg-surface border border-accent/30 rounded-lg text-sm">
-          <Loader2 className="w-4 h-4 text-accent animate-spin" />
+        <div className="flex items-center gap-2.5 rounded-lg border border-accent/30 bg-surface px-3 py-1.5 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin text-accent" />
           <div className="flex flex-col gap-0.5">
-            <span className="text-text-secondary text-xs">Loading AI model...</span>
-            <div className="w-24 h-1 bg-elevated rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-gradient-to-r from-accent to-node-interface rounded-full transition-all duration-300"
+            <span className="text-xs text-text-secondary">{t('embedding.loadingModel')}</span>
+            <div className="h-1 w-24 overflow-hidden rounded-full bg-elevated">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-accent to-node-interface transition-all duration-300"
                 style={{ width: `${downloadPercent}%` }}
               />
             </div>
@@ -129,20 +101,20 @@ export const EmbeddingStatus = () => {
 
   // Embedding in progress
   if (embeddingStatus === 'embedding') {
-    const processed = embeddingProgress?.nodesProcessed ?? 0;
-    const total = embeddingProgress?.totalNodes ?? 0;
+    const processed = 0;
+    const total = 0;
     const percent = embeddingProgress?.percent ?? 0;
-    
+
     return (
-      <div className="flex items-center gap-2.5 px-3 py-1.5 bg-surface border border-node-function/30 rounded-lg text-sm">
-        <Loader2 className="w-4 h-4 text-node-function animate-spin" />
+      <div className="flex items-center gap-2.5 rounded-lg border border-node-function/30 bg-surface px-3 py-1.5 text-sm">
+        <Loader2 className="h-4 w-4 animate-spin text-node-function" />
         <div className="flex flex-col gap-0.5">
-          <span className="text-text-secondary text-xs">
-            Embedding {processed}/{total} nodes
+          <span className="text-xs text-text-secondary">
+            {t('embedding.embeddingNodes', { processed, total })}
           </span>
-          <div className="w-24 h-1 bg-elevated rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-gradient-to-r from-node-function to-accent rounded-full transition-all duration-300"
+          <div className="h-1 w-24 overflow-hidden rounded-full bg-elevated">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-node-function to-accent transition-all duration-300"
               style={{ width: `${percent}%` }}
             />
           </div>
@@ -154,9 +126,9 @@ export const EmbeddingStatus = () => {
   // Indexing
   if (embeddingStatus === 'indexing') {
     return (
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-surface border border-node-interface/30 rounded-lg text-sm text-text-secondary">
-        <Loader2 className="w-4 h-4 text-node-interface animate-spin" />
-        <span className="text-xs">Creating vector index...</span>
+      <div className="flex items-center gap-2 rounded-lg border border-node-interface/30 bg-surface px-3 py-1.5 text-sm text-text-secondary">
+        <Loader2 className="h-4 w-4 animate-spin text-node-interface" />
+        <span className="text-xs">{t('embedding.creatingIndex')}</span>
       </div>
     );
   }
@@ -164,12 +136,12 @@ export const EmbeddingStatus = () => {
   // Ready
   if (embeddingStatus === 'ready') {
     return (
-      <div 
-        className="flex items-center gap-2 px-3 py-1.5 bg-node-function/10 border border-node-function/30 rounded-lg text-sm text-node-function"
-        title="Semantic search is ready! Use natural language in the AI chat."
+      <div
+        className="flex items-center gap-2 rounded-lg border border-node-function/30 bg-node-function/10 px-3 py-1.5 text-sm text-node-function"
+        title={t('embedding.readyTitle')}
       >
-        <Check className="w-4 h-4" />
-        <span className="text-xs font-medium">Semantic Ready</span>
+        <Check className="h-4 w-4" />
+        <span className="text-xs font-medium">{t('embedding.ready')}</span>
       </div>
     );
   }
@@ -180,11 +152,11 @@ export const EmbeddingStatus = () => {
       <>
         <button
           onClick={() => handleStartEmbeddings()}
-          className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400 hover:bg-red-500/20 transition-colors"
-          title={embeddingProgress?.error || 'Embedding failed. Click to retry.'}
+          className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm text-red-400 transition-colors hover:bg-red-500/20"
+          title={t('embedding.errorTitle')}
         >
-          <AlertCircle className="w-4 h-4" />
-          <span className="text-xs">Failed - Retry</span>
+          <AlertCircle className="h-4 w-4" />
+          <span className="text-xs">{t('embedding.failedRetry')}</span>
         </button>
         {fallbackDialog}
       </>
@@ -193,4 +165,3 @@ export const EmbeddingStatus = () => {
 
   return null;
 };
-

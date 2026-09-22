@@ -1,0 +1,104 @@
+/**
+ * Python `ScopeResolver` registered in `SCOPE_RESOLVERS` and consumed
+ * by the generic `runScopeResolution` orchestrator.
+ *
+ * The provider is a thin wiring object — Python's specific bits
+ * (super recognizer, LEGB merge precedence, Python's relative-import
+ * resolver, the simplified MRO walk) plug into `runScopeResolution`.
+ *
+ * Migration reference: when bringing up the next language
+ * (TypeScript / Java / Kotlin / Ruby), copy this file's structure —
+ * implement the 6 required `ScopeResolver` fields, optionally toggle
+ * the 2 booleans, and register in `scope-resolution/pipeline/registry.ts`.
+ */
+
+import type { ParsedFile } from 'gitnexus-shared';
+import { SupportedLanguages } from 'gitnexus-shared';
+import { buildMro, defaultLinearize } from '../../scope-resolution/passes/mro.js';
+import { populateClassOwnedMembers } from '../../scope-resolution/scope/walkers.js';
+import type { ScopeResolver } from '../../scope-resolution/contract/scope-resolver.js';
+import { indexOnlyElementType } from '../../type-extractors/shared.js';
+import { pythonProvider } from '../python.js';
+import {
+  isPythonImportedModule,
+  pythonNamespaceReceiverPaths,
+  pythonArityCompatibility,
+  pythonMergeBindings,
+  resolvePythonImportTarget,
+  type PythonResolveContext,
+} from './index.js';
+
+const pythonScopeResolver: ScopeResolver = {
+  // A free call naming a class constructs it: `Service(db).do_work()` (#2708).
+  constructionSyntax: { bare: true },
+  language: SupportedLanguages.Python,
+  languageProvider: pythonProvider,
+  importEdgeReason: 'python-scope: import',
+
+  resolveImportTarget: (targetRaw, fromFile, allFilePaths, _resolutionConfig, context) => {
+    // Pass the orchestrator's stable run-level `ReadonlySet` straight through
+    // (no per-import copy). The Python resolver chain only reads the set, and
+    // `getPythonFileIndex` memoizes its index on the set's identity via a
+    // WeakMap — so the index is built once per run and reused across every
+    // import. Copying here (the previous `new Set(allFilePaths)`) handed a
+    // fresh identity to every import, defeating that cache (PR #1918 review P1).
+    const ws: PythonResolveContext = {
+      fromFile,
+      allFilePaths,
+      parsedFiles: context?.parsedFiles,
+    };
+    // `WorkspaceIndex` is an opaque `unknown` placeholder in the
+    // shared contract, so `ws` passes structurally without a cast.
+    return resolvePythonImportTarget(
+      context?.parsedImport ?? { kind: 'namespace', localName: '_', importedName: '_', targetRaw },
+      ws,
+    );
+  },
+
+  isNamespaceImport: (parsedImport, targetFile, fromFile) =>
+    isPythonImportedModule(parsedImport, targetFile, fromFile),
+
+  // `import a.b.c` binds only `a`, yet makes `a`, `a.b` and `a.b.c` all
+  // callable — each naming a different file. Without this the absolute-import
+  // style is invisible to the call graph, and the root key points at the leaf
+  // module instead of the package (#2826).
+  namespaceReceiverPaths: pythonNamespaceReceiverPaths,
+
+  // Python LEGB precedence: local > import/namespace/reexport > wildcard.
+  // The per-scope id is unused by pythonMergeBindings (tier ordering
+  // is computed purely from BindingRef.origin), so we don't need to
+  // synthesize a Scope.
+  mergeBindings: (existing, incoming) => [...pythonMergeBindings([...existing, ...incoming])],
+
+  // Adapter: pythonArityCompatibility predates RegistryProviders and
+  // uses (def, callsite). ScopeResolver contract is (callsite, def).
+  // Wrapper kept to honor both contracts without altering the legacy
+  // shape that LanguageProvider.arityCompatibility consumes.
+  arityCompatibility: (callsite, def) => pythonArityCompatibility(def, callsite),
+
+  buildMro: (graph, parsedFiles, nodeLookup) =>
+    buildMro(graph, parsedFiles, nodeLookup, defaultLinearize),
+
+  populateOwners: (parsed: ParsedFile) => populateClassOwnedMembers(parsed),
+
+  isSuperReceiver: (text) => /^super\s*\(/.test(text),
+
+  // Subscript route only — Python spells collection views as method calls
+  // (`.values()`), which the compound resolver's call branch already handles.
+  //
+  // The hook receives the annotation AS WRITTEN (`List[User]`, `Dict[str, User]`),
+  // not the name `interpret.ts`'s `stripGeneric` reduced it to, so `undefined`
+  // here means "this spelling is not a container" — which is what stops
+  // `cfg['k'].run()` on a `__getitem__`-bearing class from folding onto the
+  // class itself. Answering the route at all is what keeps `repos[0].save()`
+  // resolving.
+  elementTypeOf: indexOnlyElementType,
+
+  // Python is dynamically typed — field-fallback heuristic on, return-
+  // type propagation across imports on. Both default to true; listed
+  // explicitly here for documentation.
+  fieldFallbackOnMethodLookup: true,
+  propagatesReturnTypesAcrossImports: true,
+};
+
+export { pythonScopeResolver };

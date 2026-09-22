@@ -3,7 +3,11 @@ import path from 'node:path';
 export type ResponseProfile = 'slim' | 'full';
 
 export function resolveResponseProfile(value: unknown): ResponseProfile {
-  return String(value || '').trim().toLowerCase() === 'full' ? 'full' : 'slim';
+  return String(value || '')
+    .trim()
+    .toLowerCase() === 'full'
+    ? 'full'
+    : 'slim';
 }
 
 export function buildSlimQueryResult(
@@ -11,7 +15,9 @@ export function buildSlimQueryResult(
   input: { repoName?: string; queryText: string },
 ): Record<string, unknown> {
   const strictAnchorMode = Boolean(full?.decision_context?.strict_anchor_mode);
-  const strictAnchorResourcePath = String(full?.decision_context?.anchor_resource_path || '').trim();
+  const strictAnchorResourcePath = String(
+    full?.decision_context?.anchor_resource_path || '',
+  ).trim();
   const candidates = buildCandidates(full, {
     queryText: input.queryText,
   });
@@ -67,6 +73,10 @@ export function buildSlimQueryResult(
   });
 
   return {
+    ...(full.warning ? { warning: full.warning } : {}),
+    ...(full.partial ? { partial: true } : {}),
+    ...(full.contentAvailability ? { contentAvailability: full.contentAvailability } : {}),
+    ...(full.timing ? { timing: full.timing } : {}),
     summary,
     candidates,
     process_hints: processHints,
@@ -161,9 +171,19 @@ export function buildSlimContextResult(
   });
 
   return {
+    ...(full.warning ? { warning: full.warning } : {}),
+    ...(full.partial ? { partial: true } : {}),
+    ...(full.contentAvailability ? { contentAvailability: full.contentAvailability } : {}),
+    ...(full.timing ? { timing: full.timing } : {}),
     summary,
     status: full.status,
     symbol: full.symbol,
+    ...(full.epistemic ? { epistemic: full.epistemic } : {}),
+    ...(full.boundaries ? { boundaries: full.boundaries } : {}),
+    ...(full.unresolved
+      ? { unresolved: full.unresolved, anchorLanguages: full.anchorLanguages }
+      : {}),
+    ...(full.typed_properties ? { typed_properties: full.typed_properties } : {}),
     incoming: facts.incoming,
     outgoing: facts.outgoing,
     processes: processHints,
@@ -196,21 +216,37 @@ function inferSummarySource(input: {
   const summary = String(input.summary || '').trim();
   if (!summary) return 'fallback';
   const factCandidates = Array.isArray(input.facts.candidates) ? input.facts.candidates : [];
-  const factProcessHints = Array.isArray(input.facts.process_hints) ? input.facts.process_hints : [];
-  const clueProcessHints = Array.isArray(input.clues.process_hints) ? input.clues.process_hints : [];
+  const factProcessHints = Array.isArray(input.facts.process_hints)
+    ? input.facts.process_hints
+    : [];
+  const clueProcessHints = Array.isArray(input.clues.process_hints)
+    ? input.clues.process_hints
+    : [];
   const runtimePreview = input.closure.runtime_preview as Record<string, unknown> | undefined;
   const runtimeStatus = String(runtimePreview?.status || '').trim();
 
-  if (factCandidates.some((row) => String((row as Record<string, unknown>)?.name || '').trim() === summary)) {
+  if (
+    factCandidates.some(
+      (row) => String((row as Record<string, unknown>)?.name || '').trim() === summary,
+    )
+  ) {
     return 'facts';
   }
-  if (factProcessHints.some((row) => String((row as Record<string, unknown>)?.summary || '').trim() === summary)) {
+  if (
+    factProcessHints.some(
+      (row) => String((row as Record<string, unknown>)?.summary || '').trim() === summary,
+    )
+  ) {
     return 'facts';
   }
   if (runtimeStatus && runtimeStatus === summary) {
     return 'closure';
   }
-  if (clueProcessHints.some((row) => String((row as Record<string, unknown>)?.summary || '').trim() === summary)) {
+  if (
+    clueProcessHints.some(
+      (row) => String((row as Record<string, unknown>)?.summary || '').trim() === summary,
+    )
+  ) {
     return 'clues';
   }
   return 'fallback';
@@ -223,10 +259,14 @@ function validateTierSemanticOrder(input: {
   if (input.summarySource !== 'clues') return true;
   const factCandidates = Array.isArray(input.facts.candidates) ? input.facts.candidates : [];
   if (factCandidates.length > 0) return false;
-  const factProcessHints = Array.isArray(input.facts.process_hints) ? input.facts.process_hints : [];
+  const factProcessHints = Array.isArray(input.facts.process_hints)
+    ? input.facts.process_hints
+    : [];
   if (factProcessHints.length === 0) return true;
   return !factProcessHints.some((row) => {
-    const confidence = String((row as Record<string, unknown>)?.confidence || '').trim().toLowerCase();
+    const confidence = String((row as Record<string, unknown>)?.confidence || '')
+      .trim()
+      .toLowerCase();
     return confidence === 'high' || confidence === 'medium';
   });
 }
@@ -262,7 +302,7 @@ function buildCandidates(
     });
   }
   return out
-    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
     .slice(0, 5)
     .map((entry) => entry.candidate);
 }
@@ -274,25 +314,31 @@ function scoreCandidateRow(
   const name = String(row?.name || '').trim();
   const filePath = String(row?.filePath || '').trim();
   const nameLower = name.toLowerCase();
-  const queryLower = String(input.queryText || '').trim().toLowerCase();
+  const queryLower = String(input.queryText || '')
+    .trim()
+    .toLowerCase();
   const fileBase = path.basename(filePath, path.extname(filePath)).toLowerCase();
   const kind = resolveCandidateKind(row);
   const exactLexicalMatch = Boolean(nameLower && queryLower.includes(nameLower));
   const fileBaseMatch = Boolean(fileBase && fileBase === nameLower);
-  const kindBonus = (kind === 'Class' || kind === 'Interface' || kind === 'Struct') ? 8 : 0;
-  const classAnchorBonus = (kind === 'Class' && exactLexicalMatch) ? 18 : 0;
+  const kindBonus = kind === 'Class' || kind === 'Interface' || kind === 'Struct' ? 8 : 0;
+  const classAnchorBonus = kind === 'Class' && exactLexicalMatch ? 18 : 0;
   const lexicalBonus = exactLexicalMatch ? 80 : 0;
-  const fileAffinityBonus = (exactLexicalMatch && fileBaseMatch) ? 14 : 0;
+  const fileAffinityBonus = exactLexicalMatch && fileBaseMatch ? 14 : 0;
   const evidenceBonus = scoreEvidenceMode(String(row?.process_evidence_mode || ''));
   const confidenceBonus = scoreConfidence(String(row?.process_confidence || ''));
-  const resourceAffinityBonus = hasPreferredResourceAffinity(row, input.preferredResourceTargets) ? 35 : 0;
-  return lexicalBonus
-    + fileAffinityBonus
-    + kindBonus
-    + classAnchorBonus
-    + resourceAffinityBonus
-    + evidenceBonus
-    + confidenceBonus;
+  const resourceAffinityBonus = hasPreferredResourceAffinity(row, input.preferredResourceTargets)
+    ? 35
+    : 0;
+  return (
+    lexicalBonus +
+    fileAffinityBonus +
+    kindBonus +
+    classAnchorBonus +
+    resourceAffinityBonus +
+    evidenceBonus +
+    confidenceBonus
+  );
 }
 
 function extractPreferredResourceTargets(nextHops: unknown): string[] {
@@ -308,13 +354,14 @@ function extractPreferredResourceTargets(nextHops: unknown): string[] {
   return [...targets];
 }
 
-function hasPreferredResourceAffinity(row: Record<string, any>, preferredResourceTargets: string[]): boolean {
+function hasPreferredResourceAffinity(
+  row: Record<string, any>,
+  preferredResourceTargets: string[],
+): boolean {
   if (preferredResourceTargets.length === 0) return false;
   const bindings = Array.isArray(row?.resourceBindings) ? row.resourceBindings : [];
   const bindingSet = new Set(
-    bindings
-      .map((binding: any) => String(binding?.resourcePath || '').trim())
-      .filter(Boolean),
+    bindings.map((binding: any) => String(binding?.resourcePath || '').trim()).filter(Boolean),
   );
   return preferredResourceTargets.some((target) => bindingSet.has(target));
 }
@@ -360,7 +407,7 @@ function buildProcessHints(processes: any): Array<Record<string, unknown>> {
     };
   });
   return scored
-    .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
     .slice(0, 5)
     .map((entry) => entry.hint);
 }
@@ -434,14 +481,15 @@ function buildResourceChains(resourceChains: any): Array<Record<string, unknown>
       relationType: chain?.relationType,
       intermediateResourcePath: chain?.intermediateResourcePath,
       nextRelationType: chain?.nextRelationType,
-      targetSymbol: chain?.targetSymbol && typeof chain.targetSymbol === 'object'
-        ? {
-          uid: chain.targetSymbol.uid,
-          name: chain.targetSymbol.name,
-          kind: chain.targetSymbol.kind,
-          filePath: chain.targetSymbol.filePath,
-        }
-        : undefined,
+      targetSymbol:
+        chain?.targetSymbol && typeof chain.targetSymbol === 'object'
+          ? {
+              uid: chain.targetSymbol.uid,
+              name: chain.targetSymbol.name,
+              kind: chain.targetSymbol.kind,
+              filePath: chain.targetSymbol.filePath,
+            }
+          : undefined,
     }))
     .filter((chain) => Boolean(chain.sourceResourcePath && chain.targetSymbol));
 }
@@ -455,9 +503,10 @@ function buildUpgradeHints(input: {
 }): Array<Record<string, unknown>> {
   const repoArg = input.repoName ? ` --repo "${input.repoName}"` : '';
   const subject = String(input.subject || '').trim();
-  const fullCommand = input.mode === 'query'
-    ? `gitnexus query${repoArg} --response-profile full "${subject}"`
-    : `gitnexus context${repoArg} --response-profile full "${subject}"`;
+  const fullCommand =
+    input.mode === 'query'
+      ? `gitnexus query${repoArg} --response-profile full "${subject}"`
+      : `gitnexus context${repoArg} --response-profile full "${subject}"`;
 
   const hints: Array<Record<string, unknown>> = [];
 
@@ -536,13 +585,11 @@ function resolveNarrowNextCommand(input: {
   return input.hop?.next_command || null;
 }
 
-function chooseRecommendedFollowUp(
-  input: {
-    upgradeHints: Array<Record<string, unknown>>;
-    strictAnchorMode?: boolean;
-    strictAnchorResourcePath?: string;
-  },
-): string | null {
+function chooseRecommendedFollowUp(input: {
+  upgradeHints: Array<Record<string, unknown>>;
+  strictAnchorMode?: boolean;
+  strictAnchorResourcePath?: string;
+}): string | null {
   const strictAnchorMode = Boolean(input.strictAnchorMode);
   const strictAnchorResourcePath = String(input.strictAnchorResourcePath || '').trim();
   if (strictAnchorMode && strictAnchorResourcePath) {
@@ -563,7 +610,7 @@ function chooseRecommendedFollowUp(
       }),
     }))
     .filter((entry) => entry.score > Number.NEGATIVE_INFINITY)
-    .sort((a, b) => (b.score - a.score) || (a.index - b.index));
+    .sort((a, b) => b.score - a.score || a.index - b.index);
   const selected = ranked[0]?.hint;
   if (selected) {
     return String(selected.param_delta || selected.next_command || '') || null;

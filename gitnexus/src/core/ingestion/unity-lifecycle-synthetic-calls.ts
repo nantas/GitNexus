@@ -49,7 +49,10 @@ export interface UnityLifecycleSyntheticResult {
   runtimeRootNodeId?: string;
 }
 
-export const detectUnityLifecycleHosts = (graph: KnowledgeGraph): UnityLifecycleHost[] => {
+export const detectUnityLifecycleHosts = (
+  graph: KnowledgeGraph,
+  declaredBases: ReadonlyMap<string, readonly string[]> = new Map(),
+): UnityLifecycleHost[] => {
   const methodsByClass = new Map<string, GraphNode[]>();
   for (const rel of graph.iterRelationships()) {
     if (rel.type !== 'HAS_METHOD') continue;
@@ -80,10 +83,18 @@ export const detectUnityLifecycleHosts = (graph: KnowledgeGraph): UnityLifecycle
   const hosts: UnityLifecycleHost[] = [];
   for (const node of graph.iterNodes()) {
     if (node.label !== 'Class') continue;
-    const baseType = resolveUnityBaseType(graph, extendsByClass, classIdsByName, node.id);
+    const baseType = resolveUnityBaseType(
+      graph,
+      extendsByClass,
+      classIdsByName,
+      node.id,
+      declaredBases,
+    );
     if (!baseType) continue;
     const methods = methodsByClass.get(node.id) ?? [];
-    const lifecycleCallbacks = methods.filter((method) => LIFECYCLE_CALLBACKS.has(method.properties.name));
+    const lifecycleCallbacks = methods.filter((method) =>
+      LIFECYCLE_CALLBACKS.has(method.properties.name),
+    );
     hosts.push({
       classNode: node,
       baseType,
@@ -98,13 +109,14 @@ export const detectUnityLifecycleHosts = (graph: KnowledgeGraph): UnityLifecycle
 export const applyUnityLifecycleSyntheticCalls = (
   graph: KnowledgeGraph,
   config: Partial<UnityLifecycleSyntheticConfig> = {},
+  declaredBases: ReadonlyMap<string, readonly string[]> = new Map(),
 ): UnityLifecycleSyntheticResult => {
   const cfg: UnityLifecycleSyntheticConfig = {
     ...DEFAULT_UNITY_LIFECYCLE_SYNTHETIC_CONFIG,
     ...config,
   };
 
-  const hosts = detectUnityLifecycleHosts(graph);
+  const hosts = detectUnityLifecycleHosts(graph, declaredBases);
   const acceptedHosts: UnityLifecycleHost[] = [];
   let rejectedHostCount = 0;
 
@@ -116,10 +128,18 @@ export const applyUnityLifecycleSyntheticCalls = (
     acceptedHosts.push(host);
   }
 
-  acceptedHosts.sort((left, right) => right.lifecycleCallbacks.length - left.lifecycleCallbacks.length);
+  acceptedHosts.sort(
+    (left, right) => right.lifecycleCallbacks.length - left.lifecycleCallbacks.length,
+  );
 
   if (acceptedHosts.length === 0) {
-    return { syntheticEdgeCount: 0, lifecycleEdgeCount: 0, loaderEdgeCount: 0, hostCount: 0, rejectedHostCount };
+    return {
+      syntheticEdgeCount: 0,
+      lifecycleEdgeCount: 0,
+      loaderEdgeCount: 0,
+      hostCount: 0,
+      rejectedHostCount,
+    };
   }
 
   ensureRuntimeRootNode(graph);
@@ -144,7 +164,10 @@ export const applyUnityLifecycleSyntheticCalls = (
       if (existingPairs.has(pairKey)) continue;
 
       graph.addRelationship({
-        id: generateId('CALLS', `${SYNTHETIC_RUNTIME_ROOT_ID}->${callback.id}:unity-lifecycle-synthetic`),
+        id: generateId(
+          'CALLS',
+          `${SYNTHETIC_RUNTIME_ROOT_ID}->${callback.id}:unity-lifecycle-synthetic`,
+        ),
         sourceId: SYNTHETIC_RUNTIME_ROOT_ID,
         targetId: callback.id,
         type: 'CALLS',
@@ -173,10 +196,16 @@ const resolveUnityBaseType = (
   extendsByClass: Map<string, GraphRelationship[]>,
   classIdsByName: Map<string, string[]>,
   classId: string,
+  declaredBases: ReadonlyMap<string, readonly string[]>,
   visited = new Set<string>(),
 ): 'MonoBehaviour' | 'ScriptableObject' | undefined => {
   if (visited.has(classId)) return undefined;
   visited.add(classId);
+  for (const name of declaredBases.get(classId) ?? []) {
+    if (/^(?:global::)?(?:UnityEngine\.)?(MonoBehaviour|ScriptableObject)$/.test(name)) {
+      return name.endsWith('MonoBehaviour') ? 'MonoBehaviour' : 'ScriptableObject';
+    }
+  }
 
   for (const edge of extendsByClass.get(classId) ?? []) {
     const targetNode = graph.getNode(edge.targetId);
@@ -187,12 +216,26 @@ const resolveUnityBaseType = (
     }
 
     if (targetNode?.label === 'Class') {
-      const inherited = resolveUnityBaseType(graph, extendsByClass, classIdsByName, targetNode.id, visited);
+      const inherited = resolveUnityBaseType(
+        graph,
+        extendsByClass,
+        classIdsByName,
+        targetNode.id,
+        declaredBases,
+        visited,
+      );
       if (inherited) return inherited;
     }
 
     for (const candidateId of resolveNamedClassTargets(classIdsByName, edge.targetId)) {
-      const inherited = resolveUnityBaseType(graph, extendsByClass, classIdsByName, candidateId, visited);
+      const inherited = resolveUnityBaseType(
+        graph,
+        extendsByClass,
+        classIdsByName,
+        candidateId,
+        declaredBases,
+        visited,
+      );
       if (inherited) return inherited;
     }
   }
@@ -202,8 +245,10 @@ const resolveUnityBaseType = (
 const normalizeBaseType = (value: string): 'MonoBehaviour' | 'ScriptableObject' | undefined => {
   const text = String(value || '').trim();
   if (!text) return undefined;
-  if (text.endsWith(UNITY_MONOBEHAVIOUR) || text.includes(`.${UNITY_MONOBEHAVIOUR}`)) return UNITY_MONOBEHAVIOUR;
-  if (text.endsWith(UNITY_SCRIPTABLE_OBJECT) || text.includes(`.${UNITY_SCRIPTABLE_OBJECT}`)) return UNITY_SCRIPTABLE_OBJECT;
+  if (text.endsWith(UNITY_MONOBEHAVIOUR) || text.includes(`.${UNITY_MONOBEHAVIOUR}`))
+    return UNITY_MONOBEHAVIOUR;
+  if (text.endsWith(UNITY_SCRIPTABLE_OBJECT) || text.includes(`.${UNITY_SCRIPTABLE_OBJECT}`))
+    return UNITY_SCRIPTABLE_OBJECT;
   return undefined;
 };
 
@@ -231,7 +276,10 @@ const sortMethodsByName = (methods: GraphNode[]): GraphNode[] =>
     return left.id.localeCompare(right.id);
   });
 
-const resolveNamedClassTargets = (classIdsByName: Map<string, string[]>, rawTargetId: string): string[] => {
+const resolveNamedClassTargets = (
+  classIdsByName: Map<string, string[]>,
+  rawTargetId: string,
+): string[] => {
   const text = String(rawTargetId || '').trim();
   if (!text.startsWith('Class:')) return [];
   return classIdsByName.get(text.slice('Class:'.length)) ?? [];

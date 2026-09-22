@@ -33,7 +33,7 @@ Unity runtime retrieval rule of thumb:
 - do not treat it as the primary retrieval anchor;
 - once you have a symbol or resource seed, switch to `uid` / `resource_path_prefix` narrowing immediately.
 
-> If step 2 says "Index is stale" → run `gitnexus analyze` when local CLI exists; otherwise resolve the pinned npx package spec from `~/.gitnexus/config.json` (`cliPackageSpec` first, then `cliVersion`) and run `npx -y <resolved-spec> analyze` (it reuses previous analyze scope/options by default; add `--no-reuse-options` to reset). If the user declines, explicitly warn that retrieval may not reflect the current codebase.
+> If step 2 says "Index is stale" → run `gitnexus analyze` when local CLI exists; otherwise resolve the pinned npx package spec from `~/.gitnexus/config.json` (`cliPackageSpec` first, then `cliVersion`) and run `npx -y <resolved-spec> analyze` (repository defaults come from `.gitnexusrc`; explicit CLI flags override them). If the user declines, explicitly warn that retrieval may not reflect the current codebase.
 
 ## Checklist
 
@@ -144,3 +144,8 @@ Unity runtime example:
   - `policy-adjusted`: user-visible result after hydration policy is applied
 - If `hydration_policy=strict` and `hydrationMeta.fallbackToCompact=true`, the result is downgraded policy-adjusted output and is not closure.
 - In that downgraded state, rerun with parity before final conclusions.
+
+
+## Repository identity
+
+Use `list_repos {}` to inspect registered repositories. Follow `offset: pagination.nextOffset` until `hasMore` is false when you need the complete list. Bind subsequent calls explicitly, for example `repo: "my-app"`, when working across repositories. Read-only tools may infer the registered path containing the process cwd, but must not cross an unindexed nested Git checkout. If no sole/default/cwd match exists, resolve the ambiguity before proceeding. For a linked checkout, pass `worktree` to `detect_changes` so its diff comes from the edited checkout.

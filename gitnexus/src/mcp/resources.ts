@@ -1,6 +1,6 @@
 /**
  * MCP Resources (Multi-Repo)
- * 
+ *
  * Provides structured on-demand data to AI agents.
  * All resources use repo-scoped URIs: gitnexus://repo/{name}/context
  */
@@ -10,6 +10,14 @@ import { getDerivedProcessDetailResource } from './local/derived-process-reader.
 import { checkStaleness } from './staleness.js';
 import { loadCLIConfig } from '../storage/repo-manager.js';
 import { buildNpxCommand, resolveCliSpec } from '../config/cli-spec.js';
+import { loadMeta } from '../storage/repo-manager.js';
+import { ANALYZER_RUNNER_IDENTITY_SCHEMA_VERSION } from '../core/analyzer-identity.js';
+import { getIndexIncompleteReasons } from '../core/index-freshness.js';
+import {
+  checkoutIsDirectory,
+  contentRetentionFromMeta,
+  isFullSourceAvailable,
+} from '../core/content-retention.js';
 
 export interface ResourceDefinition {
   uri: string;
@@ -33,7 +41,8 @@ export function getResourceDefinitions(): ResourceDefinition[] {
     {
       uri: 'gitnexus://repos',
       name: 'All Indexed Repositories',
-      description: 'List of all indexed repos with stats. Read this first to discover available repos.',
+      description:
+        'List of all indexed repos with stats. Read this first to discover available repos.',
       mimeType: 'text/yaml',
     },
     {
@@ -83,7 +92,8 @@ export function getResourceTemplates(): ResourceTemplate[] {
     {
       uriTemplate: 'gitnexus://repo/{name}/process/{processName}',
       name: 'Process Trace',
-      description: 'Step-by-step execution trace with lifecycle subtype and step evidence when available',
+      description:
+        'Step-by-step execution trace with lifecycle subtype and step evidence when available',
       mimeType: 'text/yaml',
     },
     {
@@ -92,33 +102,167 @@ export function getResourceTemplates(): ResourceTemplate[] {
       description: 'Readable trace metadata for derived process references',
       mimeType: 'text/yaml',
     },
+    {
+      uriTemplate: 'gitnexus://group/{name}/contracts',
+      name: 'Group Contract Registry',
+      description:
+        'Cross-repo contract registry for a repository group. Optional query: type, repo, unmatchedOnly (true|false).',
+      mimeType: 'text/yaml',
+    },
+    {
+      uriTemplate: 'gitnexus://group/{name}/status',
+      name: 'Group Index Status',
+      // The payload is a bare serialization, so nothing in it says which of
+      // three states a reader is looking at. Both distinctions below are
+      // additive fields whose meaning is invisible without this: `missing`
+      // alone cannot separate "not registered" from "registry unreadable", and
+      // an omitted `unreadableRepos` key looks exactly like a measured zero.
+      description:
+        'Per-repo index and contract-registry staleness for a repository group. ' +
+        'Every configured repo carries both `missing` and `unresolvable`: a repo genuinely absent ' +
+        'from the global registry is missing:true with unresolvable:false; a repo whose registry ' +
+        'entry could not be read or resolved is unresolvable:true with an unresolvableReason ' +
+        '(missing stays true there too, so a consumer written before the split still sees every ' +
+        'unusable repo); a healthy repo is neither. The group-level unreadableRepos list is ' +
+        'three-state, and an ABSENT key is not an empty one: absent means the last sync never ' +
+        'recorded which repos it could read (provenance unknown — treat cross-repo answers for ' +
+        'this group as a floor), an empty list means the sync measured none, and a populated list ' +
+        'names the repos whose contracts are missing from the registry. suppressedMatchStages is ' +
+        'three-state the same way: absent is a registry predating the field, an empty list means ' +
+        'the sync skipped no matching stage, and a populated list names stages it was ASKED to ' +
+        'skip — those cross-link counts are a lower bound by request, and the remedy is to re-sync ' +
+        'without that flag rather than to repair a repo.',
+      mimeType: 'text/yaml',
+    },
   ];
 }
 
-/**
- * Parse a resource URI to extract the repo name and resource type.
- */
-function parseUri(uri: string): { repoName?: string; resourceType: string; param?: string } {
-  if (uri === 'gitnexus://repos') return { resourceType: 'repos' };
-  if (uri === 'gitnexus://setup') return { resourceType: 'setup' };
+/** Query parameters for `gitnexus://group/{name}/contracts` */
+export type GroupContractsResourceFilter = {
+  type?: string;
+  repo?: string;
+  unmatchedOnly?: boolean;
+};
 
-  // Repo-scoped: gitnexus://repo/{name}/context
-  const repoMatch = uri.match(/^gitnexus:\/\/repo\/([^/]+)\/(.+)$/);
-  if (repoMatch) {
-    const repoName = decodeURIComponent(repoMatch[1]);
-    const rest = repoMatch[2];
+/** Normalized parse result for GitNexus MCP resource URIs */
+export type ParsedGitnexusResource =
+  | { kind: 'repos' }
+  | { kind: 'setup' }
+  | {
+      kind: 'repo';
+      repoName: string;
+      resourceType: string;
+      param?: string;
+    }
+  | {
+      kind: 'group';
+      groupName: string;
+      resourceType: 'contracts';
+      contractsFilter: GroupContractsResourceFilter;
+    }
+  | { kind: 'group'; groupName: string; resourceType: 'status' };
+
+function parseUnmatchedOnlyParam(raw: string | null): boolean | undefined {
+  if (raw === null) return undefined;
+  const v = raw.trim().toLowerCase();
+  if (v === 'true' || v === '1') return true;
+  if (v === 'false' || v === '0') return false;
+  return undefined;
+}
+
+/**
+ * Parse a GitNexus resource URI (repos, setup, per-repo, or per-group templates).
+ * Used by `readResource` and tests (round-trip / dispatch coverage).
+ */
+export function parseResourceUri(uri: string): ParsedGitnexusResource {
+  if (uri === 'gitnexus://repos') return { kind: 'repos' };
+  if (uri === 'gitnexus://setup') return { kind: 'setup' };
+
+  let u: URL;
+  try {
+    u = new URL(uri);
+  } catch {
+    throw new Error(`Unknown resource URI: ${uri}`);
+  }
+
+  if (u.protocol !== 'gitnexus:') {
+    throw new Error(`Unknown resource URI: ${uri}`);
+  }
+
+  if (u.hostname === 'group') {
+    const segments = u.pathname
+      .replace(/^\/+|\/+$/g, '')
+      .split('/')
+      .filter(Boolean);
+    if (segments.length < 2) {
+      throw new Error(
+        `Invalid group resource URI (expected gitnexus://group/{name}/contracts or .../status): ${uri}`,
+      );
+    }
+    const tail = segments[segments.length - 1]!;
+    if (tail !== 'contracts' && tail !== 'status') {
+      throw new Error(`Unknown group resource path in URI: ${uri}`);
+    }
+    const groupName = segments
+      .slice(0, -1)
+      .map((s) => decodeURIComponent(s))
+      .join('/');
+    if (!groupName) {
+      throw new Error(`Invalid group resource URI (empty group name): ${uri}`);
+    }
+    if (tail === 'status') {
+      return { kind: 'group', groupName, resourceType: 'status' };
+    }
+    const contractsFilter: GroupContractsResourceFilter = {};
+    const type = u.searchParams.get('type');
+    if (type && type.trim()) contractsFilter.type = type.trim();
+    const repo = u.searchParams.get('repo');
+    if (repo && repo.trim()) contractsFilter.repo = repo.trim();
+    if (u.searchParams.has('unmatchedOnly')) {
+      const coerced = parseUnmatchedOnlyParam(u.searchParams.get('unmatchedOnly'));
+      if (coerced !== undefined) contractsFilter.unmatchedOnly = coerced;
+    }
+    return { kind: 'group', groupName, resourceType: 'contracts', contractsFilter };
+  }
+
+  if (u.hostname === 'repo') {
+    const segments = u.pathname
+      .replace(/^\/+|\/+$/g, '')
+      .split('/')
+      .filter(Boolean);
+    if (segments.length < 2) {
+      throw new Error(`Unknown resource URI: ${uri}`);
+    }
+    const repoName = decodeURIComponent(segments[0]!);
+    const restEncoded = segments.slice(1);
+    const rest = restEncoded.map((s) => decodeURIComponent(s)).join('/');
 
     if (rest.startsWith('cluster/')) {
-      return { repoName, resourceType: 'cluster', param: decodeURIComponent(rest.replace('cluster/', '')) };
+      return {
+        kind: 'repo',
+        repoName,
+        resourceType: 'cluster',
+        param: rest.replace(/^cluster\//, ''),
+      };
     }
     if (rest.startsWith('process/')) {
-      return { repoName, resourceType: 'process', param: decodeURIComponent(rest.replace('process/', '')) };
+      return {
+        kind: 'repo',
+        repoName,
+        resourceType: 'process',
+        param: rest.replace(/^process\//, ''),
+      };
     }
     if (rest.startsWith('derived-process/')) {
-      return { repoName, resourceType: 'derived-process', param: decodeURIComponent(rest.replace('derived-process/', '')) };
+      return {
+        kind: 'repo',
+        repoName,
+        resourceType: 'derived-process',
+        param: decodeURIComponent(rest.replace('derived-process/', '')),
+      };
     }
 
-    return { repoName, resourceType: rest };
+    return { kind: 'repo', repoName, resourceType: rest };
   }
 
   throw new Error(`Unknown resource URI: ${uri}`);
@@ -128,16 +272,21 @@ function parseUri(uri: string): { repoName?: string; resourceType: string; param
  * Read a resource and return its content
  */
 export async function readResource(uri: string, backend: LocalBackend): Promise<string> {
-  const parsed = parseUri(uri);
+  const parsed = parseResourceUri(uri);
 
-  // Global repos list — no repo context needed
-  if (parsed.resourceType === 'repos') {
+  if (parsed.kind === 'repos') {
     return getReposResource(backend);
   }
-  
-  // Setup resource — returns AGENTS.md content for all repos
-  if (parsed.resourceType === 'setup') {
+
+  if (parsed.kind === 'setup') {
     return getSetupResource(backend);
+  }
+
+  if (parsed.kind === 'group') {
+    if (parsed.resourceType === 'contracts') {
+      return backend.readGroupContractsResource(parsed.groupName, parsed.contractsFilter);
+    }
+    return backend.readGroupStatusResource(parsed.groupName);
   }
 
   const repoName = parsed.repoName;
@@ -195,8 +344,11 @@ async function getReposResource(backend: LocalBackend): Promise<string> {
 
   if (repos.length > 1) {
     lines.push('');
-    lines.push('# Multiple repos indexed. Use repo parameter in tool calls:');
-    lines.push(`# gitnexus_search({query: "auth", repo: "${repos[0].name}"})`);
+    lines.push(
+      '# Multiple repos indexed. Read-only tools may omit repo when an MCP default is configured or GitNexus process.cwd() is inside one listed path without crossing an unindexed nested Git checkout.',
+    );
+    lines.push('# Otherwise—and for mutating tools without an MCP default—pass repo explicitly:');
+    lines.push(`# query({search_query: "auth", repo: "${repos[0].name}"})`);
   }
 
   return lines.join('\n');
@@ -214,38 +366,89 @@ async function getContextResource(backend: LocalBackend, repoName?: string): Pro
   if (!context) {
     return 'error: No codebase loaded. Run: gitnexus analyze';
   }
-  
-  // Check staleness
+
+  // Read fresh metadata from disk on every context resource read to avoid showing
+  // a stale staleness banner or outdated stats after an out-of-process
+  // `analyze --index-only` refresh. The RepoHandle is cached in-memory and only
+  // refreshes on registry misses, so its lastCommit/stats can lag behind the
+  // on-disk state (#2438). Mirrors the ensureInitialized hot-swap pattern.
+  const freshMeta = await loadMeta(repo.storagePath).catch(() => null);
+  const incompleteReasons = getIndexIncompleteReasons(freshMeta);
+
+  // Check staleness using the current on-disk lastCommit (not the cached handle)
   const repoPath = repo.repoPath;
-  const lastCommit = repo.lastCommit || 'HEAD';
-  const staleness = repoPath ? checkStaleness(repoPath, lastCommit) : { isStale: false, commitsBehind: 0 };
-  
-  const lines: string[] = [
-    `project: ${context.projectName}`,
-  ];
-  
+  const lastCommit = freshMeta?.lastCommit ?? repo.lastCommit ?? 'HEAD';
+  const staleness = repoPath
+    ? checkStaleness(repoPath, lastCommit)
+    : { isStale: false, commitsBehind: 0 };
+
+  const lines: string[] = [`project: ${context.projectName}`];
+
   if (staleness.isStale && staleness.hint) {
     lines.push('');
     lines.push(`staleness: "${staleness.hint}"`);
   }
-  
+
+  // A JSON object is also a valid YAML flow mapping. Keeping the versioned
+  // receipt intact lets agents compare every identity field without parsing a
+  // lossy human rendering; null explicitly means legacy/unknown provenance.
+  lines.push('');
+  const contentRetention = contentRetentionFromMeta(freshMeta);
+  const sourceAvailable = isFullSourceAvailable(
+    contentRetention,
+    repo.repoPath ? await checkoutIsDirectory(repo.repoPath) : false,
+  );
+
+  lines.push('index:');
+  lines.push(`  commit: ${JSON.stringify(lastCommit)}`);
+  lines.push(`  indexed_at: ${JSON.stringify(freshMeta?.indexedAt ?? null)}`);
+  lines.push(`  storage_path: ${JSON.stringify(repo.storagePath)}`);
+  lines.push(`  content_retention: ${JSON.stringify(contentRetention)}`);
+  lines.push(`  source_available: ${JSON.stringify(sourceAvailable)}`);
+  lines.push(`  runner_identity: ${JSON.stringify(freshMeta?.runnerIdentity ?? null)}`);
+  lines.push(`  incomplete_reasons: ${JSON.stringify(incompleteReasons)}`);
+  lines.push(`  spring_actuator: ${JSON.stringify(freshMeta?.springActuator ?? null)}`);
+  // Surfaced beside the Actuator flag, and it matters more than that one does:
+  // Actuator only annotates nodes the source pass already found, whereas
+  // document reading MINTS destinations and edges that have no code site at
+  // all. Without this line an agent reading the context sees `Destination`
+  // nodes rooted at `asyncapi:`-prefixed pseudo-files with nothing to say where
+  // they came from.
+  lines.push(`  asyncapi_spec: ${JSON.stringify(freshMeta?.asyncApiSpec ?? null)}`);
+  const indexedRunnerSchema = (freshMeta?.runnerIdentity as { schemaVersion?: unknown } | undefined)
+    ?.schemaVersion;
+  lines.push(
+    `  runner_identity_schema_status: ${JSON.stringify(
+      indexedRunnerSchema === ANALYZER_RUNNER_IDENTITY_SCHEMA_VERSION
+        ? 'current'
+        : 'legacy-or-unknown',
+    )}`,
+  );
+
+  // Use fresh stats from disk meta when available; fall back to cached context
+  const freshStats = freshMeta?.stats;
   lines.push('');
   lines.push('stats:');
-  lines.push(`  files: ${context.stats.fileCount}`);
-  lines.push(`  symbols: ${context.stats.functionCount}`);
-  lines.push(`  processes: ${context.stats.processCount}`);
+  lines.push(`  files: ${freshStats?.files ?? context.stats.fileCount}`);
+  lines.push(`  symbols: ${freshStats?.nodes ?? context.stats.functionCount}`);
+  lines.push(`  processes: ${freshStats?.processes ?? context.stats.processCount}`);
   lines.push('');
   lines.push('tools_available:');
   lines.push('  - query: Process-grouped code intelligence (execution flows related to a concept)');
   lines.push('  - context: 360-degree symbol view (categorized refs, process participation)');
   lines.push('  - impact: Blast radius analysis (what breaks if you change a symbol)');
+  lines.push(
+    '  - explain: Persisted taint findings — source→sink data flows with per-hop variables (requires analyze --pdg)',
+  );
   lines.push('  - detect_changes: Git-diff impact analysis (what do your changes affect)');
   lines.push('  - rename: Multi-file coordinated rename with confidence tags');
   lines.push('  - cypher: Raw graph queries');
   lines.push('  - list_repos: Discover all indexed repositories');
   lines.push('');
   const analyzeCmd = await resolveAnalyzeNpxCommand();
-  lines.push(`re_index: If data is stale, ask user whether to run \`gitnexus analyze\` when local CLI exists; otherwise run \`${analyzeCmd}\` (reuses previous analyze scope/options unless \`--no-reuse-options\` is passed). If user declines, clearly state retrieval may not reflect current code. For build/analyze/test commands, use 10-30 minute timeout; on failure/timeout, report exact tool output and do not auto-retry or silently switch to glob/grep fallback.`);
+  lines.push(
+    `re_index: If data is stale, ask user whether to run \`gitnexus analyze\` when local CLI exists; otherwise run \`${analyzeCmd}\` (reuses previous analyze scope/options unless \`--no-reuse-options\` is passed). If user declines, clearly state retrieval may not reflect current code. For build/analyze/test commands, use 10-30 minute timeout; on failure/timeout, report exact tool output and do not auto-retry or silently switch to glob/grep fallback.`,
+  );
   lines.push('');
   lines.push('resources_available:');
   lines.push('  - gitnexus://repos: All indexed repositories');
@@ -253,8 +456,20 @@ async function getContextResource(backend: LocalBackend, repoName?: string): Pro
   lines.push(`  - gitnexus://repo/${context.projectName}/processes: All execution flows`);
   lines.push(`  - gitnexus://repo/${context.projectName}/cluster/{name}: Module details`);
   lines.push(`  - gitnexus://repo/${context.projectName}/process/{name}: Process trace`);
-  lines.push(`  - gitnexus://repo/${context.projectName}/derived-process/{id}: Derived process trace metadata`);
-  
+  lines.push(
+    `  - gitnexus://repo/${context.projectName}/derived-process/{id}: Derived process trace metadata`,
+  );
+
+  lines.push(
+    '  - gitnexus://group/{name}/contracts: Group contract registry (optional ?type=&repo=&unmatchedOnly=)',
+  );
+  lines.push(
+    '  - gitnexus://group/{name}/status: Group index / contract staleness — separates a repo absent ' +
+      'from the registry (missing, not unresolvable) from one whose entry could not be read ' +
+      '(unresolvable + unresolvableReason), and carries unreadableRepos as absent=never recorded / ' +
+      'empty=measured none / populated=named',
+  );
+
   return lines.join('\n');
 }
 
@@ -283,7 +498,9 @@ async function getClustersResource(backend: LocalBackend, repoName?: string): Pr
     }
 
     if (result.clusters.length > displayLimit) {
-      lines.push(`\n# Showing top ${displayLimit} of ${result.clusters.length} modules. Use gitnexus_query for deeper search.`);
+      lines.push(
+        `\n# Showing top ${displayLimit} of ${result.clusters.length} modules. Use the query tool for deeper search.`,
+      );
     }
 
     return lines.join('\n');
@@ -321,7 +538,9 @@ async function getProcessesResource(backend: LocalBackend, repoName?: string): P
     }
 
     if (result.processes.length > displayLimit) {
-      lines.push(`\n# Showing top ${displayLimit} of ${result.processes.length} processes. Use gitnexus_query for deeper search.`);
+      lines.push(
+        `\n# Showing top ${displayLimit} of ${result.processes.length} processes. Use the query tool for deeper search.`,
+      );
     }
 
     return lines.join('\n');
@@ -349,6 +568,16 @@ nodes:
 
 additional_node_types: "Multi-language: Struct, Enum, Macro, Typedef, Union, Namespace, Trait, Impl, TypeAlias, Const, Static, Property, Record, Delegate, Annotation, Constructor, Template, Module (use backticks in queries: \`Struct\`, \`Enum\`, etc.)"
 
+node_properties:
+  common: "name (STRING), filePath (STRING), startLine (INT32), endLine (INT32)"
+  line_numbers: "startLine/endLine on symbol nodes are 0-BASED (tree-sitter rows) in storage AND in raw Cypher results. The context, query, impact, group/cross-repo trace, and explain/pdg_query (symbol anchor) tools present them 1-BASED (editor / sed / less -N aligned), so a symbol spans editor lines (startLine+1)..(endLine+1) — e.g. sed '<startLine+1>,<endLine+1>!d' <file>. Single-repo trace symbol lines stay 0-BASED for now (full-parity follow-up). content holds the exact symbol span. (BasicBlock / PDG statement lines are separately 1-based.) (#2377, #2380)"
+  Method: "parameterCount (INT32), returnType (STRING), isVariadic (BOOL), visibility (STRING), isStatic (BOOL), isAbstract (BOOL), isFinal (BOOL), isVirtual (BOOL), isOverride (BOOL), isAsync (BOOL), isPartial (BOOL), requiredParameterCount (INT32), parameterTypes (STRING[]), annotations (STRING[])"
+  Function: "parameterCount (INT32), returnType (STRING), isVariadic (BOOL), visibility (STRING), isStatic (BOOL), isAbstract (BOOL), isFinal (BOOL), isAsync (BOOL), parameterTypes (STRING[]), annotations (STRING[])"
+  Property: "declaredType (STRING) — the field's type annotation (e.g., 'Address', 'City'). Used for field-access chain resolution."
+  Constructor: "parameterCount (INT32), visibility (STRING), isStatic (BOOL), parameterTypes (STRING[])"
+  Community: "heuristicLabel (STRING), cohesion (DOUBLE), symbolCount (INT32), keywords (STRING[]), description (STRING), enrichedBy (STRING)"
+  Process: "heuristicLabel (STRING), processType (STRING — 'intra_community' or 'cross_community'), stepCount (INT32), communities (STRING[]), entryPointId (STRING), terminalId (STRING)"
+
 relationships:
   - CONTAINS: File/Folder contains child
   - DEFINES: File defines a symbol
@@ -356,8 +585,19 @@ relationships:
   - IMPORTS: Module imports
   - EXTENDS: Class inheritance
   - IMPLEMENTS: Interface implementation
+  - HAS_METHOD: Class/Struct/Interface owns a Method; also a Function acting as a pre-ES6 constructor (prototype assignment)
+  - HAS_PROPERTY: Class/Struct/Interface owns a Property (field)
+  - ACCESSES: Function/Method reads or writes a Property (reason: 'read' or 'write')
+  - METHOD_OVERRIDES: Method overrides another Method (MRO)
+  - METHOD_IMPLEMENTS: ConcreteMethod implements InterfaceMethod (matched by name + parameterTypes)
   - MEMBER_OF: Symbol belongs to community
   - STEP_IN_PROCESS: Symbol is step N in process
+
+pdg_layers: "Recorded ONLY when indexed with 'gitnexus analyze --pdg'. Intra-procedural, basic-block granular; both endpoints are BasicBlock nodes. Prefer the pdg_query tool over raw Cypher."
+  - BasicBlock: "Basic-block node. Columns: id, filePath, startLine, endLine, text. id = 'BasicBlock:<filePath>:<fnStartLine>:<fnStartCol>:<blockIndex>'."
+  - CFG: "Control-flow edge BasicBlock->BasicBlock. Edge kind (seq/cond-true/cond-false/loop-back/...) is in reason."
+  - CDG: "Control-DEPENDENCE edge BasicBlock->BasicBlock — the source predicate gates the target's execution. Branch sense 'T'|'F' in reason. Query via pdg_query mode:'controls'."
+  - REACHING_DEF: "Data-dependence (def->use) edge BasicBlock->BasicBlock. Source-level variable name is in reason. Query via pdg_query mode:'flows'."
 
 relationship_table: "All relationships use a single CodeRelation table with a 'type' property. Properties: type (STRING), confidence (DOUBLE), reason (STRING), step (INT32)"
 
@@ -376,13 +616,22 @@ example_queries:
     WHERE p.heuristicLabel = "LoginFlow"
     RETURN s.name, r.step
     ORDER BY r.step
+
+  guard_clauses (--pdg only; prefer pdg_query mode:'controls'): |
+    MATCH (pred:BasicBlock)-[r:CodeRelation {type: 'CDG'}]->(dep:BasicBlock)
+    WHERE dep.text STARTS WITH 'return' OR dep.text STARTS WITH 'throw'
+    RETURN pred.startLine, r.reason AS branch, dep.startLine, dep.text
 `;
 }
 
 /**
  * Cluster detail resource — queries graph directly via backend.queryClusterDetail()
  */
-async function getClusterDetailResource(name: string, backend: LocalBackend, repoName?: string): Promise<string> {
+async function getClusterDetailResource(
+  name: string,
+  backend: LocalBackend,
+  repoName?: string,
+): Promise<string> {
   try {
     const result = await backend.queryClusterDetail(name, repoName);
 
@@ -424,7 +673,11 @@ async function getClusterDetailResource(name: string, backend: LocalBackend, rep
 /**
  * Process detail resource — queries graph directly via backend.queryProcessDetail()
  */
-async function getProcessDetailResource(name: string, backend: LocalBackend, repoName?: string): Promise<string> {
+async function getProcessDetailResource(
+  name: string,
+  backend: LocalBackend,
+  repoName?: string,
+): Promise<string> {
   try {
     const result = await backend.queryProcessDetail(name, repoName);
 
@@ -470,9 +723,9 @@ async function getSetupResource(backend: LocalBackend): Promise<string> {
   if (repos.length === 0) {
     return `# GitNexus\n\nNo repositories indexed. Run: \`gitnexus analyze\` when local CLI exists; otherwise \`${analyzeCmd}\` in a repository.`;
   }
-  
+
   const sections: string[] = [];
-  
+
   for (const repo of repos) {
     const stats = repo.stats || {};
     const lines = [
@@ -501,6 +754,6 @@ async function getSetupResource(backend: LocalBackend): Promise<string> {
     ];
     sections.push(lines.join('\n'));
   }
-  
+
   return sections.join('\n\n---\n\n');
 }

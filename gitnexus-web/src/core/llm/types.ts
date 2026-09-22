@@ -1,14 +1,89 @@
 /**
  * LLM Provider Types
- * 
+ *
  * Type definitions for multi-provider LLM support.
- * Supports Azure OpenAI and Google Gemini (with extensibility for others).
+ * Supports OpenAI, Azure OpenAI, Gemini, Anthropic, Ollama, OpenRouter, MiniMax, GLM, and DeepSeek.
  */
 
 /**
  * Supported LLM providers
  */
-export type LLMProvider = 'openai' | 'azure-openai' | 'gemini' | 'anthropic' | 'ollama' | 'openrouter';
+import { DEFAULT_OLLAMA_BASE_URL, DEFAULT_OPENROUTER_BASE_URL } from '../../config/ui-constants';
+export type LLMProvider =
+  | 'openai'
+  | 'azure-openai'
+  | 'gemini'
+  | 'anthropic'
+  | 'ollama'
+  | 'openrouter'
+  | 'minimax'
+  | 'glm'
+  | 'deepseek';
+
+export const MINIMAX_ANTHROPIC_BASE_URLS = {
+  global_en: 'https://api.minimax.io/anthropic',
+  cn_zh: 'https://api.minimaxi.com/anthropic',
+} as const;
+
+export const MINIMAX_DOCS_ROOTS = {
+  global_en: 'https://platform.minimax.io/docs',
+  cn_zh: 'https://platform.minimaxi.com/docs',
+} as const;
+
+export const MINIMAX_MODEL_IDS = ['MiniMax-M3', 'MiniMax-M2.7'] as const;
+
+export type MiniMaxModelId = (typeof MINIMAX_MODEL_IDS)[number];
+export type MiniMaxThinkingMode = 'adaptive' | 'disabled' | 'always_on';
+export type MiniMaxInputModality = 'text' | 'image' | 'video';
+
+export interface MiniMaxModelCapabilities {
+  contextWindow: number;
+  inputModalities: readonly MiniMaxInputModality[];
+  thinkingModes: readonly MiniMaxThinkingMode[];
+}
+
+export const MINIMAX_MODEL_CAPABILITIES: Record<MiniMaxModelId, MiniMaxModelCapabilities> = {
+  'MiniMax-M3': {
+    contextWindow: 1_000_000,
+    inputModalities: ['text', 'image', 'video'],
+    thinkingModes: ['adaptive', 'disabled'],
+  },
+  'MiniMax-M2.7': {
+    contextWindow: 204_800,
+    inputModalities: ['text'],
+    thinkingModes: ['always_on'],
+  },
+};
+
+export const getMiniMaxModelCapabilities = (model: string): MiniMaxModelCapabilities | undefined =>
+  MINIMAX_MODEL_CAPABILITIES[model as MiniMaxModelId];
+
+export type MiniMaxMediaDetail = 'low' | 'default' | 'high';
+
+export type MiniMaxMediaSource =
+  | {
+      type: 'url';
+      url: string;
+      detail?: MiniMaxMediaDetail;
+      fps?: number;
+      max_long_side_pixel?: number;
+    }
+  | {
+      type: 'base64';
+      media_type: string;
+      data: string;
+      detail?: MiniMaxMediaDetail;
+      fps?: number;
+      max_long_side_pixel?: number;
+    };
+
+export type AgentUserContent =
+  | string
+  | Array<
+      | { type: 'text'; text: string }
+      | { type: 'image'; source: MiniMaxMediaSource }
+      | { type: 'video'; source: MiniMaxMediaSource }
+    >;
 
 /**
  * Base configuration shared by all providers
@@ -26,8 +101,8 @@ export interface BaseProviderConfig {
 export interface OpenAIConfig extends BaseProviderConfig {
   provider: 'openai';
   apiKey: string;
-  model: string;  // e.g., 'gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'
-  baseUrl?: string;  // optional, for custom endpoints or proxies
+  model: string; // e.g., 'gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'
+  baseUrl?: string; // optional, for custom endpoints or proxies
 }
 
 /**
@@ -36,9 +111,9 @@ export interface OpenAIConfig extends BaseProviderConfig {
 export interface AzureOpenAIConfig extends BaseProviderConfig {
   provider: 'azure-openai';
   apiKey: string;
-  endpoint: string;  // e.g., https://your-resource.openai.azure.com
+  endpoint: string; // e.g., https://your-resource.openai.azure.com
   deploymentName: string;
-  apiVersion?: string;  // defaults to '2024-08-01-preview'
+  apiVersion?: string; // defaults to '2024-08-01-preview'
 }
 
 /**
@@ -47,7 +122,7 @@ export interface AzureOpenAIConfig extends BaseProviderConfig {
 export interface GeminiConfig extends BaseProviderConfig {
   provider: 'gemini';
   apiKey: string;
-  model: string;  // e.g., 'gemini-2.0-flash', 'gemini-1.5-pro'
+  model: string; // e.g., 'gemini-2.0-flash', 'gemini-1.5-pro'
 }
 
 /**
@@ -56,7 +131,7 @@ export interface GeminiConfig extends BaseProviderConfig {
 export interface AnthropicConfig extends BaseProviderConfig {
   provider: 'anthropic';
   apiKey: string;
-  model: string;  // e.g., 'claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022'
+  model: string; // e.g., 'claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022'
 }
 
 /**
@@ -64,7 +139,7 @@ export interface AnthropicConfig extends BaseProviderConfig {
  */
 export interface OllamaConfig extends BaseProviderConfig {
   provider: 'ollama';
-  baseUrl?: string;  // defaults to http://localhost:11434
+  baseUrl?: string; // defaults to http://localhost:11434
   model: string;
 }
 
@@ -74,14 +149,53 @@ export interface OllamaConfig extends BaseProviderConfig {
 export interface OpenRouterConfig extends BaseProviderConfig {
   provider: 'openrouter';
   apiKey: string;
-  model: string;  // e.g., 'anthropic/claude-3.5-sonnet', 'openai/gpt-4-turbo'
-  baseUrl?: string;  // defaults to https://openrouter.ai/api/v1
+  model: string; // e.g., 'anthropic/claude-3.5-sonnet', 'openai/gpt-4-turbo'
+  baseUrl?: string; // defaults to https://openrouter.ai/api/v1
+}
+
+/**
+ * MiniMax configuration (Anthropic-compatible API)
+ */
+export interface MiniMaxConfig extends BaseProviderConfig {
+  provider: 'minimax';
+  apiKey: string;
+  model: string;
+  baseUrl?: string;
+  thinkingMode?: MiniMaxThinkingMode;
+}
+
+/**
+ * GLM (Z.AI) configuration — OpenAI-compatible API
+ */
+export interface GLMConfig extends BaseProviderConfig {
+  provider: 'glm';
+  apiKey: string;
+  model: string; // e.g., 'GLM-4.7', 'GLM-4.5', 'GLM-4.5-Air', 'GLM-5'
+  baseUrl?: string; // defaults to https://api.z.ai/api/coding/paas/v4
+}
+
+/**
+ * DeepSeek configuration — OpenAI-compatible API
+ */
+export interface DeepSeekConfig extends BaseProviderConfig {
+  provider: 'deepseek';
+  apiKey: string;
+  model: string; // e.g., 'deepseek-v4-flash', 'deepseek-v4-pro'
 }
 
 /**
  * Union type for all provider configurations
  */
-export type ProviderConfig = OpenAIConfig | AzureOpenAIConfig | GeminiConfig | AnthropicConfig | OllamaConfig | OpenRouterConfig;
+export type ProviderConfig =
+  | OpenAIConfig
+  | AzureOpenAIConfig
+  | GeminiConfig
+  | AnthropicConfig
+  | OllamaConfig
+  | OpenRouterConfig
+  | MiniMaxConfig
+  | GLMConfig
+  | DeepSeekConfig;
 
 /**
  * Stored settings (what goes to localStorage)
@@ -98,6 +212,9 @@ export interface LLMSettings {
   anthropic?: Partial<Omit<AnthropicConfig, 'provider'>>;
   ollama?: Partial<Omit<OllamaConfig, 'provider'>>;
   openrouter?: Partial<Omit<OpenRouterConfig, 'provider'>>;
+  minimax?: Partial<Omit<MiniMaxConfig, 'provider'>>;
+  glm?: Partial<Omit<GLMConfig, 'provider'>>;
+  deepseek?: Partial<Omit<DeepSeekConfig, 'provider'>>;
 
   // Intelligent Clustering Settings
   intelligentClustering: boolean;
@@ -138,14 +255,32 @@ export const DEFAULT_LLM_SETTINGS: LLMSettings = {
     temperature: 0.1,
   },
   ollama: {
-    baseUrl: 'http://localhost:11434',
+    baseUrl: DEFAULT_OLLAMA_BASE_URL,
     model: 'llama3.2',
     temperature: 0.1,
   },
   openrouter: {
     apiKey: '',
     model: '',
-    baseUrl: 'https://openrouter.ai/api/v1',
+    baseUrl: DEFAULT_OPENROUTER_BASE_URL,
+    temperature: 0.1,
+  },
+  minimax: {
+    apiKey: '',
+    model: MINIMAX_MODEL_IDS[0],
+    baseUrl: MINIMAX_ANTHROPIC_BASE_URLS.global_en,
+    thinkingMode: 'adaptive',
+    temperature: 0.1,
+  },
+  glm: {
+    apiKey: '',
+    model: 'GLM-5',
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+    temperature: 0.1,
+  },
+  deepseek: {
+    apiKey: '',
+    model: 'deepseek-v4-flash',
     temperature: 0.1,
   },
 };
@@ -170,6 +305,8 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'tool';
   content: string;
+  /** Hidden raw transcript for reconstructing future agent turns */
+  historyMessages?: AgentHistoryMessage[];
   /** @deprecated Use steps instead for proper ordering */
   toolCalls?: ToolCallInfo[];
   /** Ordered steps: reasoning, tool calls, and final content interleaved */
@@ -186,24 +323,49 @@ export interface ToolCallInfo {
   name: string;
   args: Record<string, unknown>;
   result?: string;
-  status: 'pending' | 'running' | 'completed' | 'error';
+  status: 'pending' | 'running' | 'completed' | 'error' | 'stopped';
 }
 
 /**
- * Streaming chunk from agent
- * Now supports step-based streaming where each step is a distinct message
+ * Minimal tool-call payload needed to reconstruct prior assistant turns.
  */
-export interface AgentStreamChunk {
-  type: 'reasoning' | 'tool_call' | 'tool_result' | 'content' | 'error' | 'done';
-  /** LLM's reasoning/thinking text (shown as a step) */
-  reasoning?: string;
-  /** Final answer content (streamed token by token) */
-  content?: string;
-  /** Tool call information */
-  toolCall?: ToolCallInfo;
-  /** Error message */
-  error?: string;
+export interface AgentToolCall {
+  id?: string;
+  name: string;
+  args: Record<string, unknown>;
+  type: 'tool_call';
 }
+
+/**
+ * Hidden per-turn transcript we keep so providers like DeepSeek can replay
+ * the original assistant/tool exchange on later user turns.
+ */
+export type AgentHistoryMessage =
+  | {
+      role: 'assistant';
+      content: string;
+      reasoningContent?: string;
+      toolCalls?: AgentToolCall[];
+    }
+  | {
+      role: 'tool';
+      content: string;
+      toolCallId: string;
+      name?: string;
+    };
+
+/**
+ * Streaming chunk from agent (discriminated union).
+ * Each variant carries only its relevant fields, enabling exhaustive switch handling.
+ */
+export type AgentStreamChunk =
+  | { type: 'reasoning'; reasoning: string }
+  | { type: 'tool_call'; toolCall: ToolCallInfo }
+  | { type: 'tool_result'; toolCall: ToolCallInfo }
+  | { type: 'content'; content: string }
+  | { type: 'error'; error: string }
+  | { type: 'done'; historyMessages?: AgentHistoryMessage[] }
+  | { type: 'cancelled' };
 
 /**
  * A single step in the agent's execution
@@ -347,4 +509,3 @@ NOTES:
 - For vector search, join CodeEmbedding.nodeId to the appropriate table's id
 - Use LIMIT to avoid returning too many results
 `;
-

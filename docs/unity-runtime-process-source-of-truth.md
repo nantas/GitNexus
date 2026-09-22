@@ -23,34 +23,26 @@ Status: Active (source of truth)
 
 ### 2.1 Analyze 侧（图构建）
 
-Pipeline 执行顺序（`gitnexus/src/core/ingestion/pipeline.ts`）：
+Pipeline 通过 `buildPhaseList` 注册显式依赖的 phase（`gitnexus/src/core/ingestion/pipeline.ts`）：
 
-```
-Phase 1-4:   Scan → Structure → Parse → MRO
-Phase 5:     Communities
-Phase 5.5:   processUnityResources (UNITY_COMPONENT_INSTANCE / UNITY_ASSET_GUID_REF 边)
-Phase 5.6:   applyUnityLifecycleSyntheticCalls (通用 lifecycle 合成 CALLS)
-Phase 6:     processProcesses (沿所有 CALLS 边追踪，生成 Process)
+```text
+scan → structure → parse → scopeResolution → … → communities
+  → unity-resources → unity-lifecycle → processes → unity-process-subtype
 ```
 
-1. Unity 资源绑定解析（Phase 5.5）：
-   - `processUnityResources`：`pipeline.ts:498`
-   - 产出 `UNITY_COMPONENT_INSTANCE`、`UNITY_ASSET_GUID_REF`、`UNITY_RESOURCE_SUMMARY` 边
-   - `PrefabInstance.m_SourcePrefab` 资源级提取已纳入 Phase 5.5，产出去重后的 `scene->prefab` 与 `prefab->prefab` `UNITY_ASSET_GUID_REF`
-2. 内置 Lifecycle 注入（Phase 5.6）：
-   - 对 Unity 项目自动生效（检测 `Assets/*.cs` 文件）：`pipeline.ts:501`
-   - 通用 lifecycle 回调注入（OnEnable/Awake/Start/Update 等）：`unity-lifecycle-synthetic-calls.ts:52-103`
-   - 配置从 `resolveUnityConfig()` 读取：`pipeline.ts:502`
-4. Process 生成（Phase 6）：
-   - 基于 CALLS tracing，标注 `processSubtype` 和 `runtimeChainConfidence`：`pipeline.ts:534-580`
-   - 生命周期 metadata 按 Unity resource-binding flow 条件持久化（Unity 自动检测命中 `Assets/*.cs` 时开启）：`pipeline.ts:505`
+1. `unity-resources`：依赖 `communities/scopeResolution/structure`。独立模块 `unity-resource-scan.ts` 扫描资源路径并按 scope 过滤，随后由 `processUnityResources` 写入 Unity 绑定与 prefab-source 边。
+2. `unity-lifecycle`：依赖 `unity-resources/parse`。基类线索取同一 normalized AST 的 parse report，并与 Class 的文件/名称/行号对齐；不依赖外部引擎类型的虚拟继承节点。检测 `Assets/*.cs` 后加载目标仓 Unity 配置，调用 `applyUnityLifecycleSyntheticCalls`。
+3. `processes`：注册时增加 `unity-lifecycle` 依赖，确保追踪前已注入合成 CALLS；上游 `process-processor.ts` 保持原实现。
+4. `unity-process-subtype`：依赖 `processes/unity-lifecycle`，沿过程 trace 的 CALLS reason 回写 `processSubtype/runtimeChainConfidence/sourceReasons/sourceConfidences` 与步骤证据。流式图必须通过 `forEachRelationshipFields` 读取真实 reason；对象视图的 `streamed` 占位不能用于分类。`STEP_IN_PROCESS` 保留到 subtype 完成后统一落库。
+5. Unity phases 与 derived phases 一同受 `skipGraphPhases/skipDerivedGraphPhases` 控制；deferred derived run 包含三个 Unity phases。
+6. parity seed 在 `core/run-analyze.ts` 成功发布索引时写入 `unity-parity-seed.json`，供 MCP hydration 使用。
 
 ### 2.1.1 Scan-Context 承载器契约（As-Built + Design Direction）
 
 1. As-Built（当前事实）：
    - `scan-context` 已承担 Unity 资源扫描阶段的核心索引输入（脚本 GUID 命中、资源路径集合、GUID 映射等）。
    - `scan-context` 在同次资源扫描中以流式方式产出 `PrefabInstance.m_SourcePrefab` 轻量线索（streaming delivery）。
-   - `processUnityResources` 在 Phase 5.5 统一消费 `scanContext.streamPrefabSourceRefs(...)` 写入 `UNITY_ASSET_GUID_REF`，并统一执行 dedupe/diagnostics/reason payload。
+   - `processUnityResources` 在 `unity-resources` 统一消费 `scanContext.streamPrefabSourceRefs(...)` 写入 `UNITY_ASSET_GUID_REF`，并统一执行 dedupe/diagnostics/reason payload。
    - `scan-context does not write graph edges`; 图谱写入职责仅在 `processUnityResources`。
 2. Design Direction（重构方向，待实现）：
    - `scan-context` 持续作为可扩展的“资源字段识别承载器（resource signal carrier）”。
@@ -58,7 +50,7 @@ Phase 6:     processProcesses (沿所有 CALLS 边追踪，生成 Process)
 3. 统一消费点契约：
    - scan-context 的识别结果由 `processUnityResources` 统一消费并写图（含 dedupe、diagnostics、reason payload）。
    - 组件级深解析仍由 resolver/绑定链路执行；scan-context 不承担完整语义求值职责。
-   - 目标是固定“扫描产出记录 → Phase 5.5 统一消费”这一主干，避免后续功能扩展时出现平行管线漂移。
+   - 目标是固定“扫描产出记录 → `unity-resources` 统一消费”这一主干，避免后续功能扩展时出现平行管线漂移。
 
 ### 2.2 Query/Context 侧（检索与投影）
 
@@ -101,7 +93,7 @@ Phase 6:     processProcesses (沿所有 CALLS 边追踪，生成 Process)
 | Phase 1 | Unity summary schema hygiene | 已落地 | `gitnexus/src/core/lbug/schema.ts`（`REL_TYPES` 定义处） |
 | Phase 2 | class→method process 投影 | 已落地（query/context 双侧） | `local-backend.ts:1416-1449, 2393-2414` |
 | Phase 3 | lifecycle + loader synthetic CALLS | **V2 重构**：lifecycle 始终启用 | `unity-lifecycle-synthetic-calls.ts` |
-| Phase 4 | persisted lifecycle process artifact | **V2 变更**：仅在 Unity resource-binding flow 激活时持久化 | `pipeline.ts:505,569-570` |
+| Phase 4 | persisted lifecycle process artifact | **V2 变更**：仅在 Unity resource-binding flow 激活时持久化 | `pipeline-phases/unity-process-subtype.ts` |
 | Phase 5 | confidence + verification_hint 合约 | **V2 变更**：扩展字段始终输出 | `process-confidence.ts`；`local-backend.ts` |
 | V1 Reload | on-demand verify + 验收闭环 | **V2 重构**：verifier 简化为图谱查询 | `runtime-chain-verify.ts` (934→297 行) |
 
@@ -206,7 +198,7 @@ V2 移除所有 `GITNEXUS_UNITY_*` 环境变量，行为由自动检测和显式
 
 ## 7. V2 迁移回写（2026-04-03）
 
-1. **Pipeline 重排序**：Unity 资源处理从 Phase 7 提前到 Phase 5.5，lifecycle 始终启用
+1. **Pipeline 重排序**：Unity 资源处理从 Phase 7 提前到 `unity-resources`，lifecycle 始终启用
 2. **环境变量清除**：15 个 `GITNEXUS_UNITY_*` env var 全部移除，迁移到 `resolveUnityConfig()` 统一配置
 3. **Verifier 收口**：`runtime-chain-verify.ts` query-time 路径已切换为 graph-only closure，不再加载 retrieval/verification 规则目录做匹配
 4. **硬编码移除**：`RUNTIME_LOADER_ANCHORS`（8 锚点）、`DETERMINISTIC_LOADER_BRIDGES`（7 桥接）、项目特化评分全部删除
@@ -215,12 +207,12 @@ V2 移除所有 `GITNEXUS_UNITY_*` 环境变量，行为由自动检测和显式
 
 1. 任何 Unity runtime process 行为变更（字段、配置、语义、默认值），必须同步更新本文。
 3. `AGENTS.md` / `CLAUDE.md` 应持续指向本文，作为该领域唯一入口文档。
-4. 新增 Unity 资源字段识别需求时，优先评估是否应挂载到 scan-context 承载器，并在本文同步记录“识别器输入字段 + Phase 5.5 消费方式”。
+4. 新增 Unity 资源字段识别需求时，优先评估是否应挂载到 scan-context 承载器，并在本文同步记录“识别器输入字段 + `unity-resources` 消费方式”。
 
 ## 附录 C：已退役 — Rule Lab 离线规则创作系统（v1.5.0 移除）
 
 **退役日期**: 2026-05-18
-**退役原因**: Phase 5.6（内置 lifecycle 自动检测）+ graph-only runtime verification 已完全覆盖 rule lab 的规则驱动合成边注入功能。离线规则创作工作流（CLI `rule-lab` 子命令组、MCP `rule_lab_*` 工具）不再维护。
+**退役原因**: `unity-lifecycle`（内置 lifecycle 自动检测）+ graph-only runtime verification 已完全覆盖 rule lab 的规则驱动合成边注入功能。离线规则创作工作流（CLI `rule-lab` 子命令组、MCP `rule_lab_*` 工具）不再维护。
 
 ### 退役模块
 
@@ -234,7 +226,7 @@ V2 移除所有 `GITNEXUS_UNITY_*` 环境变量，行为由自动检测和显式
 
 ### 保留的能力
 
-- Phase 5.5（Unity 资源绑定解析）— 不受影响
-- Phase 5.6（内置 Lifecycle 合成 CALLS 注入）— 不受影响
+- `unity-resources`（Unity 资源绑定解析）— 不受影响
+- `unity-lifecycle`（内置 Lifecycle 合成 CALLS 注入）— 不受影响
 - Query-time graph-only runtime chain verification — 不受影响
 - 非 rule-lab 的 MCP 工具（query/context/impact/rename 等）— 不受影响

@@ -1,11 +1,12 @@
-import { GraphNode, GraphRelationship, KnowledgeGraph } from './types'
+import type { GraphNode, GraphRelationship } from 'gitnexus-shared';
+import type { KnowledgeGraph } from './types';
 
 export const createKnowledgeGraph = (): KnowledgeGraph => {
   const nodeMap = new Map<string, GraphNode>();
   const relationshipMap = new Map<string, GraphRelationship>();
 
   const addNode = (node: GraphNode) => {
-    if(!nodeMap.has(node.id)) {
+    if (!nodeMap.has(node.id)) {
       nodeMap.set(node.id, node);
     }
   };
@@ -16,13 +17,13 @@ export const createKnowledgeGraph = (): KnowledgeGraph => {
     }
   };
 
-  return{
-    get nodes(){
-      return Array.from(nodeMap.values())
+  return {
+    get nodes() {
+      return Array.from(nodeMap.values());
     },
-  
-    get relationships(){
-      return Array.from(relationshipMap.values())
+
+    get relationships() {
+      return Array.from(relationshipMap.values());
     },
 
     // O(1) count getters - avoid creating arrays just for length
@@ -36,6 +37,5 @@ export const createKnowledgeGraph = (): KnowledgeGraph => {
 
     addNode,
     addRelationship,
-
   };
 };

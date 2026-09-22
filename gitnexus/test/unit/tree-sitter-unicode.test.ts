@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { loadParser, loadLanguage, parseContent } from '../../src/core/tree-sitter/parser-loader.js';
+import { loadParser, loadLanguage } from '../../src/core/tree-sitter/parser-loader.js';
+import { parseSourceSafe } from '../../src/core/tree-sitter/safe-parse.js';
+import type Parser from 'tree-sitter';
+let parser: Parser;
+const parseContent = (source: string, oldTree?: Parser.Tree) =>
+  parseSourceSafe(parser, source, oldTree);
 import { SupportedLanguages } from '../../src/config/supported-languages.js';
 
 // Fixture: C# class with Unicode (Chinese) field names and method calls
@@ -49,7 +54,7 @@ namespace NEON.Game.PowerUps {
 
 describe('C# Unicode identifier support (tree-sitter-c-sharp >= 0.23.1)', () => {
   it('parses C# class with Unicode field names without error', async () => {
-    await loadParser();
+    parser = await loadParser();
     await loadLanguage(SupportedLanguages.CSharp);
 
     const tree = parseContent(CSHARP_UNICODE_CLASS);
@@ -57,7 +62,7 @@ describe('C# Unicode identifier support (tree-sitter-c-sharp >= 0.23.1)', () => 
   });
 
   it('finds class_declaration nodes in Unicode-heavy file', async () => {
-    await loadParser();
+    parser = await loadParser();
     await loadLanguage(SupportedLanguages.CSharp);
 
     const tree = parseContent(CSHARP_UNICODE_CLASS);
@@ -71,7 +76,7 @@ describe('C# Unicode identifier support (tree-sitter-c-sharp >= 0.23.1)', () => 
   });
 
   it('finds method_declaration nodes in Unicode-heavy file', async () => {
-    await loadParser();
+    parser = await loadParser();
     await loadLanguage(SupportedLanguages.CSharp);
 
     const tree = parseContent(CSHARP_UNICODE_CLASS);
@@ -85,7 +90,7 @@ describe('C# Unicode identifier support (tree-sitter-c-sharp >= 0.23.1)', () => 
   });
 
   it('parses partial class with Unicode fields without cascading ERROR', async () => {
-    await loadParser();
+    parser = await loadParser();
     await loadLanguage(SupportedLanguages.CSharp);
 
     const tree = parseContent(CSHARP_PARTIAL_CLASS_UNICODE);
@@ -100,7 +105,7 @@ describe('C# Unicode identifier support (tree-sitter-c-sharp >= 0.23.1)', () => 
   });
 
   it('does NOT produce ERROR nodes for valid Unicode identifiers (shallow check)', async () => {
-    await loadParser();
+    parser = await loadParser();
     await loadLanguage(SupportedLanguages.CSharp);
 
     const tree = parseContent(CSHARP_UNICODE_CLASS);

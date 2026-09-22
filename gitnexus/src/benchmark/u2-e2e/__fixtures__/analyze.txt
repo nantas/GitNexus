@@ -1,0 +1,2 @@
+Repository indexed successfully (114.8s)
+KuzuDB 73.5s | FTS 19.6s

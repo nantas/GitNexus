@@ -1,14 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import { loadParser, loadLanguage, parseContent } from '../../src/core/tree-sitter/parser-loader.js';
+import { loadParser, loadLanguage } from '../../src/core/tree-sitter/parser-loader.js';
+import { parseSourceSafe } from '../../src/core/tree-sitter/safe-parse.js';
+import type Parser from 'tree-sitter';
+let parser: Parser;
+const parseContent = (source: string, oldTree?: Parser.Tree) =>
+  parseSourceSafe(parser, source, oldTree);
 import { SupportedLanguages } from '../../src/config/supported-languages.js';
 
-describe('parseContent (adaptive buffer)', () => {
+describe('safe parse (bounded UTF-16 chunks)', () => {
   it('exports parseContent function', async () => {
     expect(typeof parseContent).toBe('function');
   });
 
   it('parses simple C# content without error', async () => {
-    await loadParser();
+    parser = await loadParser();
     await loadLanguage(SupportedLanguages.CSharp);
     const code = `
 namespace MyApp {
@@ -24,7 +29,7 @@ namespace MyApp {
   });
 
   it('does not throw on large file (> 36 KB)', async () => {
-    await loadParser();
+    parser = await loadParser();
     await loadLanguage(SupportedLanguages.CSharp);
     // Generate ~40 KB synthetic C# content
     const lines: string[] = ['namespace BigFile {', '  public class BigClass {'];
@@ -36,13 +41,15 @@ namespace MyApp {
     expect(largeCode.length).toBeGreaterThan(36 * 1024);
 
     let tree: any;
-    expect(() => { tree = parseContent(largeCode); }).not.toThrow();
+    expect(() => {
+      tree = parseContent(largeCode);
+    }).not.toThrow();
     expect(tree).toBeDefined();
     expect(tree.rootNode.type).toBe('compilation_unit');
   });
 
   it('accepts optional oldTree parameter', async () => {
-    await loadParser();
+    parser = await loadParser();
     await loadLanguage(SupportedLanguages.CSharp);
     const code = 'namespace A { public class B {} }';
     const tree1 = parseContent(code);
@@ -53,13 +60,13 @@ namespace MyApp {
 
 describe('parseContent edge cases', () => {
   it('handles empty string without throwing', async () => {
-    await loadParser();
+    parser = await loadParser();
     await loadLanguage(SupportedLanguages.CSharp);
     expect(() => parseContent('')).not.toThrow();
   });
 
   it('handles legacy chunk-boundary-sized content (4096 bytes)', async () => {
-    await loadParser();
+    parser = await loadParser();
     await loadLanguage(SupportedLanguages.TypeScript);
     // Generate content of exactly 4096 bytes. This used to be a callback
     // chunk boundary; keep it covered to prevent regressions around boundary
@@ -69,7 +76,7 @@ describe('parseContent edge cases', () => {
   });
 
   it('handles content with multi-byte UTF-8 characters (Chinese comments)', async () => {
-    await loadParser();
+    parser = await loadParser();
     await loadLanguage(SupportedLanguages.CSharp);
     // Chinese characters are 3 bytes each in UTF-8 — stress tests slice boundaries
     const code = `
@@ -89,12 +96,14 @@ namespace 测试命名空间 {
     expect(tree.rootNode.hasError).toBe(false);
   });
 
-  it('uses byte-sized buffers for large multi-byte UTF-8 content', async () => {
-    await loadParser();
+  it('uses bounded UTF-16 chunks for large multi-byte UTF-8 content', async () => {
+    parser = await loadParser();
     await loadLanguage(SupportedLanguages.CSharp);
 
-    const comments = Array.from({ length: 12_000 }, (_, index) =>
-      `    // 第 ${index} 行：中文注释用于验证 byte offset 不会被 JS string index 误用`
+    const comments = Array.from(
+      { length: 12_000 },
+      (_, index) =>
+        `    // 第 ${index} 行：中文注释用于验证 byte offset 不会被 JS string index 误用`,
     ).join('\n');
     const code = `
 namespace Utf8Stress {

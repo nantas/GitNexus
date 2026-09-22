@@ -14,7 +14,6 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { spawnSync } = require('child_process');
 const DEFAULT_NPX_SPEC = '';
 const DEFAULT_PACKAGE_NAME = '@veewo/gitnexus';
 
@@ -31,12 +30,13 @@ function normalizeNpxSpec(raw) {
   return `${DEFAULT_PACKAGE_NAME}@${value}`;
 }
 
+// Resolve the fallback pin from ~/.gitnexus/config.json (cliPackageSpec, then cliVersion).
 function resolveNpxSpec() {
   if (process.env.GITNEXUS_CLI_SPEC) return normalizeNpxSpec(process.env.GITNEXUS_CLI_SPEC);
   if (process.env.GITNEXUS_CLI_VERSION) return normalizeNpxSpec(process.env.GITNEXUS_CLI_VERSION);
 
   try {
-    const raw = fs.readFileSync(path.join(os.homedir(), '.gitnexus', 'config.json'), 'utf-8');
+    const raw = fs.readFileSync(path.join(process.env.GITNEXUS_HOME || path.join(os.homedir(), '.gitnexus'), 'config.json'), 'utf-8');
     const parsed = JSON.parse(raw);
     if (typeof parsed.cliPackageSpec === 'string' && parsed.cliPackageSpec.trim()) {
       return normalizeNpxSpec(parsed.cliPackageSpec);
@@ -48,6 +48,15 @@ function resolveNpxSpec() {
 
   return DEFAULT_NPX_SPEC;
 }
+
+const { spawnSync } = require('child_process');
+const { acquireHookSlot } = require('./hook-lock.cjs');
+const {
+  hasGitNexusDbLockedByGitNexusServer,
+  resolveUnixGuardTimeout,
+} = require('./hook-db-lock-probe.cjs');
+const { formatAnalyzeCommand } = require('./resolve-analyze-cmd.cjs');
+const { resolveHookRepo } = require('./registry-query.cjs');
 
 /**
  * Read JSON input from stdin synchronously.
@@ -61,20 +70,36 @@ function readInput() {
   }
 }
 
+function hasGitNexusServerOwner(lbugPath) {
+  return hasGitNexusDbLockedByGitNexusServer(lbugPath, process.pid);
+}
+
 /**
- * Find the .gitnexus directory by walking up from startDir.
- * Returns the path to .gitnexus/ or null if not found.
+ * Whether opt-in diagnostics should be written to the hook's stderr. Strict
+ * hook runners (e.g. Codex `PreToolUse`) validate hook output, so normal,
+ * non-error skip paths must stay silent unless the operator explicitly asks
+ * for diagnostics via GITNEXUS_DEBUG. See issue #1913.
  */
-function findGitNexusDir(startDir) {
-  let dir = startDir || process.cwd();
-  for (let i = 0; i < 5; i++) {
-    const candidate = path.join(dir, '.gitnexus');
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+function isDebugEnabled() {
+  return process.env.GITNEXUS_DEBUG === '1' || process.env.GITNEXUS_DEBUG === 'true';
+}
+
+function extractAugmentContext(stderr) {
+  const output = (stderr || '').trim();
+  const marker = output.indexOf('[GitNexus]');
+  const debug = isDebugEnabled();
+  if (debug && output.length > 0) {
+    // Emit the FULL discarded prefix (everything before the marker, or all of
+    // it when no marker is present) so suppressed diagnostics — KuzuDB lock
+    // warnings, parser errors, etc. — remain recoverable on the hook's own
+    // stderr. The untruncated payload lets operators see exactly what was
+    // filtered out instead of a 180-char JSON-quoted preview.
+    const discarded = marker === -1 ? output : output.slice(0, marker).trim();
+    if (discarded.length > 0) {
+      process.stderr.write(`[GitNexus hook] augment stderr discarded prefix:\n${discarded}\n`);
+    }
   }
-  return null;
+  return marker === -1 ? '' : output.slice(marker).trim();
 }
 
 /**
@@ -98,10 +123,26 @@ function extractPattern(toolName, toolInput) {
     const tokens = cmd.split(/\s+/);
     let foundCmd = false;
     let skipNext = false;
-    const flagsWithValues = new Set(['-e', '-f', '-m', '-A', '-B', '-C', '-g', '--glob', '-t', '--type', '--include', '--exclude']);
+    const flagsWithValues = new Set([
+      '-e',
+      '-f',
+      '-m',
+      '-A',
+      '-B',
+      '-C',
+      '-g',
+      '--glob',
+      '-t',
+      '--type',
+      '--include',
+      '--exclude',
+    ]);
 
     for (const token of tokens) {
-      if (skipNext) { skipNext = false; continue; }
+      if (skipNext) {
+        skipNext = false;
+        continue;
+      }
       if (!foundCmd) {
         if (/\brg$|\bgrep$/.test(token)) foundCmd = true;
         continue;
@@ -126,6 +167,10 @@ function extractPattern(toolName, toolInput) {
  * 3. Fall back to npx (returns empty string)
  */
 function resolveCliPath() {
+  const fromEnv = process.env.GITNEXUS_HOOK_CLI_PATH;
+  if (fromEnv !== undefined && String(fromEnv).trim() && fs.existsSync(String(fromEnv))) {
+    return String(fromEnv);
+  }
   let cliPath = path.resolve(__dirname, '..', '..', 'dist', 'cli', 'index.js');
   if (!fs.existsSync(cliPath)) {
     try {
@@ -137,26 +182,155 @@ function resolveCliPath() {
   return cliPath;
 }
 
+// Debounce for the unguarded-CLI diagnostic below (#2163 follow-up review):
+// at most one line per (short-lived) hook process, even if a future change
+// runs the CLI more than once.
+let unguardedCliWarned = false;
+
 /**
  * Spawn a gitnexus CLI command synchronously.
  * Returns the stderr output (KuzuDB captures stdout at OS level).
+ *
+ * Unix orphan containment (#2163 follow-up): the augment CLI is the
+ * longest-lived hook child (inner spawnSync timeout 7s locally, 12s via
+ * npx), so on Unix it gets the same SIGKILL-surviving coreutils `timeout`
+ * wrapper as the probe's lsof/ps. The wrapper budget is ceil(inner/1000)+1
+ * seconds — STRICTLY greater than the inner spawnSync timeout, so on the
+ * supervised path Node's SIGTERM always fires first and the existing
+ * error/status contract is untouched. Once the hook itself has been
+ * SIGKILLed (exactly the orphan case the wrapper exists for), the guard
+ * semantics differ per branch:
+ *   - direct exec (the CLI is the guard's CHILD): `-k 1` TERM-first — a
+ *     SIGTERM-immune CLI can hold the guard ~1s past the inner timeout
+ *     before the `-k` SIGKILL escalation reaps it.
+ *   - npx (the CLI is a GRANDCHILD: guard → npx → CLI): `-s KILL` — the
+ *     budget expiry SIGKILLs the whole process group outright. TERM-first
+ *     would kill only the obedient npx parent, making `timeout` reap it and
+ *     return before the `-k` escalation ever fires, stranding a
+ *     SIGTERM-immune CLI grandchild unbounded (reproduced on coreutils
+ *     9.x). `-k 1` is retained alongside `-s KILL` as a harmless belt: with
+ *     `-s KILL` the `-k` escalation signal is also KILL. Two residual gaps
+ *     on this branch, both bounded by "no worse than pre-fix" (where the
+ *     grandchild received no signal at all): the group-wide SIGKILL is
+ *     coreutils semantics — a busybox `timeout` passes the self-test (it
+ *     has `-k` and propagates exit status) but signals only its direct
+ *     child, so a busybox guard cannot reach the grandchild; and on the
+ *     SUPERVISED path (hook alive, inner spawnSync timeout SIGTERMs the
+ *     guard) coreutils forwards TERM rather than the `-s` signal, npx dies,
+ *     and the guard exits before any KILL fires — so a SIGTERM-immune CLI
+ *     grandchild still escapes in those two cases.
+ * If the sibling probe predates the resolveUnixGuardTimeout export (version
+ * skew), the adapter degrades to the unwrapped invocation instead of
+ * throwing. Windows is deliberately NOT wrapped — there is no coreutils
+ * timeout to resolve there and the resolver's self-test spawns /bin/sh — so
+ * on win32 (the npx.cmd path) and whenever the guard resolves to null (e.g.
+ * macOS without Homebrew coreutils — reported once under GITNEXUS_DEBUG)
+ * the argv stays byte-identical to the pre-wrap invocation.
  */
-function runGitNexusCli(cliPath, args, cwd, timeout, npxSpec) {
+function runGitNexusCli(cliPath, args, cwd, timeout) {
   const isWin = process.platform === 'win32';
-  if (cliPath) {
-    return spawnSync(
-      process.execPath,
-      [cliPath, ...args],
-      { encoding: 'utf-8', timeout, cwd, stdio: ['pipe', 'pipe', 'pipe'] }
+  // Version-skew guard (#2163 follow-up review): an older sibling probe
+  // without the resolveUnixGuardTimeout export must degrade to the unwrapped
+  // invocation — a TypeError here would be swallowed by the caller's catch
+  // and silently kill the augment.
+  const guard =
+    isWin || typeof resolveUnixGuardTimeout !== 'function' ? null : resolveUnixGuardTimeout();
+  if (!isWin && !guard && !unguardedCliWarned && isDebugEnabled()) {
+    // Diagnose the "stays unwrapped" Unix paths once per hook process: no
+    // usable coreutils timeout/gtimeout (e.g. macOS without Homebrew
+    // coreutils), GITNEXUS_HOOK_TIMEOUT_PATH=disabled, or probe skew above.
+    unguardedCliWarned = true;
+    process.stderr.write(
+      '[GitNexus hook] no usable timeout/gtimeout guard; augment CLI child runs unguarded\n',
     );
   }
+  if (cliPath) {
+    const [cmd, cmdArgs] = guard
+      ? [
+          guard,
+          ['-k', '1', String(Math.ceil(timeout / 1000) + 1), process.execPath, cliPath, ...args],
+        ]
+      : [process.execPath, [cliPath, ...args]];
+    return spawnSync(cmd, cmdArgs, {
+      encoding: 'utf-8',
+      timeout,
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+  }
+  const npxSpec = resolveNpxSpec();
   if (!npxSpec) return null;
-  // On Windows, invoke npx.cmd directly (no shell needed)
-  return spawnSync(
-    isWin ? 'npx.cmd' : 'npx',
-    ['-y', npxSpec, ...args],
-    { encoding: 'utf-8', timeout: timeout + 5000, cwd, stdio: ['pipe', 'pipe', 'pipe'] }
+  // On Windows, invoke npx.cmd directly (no shell needed). A non-null guard
+  // implies non-Windows, so the wrapped arm can hardcode plain `npx`. The
+  // wrapped arm leads with `-s KILL` (NOT TERM-first like the direct branch
+  // above): the CLI here is a grandchild behind npx — see the docblock.
+  const [cmd, cmdArgs] = guard
+    ? [
+        guard,
+        [
+          '-s',
+          'KILL',
+          '-k',
+          '1',
+          String(Math.ceil((timeout + 5000) / 1000) + 1),
+          'npx',
+          '-y',
+          npxSpec,
+          ...args,
+        ],
+      ]
+    : [isWin ? 'npx.cmd' : 'npx', ['-y', npxSpec, ...args]];
+  return spawnSync(cmd, cmdArgs, {
+    encoding: 'utf-8',
+    timeout: timeout + 5000,
+    cwd,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+}
+
+/**
+ * Fallback augmentation for the #2396 path: when a GitNexus process holds the
+ * lbug DB write lock the CLI `augment` can't run, so point the agent at the MCP
+ * `query` tool instead. Phrased conditionally ("if the MCP tools are live") so it
+ * stays truthful on every owner path — a confirmed MCP owner, a `serve` owner, or
+ * a fail-closed probe where no server is actually confirmed. `pattern` is embedded
+ * verbatim; the caller (sendHookResponse) JSON-escapes it structurally.
+ */
+function buildMcpQueryHint(pattern) {
+  return (
+    `[GitNexus] Local augment is unavailable (the graph DB is held by another ` +
+    `GitNexus process). If the GitNexus MCP tools are live in this session, call ` +
+    `the GitNexus \`query\` MCP tool (e.g. mcp__gitnexus__query) with ` +
+    `search_query "${pattern}".`
   );
+}
+
+/**
+ * #2396 throttle: emit the MCP-query hint at most once per repo per window, so an
+ * owner-locked session isn't nudged on every search. Window (ms) via
+ * GITNEXUS_MCP_HINT_THROTTLE_MS (default 10min; 0/invalid disables). Best-effort —
+ * any fs error falls back to emitting.
+ * ponytail: per-repo mtime marker, shared across concurrent sessions on the same
+ * repo; add per-session dedup only if that sharing becomes a problem.
+ */
+function shouldEmitMcpHint(storagePath) {
+  const raw = process.env.GITNEXUS_MCP_HINT_THROTTLE_MS;
+  const windowMs = raw === undefined || raw === '' ? 600000 : Number(raw);
+  if (!Number.isFinite(windowMs) || windowMs <= 0) return true;
+  const marker = path.join(storagePath, '.mcp-hint-shown');
+  try {
+    if (Date.now() - fs.statSync(marker).mtimeMs < windowMs) return false;
+  } catch {
+    /* marker missing/unreadable → emit */
+  }
+  try {
+    fs.writeFileSync(marker, '');
+  } catch {
+    /* best-effort; still emit */
+  }
+  return true;
 }
 
 /**
@@ -165,7 +339,6 @@ function runGitNexusCli(cliPath, args, cwd, timeout, npxSpec) {
 function handlePreToolUse(input) {
   const cwd = input.cwd || process.cwd();
   if (!path.isAbsolute(cwd)) return;
-  if (!findGitNexusDir(cwd)) return;
 
   const toolName = input.tool_name || '';
   const toolInput = input.tool_input || {};
@@ -175,18 +348,59 @@ function handlePreToolUse(input) {
   const pattern = extractPattern(toolName, toolInput);
   if (!pattern || pattern.length < 3) return;
 
-  const cliPath = resolveCliPath();
-  const npxSpec = resolveNpxSpec();
+  // Registry row first (persisted external storagePath wins). Local owned
+  // `.gitnexus` is only the fallback when no matching registry row exists.
+  const repo = resolveHookRepo(cwd);
+  if (!repo) return;
+  const storagePath = repo.storagePath;
+
+  // Acquire the per-repo slot BEFORE the DB-owner probe (#2163): the probe
+  // itself spawns lsof/ps, so it must be bounded by the same ≤3-per-repo cap
+  // as the augment, or concurrent sessions fan out unbounded probe
+  // subprocesses. Keep the acquire right after the cheap guards above —
+  // moving it earlier would churn slot files on tool calls that never probe.
+  const release = acquireHookSlot(storagePath);
+  if (!release) {
+    // Normal skip path: all per-repo hook slots are held by concurrent
+    // sessions. Stay silent for strict hook runners (issue #1913); surface
+    // the reason only when diagnostics are explicitly requested.
+    if (isDebugEnabled()) {
+      process.stderr.write('[GitNexus] augment skipped: hook slots saturated\n');
+    }
+    return;
+  }
+
   let result = '';
   try {
-    const child = runGitNexusCli(cliPath, ['augment', '--', pattern], cwd, 7000, npxSpec);
-    if (child && !child.error && child.status === 0) {
-      result = child.stderr || '';
+    if (hasGitNexusServerOwner(repo.lbugPath)) {
+      // #2396: the MCP server holds the DB write lock, so a competing CLI
+      // `augment` would only contend on it (LadybugDB is single-writer). But the
+      // session that triggered this hook has the GitNexus MCP tools live — route
+      // the augmentation to the agent via additionalContext instead of silently
+      // doing nothing. Mirror the skip reason to stderr only under GITNEXUS_DEBUG
+      // (strict-runner contract, #1913); the hint itself rides the sanctioned
+      // additionalContext stdout channel the successful augment already uses.
+      if (isDebugEnabled()) {
+        process.stderr.write('[GitNexus] augment skipped: MCP server owns DB\n');
+      }
+      if (shouldEmitMcpHint(storagePath)) {
+        result = buildMcpQueryHint(pattern);
+      }
+    } else {
+      const cliPath = resolveCliPath();
+      const child = runGitNexusCli(cliPath, ['augment', '--', pattern], cwd, 7000);
+      if (!child.error && child.status === 0) {
+        result = extractAugmentContext(child.stderr || '');
+      }
     }
-  } catch { /* graceful failure */ }
+  } catch {
+    /* graceful failure */
+  } finally {
+    release();
+  }
 
-  if (result && result.trim()) {
-    sendHookResponse('PreToolUse', result.trim());
+  if (result) {
+    sendHookResponse('PreToolUse', result);
   }
 }
 
@@ -194,18 +408,20 @@ function handlePreToolUse(input) {
  * Emit a PostToolUse hook response with additional context for the agent.
  */
 function sendHookResponse(hookEventName, message) {
-  console.log(JSON.stringify({
-    hookSpecificOutput: { hookEventName, additionalContext: message }
-  }));
+  console.log(
+    JSON.stringify({
+      hookSpecificOutput: { hookEventName, additionalContext: message },
+    }),
+  );
 }
 
 /**
  * PostToolUse handler — detect index staleness after git mutations.
  *
- * Instead of spawning a full analyze command synchronously (which blocks
+ * Instead of spawning a full `gitnexus analyze` synchronously (which blocks
  * the agent for up to 120s and risks KuzuDB corruption on timeout), we do a
  * lightweight staleness check: compare `git rev-parse HEAD` against the
- * lastCommit stored in `.gitnexus/meta.json`. If they differ, notify the
+ * lastCommit stored in the registered index metadata. If they differ, notify the
  * agent so it can decide when to reindex.
  */
 function handlePostToolUse(input) {
@@ -221,42 +437,42 @@ function handlePostToolUse(input) {
 
   const cwd = input.cwd || process.cwd();
   if (!path.isAbsolute(cwd)) return;
-  const gitNexusDir = findGitNexusDir(cwd);
-  if (!gitNexusDir) return;
+  const repo = resolveHookRepo(cwd);
+  if (!repo) return;
 
   // Compare HEAD against last indexed commit — skip if unchanged
   let currentHead = '';
   try {
     const headResult = spawnSync('git', ['rev-parse', 'HEAD'], {
-      encoding: 'utf-8', timeout: 3000, cwd, stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+      timeout: 3000,
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     });
     currentHead = (headResult.stdout || '').trim();
-  } catch { return; }
+  } catch {
+    return;
+  }
 
   if (!currentHead) return;
 
   let lastCommit = '';
   let hadEmbeddings = false;
-  try {
-    const meta = JSON.parse(fs.readFileSync(path.join(gitNexusDir, 'meta.json'), 'utf-8'));
+  const meta = repo.metadata;
+  if (meta) {
     lastCommit = meta.lastCommit || '';
-    hadEmbeddings = (meta.stats && meta.stats.embeddings > 0);
-  } catch { /* no meta — treat as stale */ }
+    hadEmbeddings = meta.stats && meta.stats.embeddings > 0;
+  }
 
   // If HEAD matches last indexed commit, no reindex needed
   if (currentHead && currentHead === lastCommit) return;
 
-  const npxSpec = resolveNpxSpec();
-  const analyzeArgs = `analyze${hadEmbeddings ? ' --embeddings' : ''}`;
-  const analyzeCmd = `gitnexus ${analyzeArgs}`;
-  const fallbackCmd = npxSpec
-    ? `npx -y ${npxSpec} ${analyzeArgs}`
-    : null;
-  sendHookResponse('PostToolUse',
+  const analyzeCmd = formatAnalyzeCommand({ embeddings: hadEmbeddings, indexOnly: true, packageSpec: resolveNpxSpec() });
+  sendHookResponse(
+    'PostToolUse',
     `GitNexus index is stale (last indexed: ${lastCommit ? lastCommit.slice(0, 7) : 'never'}). ` +
-    (fallbackCmd
-      ? `Run \`${analyzeCmd}\` (or \`${fallbackCmd}\`) to update the knowledge graph.`
-      : `Run \`${analyzeCmd}\` to update the knowledge graph. If local CLI is unavailable, populate ~/.gitnexus/config.json via \`gitnexus setup --cli-spec <packageSpec>\` first.`)
+      `Run \`${analyzeCmd}\` to update the knowledge graph.`,
   );
 }
 
@@ -272,7 +488,7 @@ function main() {
     const handler = handlers[input.hook_event_name || ''];
     if (handler) handler(input);
   } catch (err) {
-    if (process.env.GITNEXUS_DEBUG) {
+    if (isDebugEnabled()) {
       console.error('GitNexus hook error:', (err.message || '').slice(0, 200));
     }
   }

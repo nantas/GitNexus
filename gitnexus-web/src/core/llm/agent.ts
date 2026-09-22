@@ -1,36 +1,56 @@
 /**
  * Graph RAG Agent Factory
- * 
+ *
  * Creates a LangChain agent configured for code graph analysis.
  * Supports Azure OpenAI and Google Gemini providers.
  */
 
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
-import { SystemMessage } from '@langchain/core/messages';
+import {
+  SystemMessage,
+  HumanMessage,
+  AIMessage,
+  ToolMessage,
+  type BaseMessage,
+} from '@langchain/core/messages';
 import { ChatOpenAI, AzureChatOpenAI } from '@langchain/openai';
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { ChatAnthropic } from '@langchain/anthropic';
 import { ChatOllama } from '@langchain/ollama';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { createGraphRAGTools } from './tools';
-import type { 
-  ProviderConfig, 
+import { createGraphRAGTools, type GraphRAGBackend } from './tools';
+import type {
+  AgentUserContent,
+  ProviderConfig,
   OpenAIConfig,
-  AzureOpenAIConfig, 
+  AzureOpenAIConfig,
   GeminiConfig,
   AnthropicConfig,
   OllamaConfig,
   OpenRouterConfig,
+  MiniMaxConfig,
+  GLMConfig,
+  DeepSeekConfig,
   AgentStreamChunk,
+  AgentHistoryMessage,
+  MiniMaxThinkingMode,
 } from './types';
-import { 
+import { getMiniMaxModelCapabilities, MINIMAX_ANTHROPIC_BASE_URLS } from './types';
+import {
   type CodebaseContext,
   buildDynamicSystemPrompt,
+  CHAT_ONLY_PROMPT_NOTE,
 } from './context-builder';
+import { DEFAULT_OLLAMA_BASE_URL, DEFAULT_OPENROUTER_BASE_URL } from '../../config/ui-constants';
+import {
+  DeepSeekChatOpenAI,
+  normalizeMessageContent,
+  normalizeToolCalls,
+} from './deepseek-chat-model';
 
 /**
  * System prompt for the Graph RAG agent
- * 
+ *
  * Design principles (based on Aider/Cline research):
  * - Short, punchy directives > long explanations
  * - No template-inducing examples
@@ -40,7 +60,7 @@ import {
  */
 /**
  * Base system prompt - exported so it can be used with dynamic context injection
- * 
+ *
  * Structure (optimized for instruction following):
  * 1. Identity + GROUNDING mandate (most important)
  * 2. Core protocol (how to work)
@@ -52,66 +72,90 @@ export const BASE_SYSTEM_PROMPT = `You are Nexus, a Code Analysis Agent with acc
 
 ## ⚠️ MANDATORY: GROUNDING
 Every factual claim MUST include a citation.
-- File refs: [[src/auth.ts:45-60]] (line range with hyphen)
+- File refs: [[src/auth.ts:45-60]] (repo-relative path, line range with hyphen)
+- Symbol refs: [[Function:validateUser]] or [[Class:AuthService]]
+- Do NOT wrap citations in backticks or code blocks — keep them as plain text
 - NO citation = NO claim. Say "I didn't find evidence" instead of guessing.
 
-## ⚠️ MANDATORY: VALIDATION
-Every output MUST be validated.
-- Use cypher to validate the results and confirm completeness of context before final output.
-- NO validation = NO claim. Say "I didn't find evidence" instead of guessing.
-- Do not blindly trust readme or single source of truth. Always validate and cross-reference. Never be lazy.
+## 🧠 CORE PROTOCOL (Iterative Loop)
+You are an investigator, not a one-shot query engine. For each question:
+1. **Plan** — Briefly state what you are looking for and why.
+2. **Execute** — Run tools to gather evidence.
+3. **Analyze & pivot** — Did the output fully answer the question?
+   - Yes → proceed to grounding.
+   - Revealed new files/functions → loop back and investigate them immediately.
+   - Tool failed → fix the input and retry. Never stop after one error.
+4. **Trace** — Use cypher, explore, or impact to follow graph connections.
+5. **Read** — Use read to verify logic. Do not guess behavior from names alone.
+6. **Validate** — Cross-check findings with cypher before final output. README/docs are summaries, not proof.
+7. **Ground** — Cite every finding with [[path:START-END]] or [[Type:Name]].
 
-## 🧠 CORE PROTOCOL
-You are an investigator. For each question:
-1. **Search** → Use cypher, search or grep to find relevant code
-2. **Read** → Use read to see the actual source
-3. **Trace** → Use cypher to follow connections in the graph
-4. **Cite** → Ground every finding with [[file:line]] or [[Type:Name]]
-5. **Validate** → Use cypher to validate the results and confirm completeness of context before final output. ( MUST DO )
+Before EVERY tool call, briefly state what you are doing and why. Keep narration to one line per step.
 
-## 🛠️ TOOLS
-- **\`search\`** — Hybrid search. Results grouped by process with cluster context.
-- **\`cypher\`** — Cypher queries against the graph. Use \`{{QUERY_VECTOR}}\` for vector search.
-- **\`grep\`** — Regex search. Best for exact strings, TODOs, error codes.
-- **\`read\`** — Read file content. Always use after search/grep to see full code.
-- **\`explore\`** — Deep dive on a symbol, cluster, or process. Shows membership, participation, connections.
+## BE DIRECT
+- No pleasantries. No "Great question!" or "I'd be happy to help."
+- Don't repeat advice already given in this conversation.
+- Match response length to query complexity.
+- Don't pad with generic "let me know if you need more" — users will ask.
+
+## 🛠️ TOOLS (exact names — use these only)
+- **\`search\`** — Hybrid keyword + semantic search. Results grouped by process with cluster context. Start here for discovery.
+- **\`cypher\`** — Cypher queries against the graph. Use \`{{QUERY_VECTOR}}\` placeholder for vector search.
+- **\`grep\`** — Regex search across files. Best for exact strings, TODOs, error codes.
+- **\`read\`** — Read file content. Always use after search/grep to see full source.
+- **\`explore\`** — Deep dive on a symbol, cluster, or process.
 - **\`overview\`** — Codebase map showing all clusters and processes.
 - **\`impact\`** — Impact analysis. Shows affected processes, clusters, and risk level.
 
+**Tool strategy:**
+- Discovery → \`search\` or \`overview\`
+- Structure → \`cypher\`, \`explore\`, or \`impact\`
+- Verification → \`read\` (required before concluding)
+- Exact patterns → \`grep\`
+
 ## 📊 GRAPH SCHEMA
-Nodes: File, Folder, Function, Class, Interface, Method, Community, Process
-Relations: \`CodeRelation\` with \`type\` property: CONTAINS, DEFINES, IMPORTS, CALLS, EXTENDS, IMPLEMENTS, MEMBER_OF, STEP_IN_PROCESS
+Typed node labels: File, Folder, Function, Class, Interface, Method, CodeElement, Community, Process
+Single relation table: \`CodeRelation\` with \`type\` property: CONTAINS, DEFINES, IMPORTS, CALLS, EXTENDS, IMPLEMENTS, MEMBER_OF, STEP_IN_PROCESS
 
-## 📐 GRAPH SEMANTICS (Important!)
-**Edge Types:**
-- \`CALLS\`: Method invocation OR constructor injection. If A receives B as parameter and uses it, A→B is CALLS. This is intentional simplification.
-- \`IMPORTS\`: File-level import/include statement.
-- \`EXTENDS/IMPLEMENTS\`: Class inheritance.
-
-**Process Nodes:**
-- Process labels use format: "EntryPoint → Terminal" (e.g., "onCreate → showToast")
-- These are heuristic names from tracing execution flow, NOT application-defined names
-- Entry points are detected via export status, naming patterns, and framework conventions
+✅ \`MATCH (f:Function) RETURN f.name LIMIT 10\`
+✅ \`MATCH (a)-[r:CodeRelation {type: 'CALLS'}]->(b:Function) RETURN a.name, b.name\`
+❌ \`MATCH ()-[:CALLS]->()\` — WRONG, no such relationship label
 
 Cypher examples:
-- \`MATCH (f:Function) RETURN f.name LIMIT 10\`
-- \`MATCH (f:File)-[:CodeRelation {type: 'IMPORTS'}]->(g:File) RETURN f.name, g.name\`
+- Find callers: \`MATCH (caller:Function)-[:CodeRelation {type: 'CALLS'}]->(fn:Function {name: 'validate'}) RETURN caller.name, caller.filePath\`
+- File imports: \`MATCH (f:File)-[:CodeRelation {type: 'IMPORTS'}]->(g:File) RETURN f.name, g.name\`
+- Semantic search: include \`{{QUERY_VECTOR}}\` in cypher and provide a \`query\` parameter
 
-## 📝CRITICAL RULES
-- **impact output is trusted.** Do NOT re-validate with cypher. Optionally run the suggested grep commands for dynamic patterns.
+## 📐 GRAPH SEMANTICS
+- \`CALLS\`: Method invocation or constructor injection (intentional simplification).
+- \`IMPORTS\`: File-level import/include.
+- \`EXTENDS/IMPLEMENTS\`: Class inheritance.
+- Process labels use format "EntryPoint → Terminal" (heuristic, not app-defined names).
+
+## 🎯 VISUAL GROUNDING (not a tool)
+The user sees a knowledge graph alongside this chat. Citations automatically highlight nodes in the graph UI.
+- Include [[path:START-END]] and [[Type:Name]] refs as you discover relevant code — the UI highlights them for the user.
+- Prefer 2-6 high-signal references over large dumps.
+- There is NO \`highlight_in_graph\` tool. Ground with citations; the UI handles visualization.
+
+## 📝 CRITICAL RULES
+- **impact output is trusted.** Do NOT re-validate with cypher. Optionally run suggested grep for dynamic patterns.
 - **Cite or retract.** Never state something you can't ground.
-- **Read before concluding.** Don't guess from names alone.
-- **Retry on failure.** If a tool fails, fix the input and try again.
-- **Cyfer tool validation** prefer using cyfer tool in anything that requires graph connections.
-- **OUTPUT STYLE** Prefer using tables and mermaid diagrams instead of long explanations.
-- ALWAYS USE MERMAID FOR VISUALIZATION AND STRUCTURING THE OUTPUT.
+- **Iterative depth.** If Function A calls Function B, read Function B. Trace logic to the source.
+- **Prefer cypher** for anything requiring graph connections.
+
+## ERROR RECOVERY
+If a tool call fails (Cypher syntax, file not found, invalid regex), do NOT stop.
+- Read the error, fix the input, and retry at least once.
+- For Cypher errors, verify typed node labels and \`CodeRelation {type: '...'}\` filters match the GRAPH SCHEMA section above.
+- If search returns nothing, try grep or a different query before concluding.
 
 ## 🎯 OUTPUT STYLE
-Think like a senior architect. Be concise—no fluff, short, precise and to the point.
+Think like a senior architect. Be concise — no fluff.
 - Use tables for comparisons/rankings
-- Use mermaid diagrams for flows/dependencies
+- Use mermaid diagrams for flows, architecture, and dependencies
 - Surface deep insights: patterns, coupling, design decisions
-- End with **TL;DR** (short summary of the response, summing up the response and the most critical parts)
+- End with **TL;DR**
 
 ## MERMAID RULES
 When generating diagrams:
@@ -119,20 +163,22 @@ When generating diagrams:
 - Wrap labels with spaces in quotes: A["My Label"]
 - Use simple IDs: A, B, C or auth, db, api
 - Flowchart: graph TD or graph LR (not flowchart)
+- Keep diagrams focused — 5-10 nodes max
 - Always test mentally: would this parse?
 
 BAD:  A[User's Data] --> B(Process & Save)
 GOOD: A["User Data"] --> B["Process and Save"]
 `;
+
 export const createChatModel = (config: ProviderConfig): BaseChatModel => {
   switch (config.provider) {
     case 'openai': {
       const openaiConfig = config as OpenAIConfig;
-      
+
       if (!openaiConfig.apiKey || openaiConfig.apiKey.trim() === '') {
         throw new Error('OpenAI API key is required but was not provided');
       }
-      
+
       return new ChatOpenAI({
         apiKey: openaiConfig.apiKey,
         modelName: openaiConfig.model,
@@ -145,7 +191,7 @@ export const createChatModel = (config: ProviderConfig): BaseChatModel => {
         streaming: true,
       });
     }
-    
+
     case 'azure-openai': {
       const azureConfig = config as AzureOpenAIConfig;
       return new AzureChatOpenAI({
@@ -157,7 +203,7 @@ export const createChatModel = (config: ProviderConfig): BaseChatModel => {
         streaming: true,
       });
     }
-    
+
     case 'gemini': {
       const geminiConfig = config as GeminiConfig;
       return new ChatGoogleGenerativeAI({
@@ -168,7 +214,7 @@ export const createChatModel = (config: ProviderConfig): BaseChatModel => {
         streaming: true,
       });
     }
-    
+
     case 'anthropic': {
       const anthropicConfig = config as AnthropicConfig;
       return new ChatAnthropic({
@@ -179,11 +225,11 @@ export const createChatModel = (config: ProviderConfig): BaseChatModel => {
         streaming: true,
       });
     }
-    
+
     case 'ollama': {
       const ollamaConfig = config as OllamaConfig;
       return new ChatOllama({
-        baseUrl: ollamaConfig.baseUrl ?? 'http://localhost:11434',
+        baseUrl: ollamaConfig.baseUrl ?? DEFAULT_OLLAMA_BASE_URL,
         model: ollamaConfig.model,
         temperature: ollamaConfig.temperature ?? 0.1,
         streaming: true,
@@ -194,24 +240,23 @@ export const createChatModel = (config: ProviderConfig): BaseChatModel => {
         numCtx: 32768,
       });
     }
-    
+
     case 'openrouter': {
       const openRouterConfig = config as OpenRouterConfig;
-      
+
       // Debug logging
       if (import.meta.env.DEV) {
         console.log('🌐 OpenRouter config:', {
           hasApiKey: !!openRouterConfig.apiKey,
-          apiKeyLength: openRouterConfig.apiKey?.length || 0,
           model: openRouterConfig.model,
           baseUrl: openRouterConfig.baseUrl,
         });
       }
-      
+
       if (!openRouterConfig.apiKey || openRouterConfig.apiKey.trim() === '') {
         throw new Error('OpenRouter API key is required but was not provided');
       }
-      
+
       return new ChatOpenAI({
         openAIApiKey: openRouterConfig.apiKey,
         apiKey: openRouterConfig.apiKey, // Fallback for some versions
@@ -220,12 +265,85 @@ export const createChatModel = (config: ProviderConfig): BaseChatModel => {
         maxTokens: openRouterConfig.maxTokens,
         configuration: {
           apiKey: openRouterConfig.apiKey, // Ensure client receives it
-          baseURL: openRouterConfig.baseUrl ?? 'https://openrouter.ai/api/v1',
+          baseURL: openRouterConfig.baseUrl ?? DEFAULT_OPENROUTER_BASE_URL,
         },
         streaming: true,
       });
     }
-    
+
+    case 'minimax': {
+      const minimaxConfig = config as MiniMaxConfig;
+
+      if (!minimaxConfig.apiKey || minimaxConfig.apiKey.trim() === '') {
+        throw new Error('MiniMax API key is required but was not provided');
+      }
+
+      const capabilities = getMiniMaxModelCapabilities(minimaxConfig.model);
+      const requestedThinkingMode = minimaxConfig.thinkingMode;
+      const thinkingMode: MiniMaxThinkingMode | undefined =
+        requestedThinkingMode && capabilities?.thinkingModes.includes(requestedThinkingMode)
+          ? requestedThinkingMode
+          : (capabilities?.thinkingModes[0] ?? requestedThinkingMode);
+      const thinking =
+        thinkingMode && thinkingMode !== 'always_on' ? { type: thinkingMode } : undefined;
+      const temperature =
+        thinkingMode === 'adaptive' || thinkingMode === 'always_on'
+          ? undefined
+          : (minimaxConfig.temperature ?? 0.1);
+
+      return new ChatAnthropic({
+        anthropicApiKey: minimaxConfig.apiKey,
+        model: minimaxConfig.model,
+        ...(temperature !== undefined ? { temperature } : {}),
+        maxTokens: minimaxConfig.maxTokens ?? 8192,
+        streaming: true,
+        ...(thinking ? { thinking } : {}),
+        clientOptions: {
+          baseURL: minimaxConfig.baseUrl ?? MINIMAX_ANTHROPIC_BASE_URLS.global_en,
+        },
+      });
+    }
+
+    case 'glm': {
+      const glmConfig = config as GLMConfig;
+
+      if (!glmConfig.apiKey || glmConfig.apiKey.trim() === '') {
+        throw new Error('GLM API key is required but was not provided');
+      }
+
+      return new ChatOpenAI({
+        apiKey: glmConfig.apiKey,
+        modelName: glmConfig.model,
+        temperature: glmConfig.temperature ?? 0.1,
+        maxTokens: glmConfig.maxTokens,
+        configuration: {
+          apiKey: glmConfig.apiKey,
+          baseURL: glmConfig.baseUrl ?? 'https://api.z.ai/api/coding/paas/v4',
+        },
+        streaming: true,
+      });
+    }
+
+    case 'deepseek': {
+      const deepseekConfig = config as DeepSeekConfig;
+
+      if (!deepseekConfig.apiKey || deepseekConfig.apiKey.trim() === '') {
+        throw new Error('DeepSeek API key is required but was not provided');
+      }
+
+      return new DeepSeekChatOpenAI({
+        apiKey: deepseekConfig.apiKey,
+        modelName: deepseekConfig.model,
+        temperature: deepseekConfig.temperature ?? 0.1,
+        maxTokens: deepseekConfig.maxTokens,
+        configuration: {
+          apiKey: deepseekConfig.apiKey,
+          baseURL: 'https://api.deepseek.com',
+        },
+        streaming: true,
+      });
+    }
+
     default:
       throw new Error(`Unsupported provider: ${(config as any).provider}`);
   }
@@ -239,8 +357,10 @@ const extractInstanceName = (endpoint: string): string => {
   try {
     const url = new URL(endpoint);
     const hostname = url.hostname;
-    // Extract the first part before .openai.azure.com
-    const match = hostname.match(/^([^.]+)\.openai\.azure\.com/);
+    // Extract the first part before .openai.azure.com. The trailing `$`
+    // anchor is required (CodeQL js/regex/missing-regexp-anchor): without
+    // it `evil.openai.azure.com.attacker.tld` would match.
+    const match = hostname.match(/^([^.]+)\.openai\.azure\.com$/);
     if (match) {
       return match[1];
     }
@@ -256,98 +376,158 @@ const extractInstanceName = (endpoint: string): string => {
  */
 export const createGraphRAGAgent = (
   config: ProviderConfig,
-  executeQuery: (cypher: string) => Promise<any[]>,
-  semanticSearch: (query: string, k?: number, maxDistance?: number) => Promise<any[]>,
-  semanticSearchWithContext: (query: string, k?: number, hops?: number) => Promise<any[]>,
-  hybridSearch: (query: string, k?: number) => Promise<any[]>,
-  isEmbeddingReady: () => boolean,
-  isBM25Ready: () => boolean,
-  fileContents: Map<string, string>,
-  codebaseContext?: CodebaseContext
+  backend: GraphRAGBackend,
+  codebaseContext?: CodebaseContext,
+  chatOnly = false,
 ) => {
   const model = createChatModel(config);
-  const tools = createGraphRAGTools(
-    executeQuery,
-    semanticSearch,
-    semanticSearchWithContext,
-    hybridSearch,
-    isEmbeddingReady,
-    isBM25Ready,
-    fileContents
-  );
-  
-  // Use dynamic prompt if context is provided, otherwise use base prompt
-  const systemPrompt = codebaseContext 
-    ? buildDynamicSystemPrompt(BASE_SYSTEM_PROMPT, codebaseContext)
-    : BASE_SYSTEM_PROMPT;
-  
+  const tools = createGraphRAGTools(backend);
+
+  // Use dynamic prompt if context is provided, otherwise use base prompt. The
+  // chat-only note (graph not loaded, #2178) must apply in BOTH branches — when
+  // codebaseContext is absent, buildDynamicSystemPrompt is never called, so
+  // append the note here too.
+  const systemPrompt = codebaseContext
+    ? buildDynamicSystemPrompt(BASE_SYSTEM_PROMPT, codebaseContext, chatOnly)
+    : chatOnly
+      ? `${BASE_SYSTEM_PROMPT}${CHAT_ONLY_PROMPT_NOTE}`
+      : BASE_SYSTEM_PROMPT;
+
   // Log the full prompt for debugging
   if (import.meta.env.DEV) {
     console.log('🤖 AGENT SYSTEM PROMPT:\n', systemPrompt);
   }
-  
+
   const agent = createReactAgent({
     llm: model as any,
     tools: tools as any,
     messageModifier: new SystemMessage(systemPrompt) as any,
   });
-  
+
   return agent;
 };
 
 /**
  * Message type for agent conversation
  */
-export interface AgentMessage {
-  role: 'user' | 'assistant';
-  content: string;
+export type AgentMessage = { role: 'user'; content: AgentUserContent } | AgentHistoryMessage;
+
+export interface AgentRuntimeOptions {
+  /** Capture assistant/tool messages for providers that require exact transcript replay. */
+  captureHistory?: boolean;
+  /** When aborted (e.g. user clicked Stop), the stream ends with a `cancelled` chunk. */
+  signal?: AbortSignal;
 }
+
+const isAbortError = (error: unknown, signal?: AbortSignal): boolean => {
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (error instanceof Error && error.name === 'AbortError') return true;
+  if (signal?.aborted) return true;
+  return false;
+};
+
+export const buildLangChainMessages = (messages: AgentMessage[]): BaseMessage[] =>
+  messages.map((message) => {
+    if (message.role === 'user') {
+      return typeof message.content === 'string'
+        ? new HumanMessage(message.content)
+        : new HumanMessage({ content: message.content as any });
+    }
+    if (message.role === 'tool') {
+      return new ToolMessage({
+        content: message.content,
+        tool_call_id: message.toolCallId,
+        ...(message.name ? { name: message.name } : {}),
+      });
+    }
+    return new AIMessage({
+      content: message.content,
+      ...(typeof message.reasoningContent === 'string'
+        ? { additional_kwargs: { reasoning_content: message.reasoningContent } }
+        : {}),
+      ...(message.toolCalls?.length ? { tool_calls: message.toolCalls } : {}),
+    } as any);
+  });
+
+export const serializeAgentHistoryMessages = (
+  messages: unknown[],
+  startIndex = 0,
+): AgentHistoryMessage[] => {
+  const serialized: AgentHistoryMessage[] = [];
+  for (const rawMessage of messages.slice(startIndex)) {
+    const msg: any = rawMessage;
+    const msgType = msg?._getType?.() || msg?.type || msg?.constructor?.name || 'unknown';
+    if (msgType === 'ai' || msgType === 'AIMessage') {
+      const reasoningContent = (msg.additional_kwargs || msg.kwargs)?.reasoning_content;
+      const toolCalls = normalizeToolCalls(msg.tool_calls);
+      serialized.push({
+        role: 'assistant',
+        content: normalizeMessageContent(msg.content),
+        ...(toolCalls?.length && typeof reasoningContent === 'string' ? { reasoningContent } : {}),
+        ...(toolCalls?.length ? { toolCalls } : {}),
+      });
+      continue;
+    }
+    if (msgType === 'tool' || msgType === 'ToolMessage') {
+      serialized.push({
+        role: 'tool',
+        content: normalizeMessageContent(msg.content),
+        toolCallId: String(msg.tool_call_id ?? ''),
+        ...(typeof msg.name === 'string' ? { name: msg.name } : {}),
+      });
+    }
+  }
+  return serialized;
+};
 
 /**
  * Stream a response from the agent
  * Uses BOTH streamModes for best of both worlds:
  * - 'values' for state transitions (tool calls, results) in proper order
  * - 'messages' for token-by-token text streaming
- * 
+ *
  * This preserves the natural progression: reasoning → tool → reasoning → tool → answer
  */
 export async function* streamAgentResponse(
   agent: ReturnType<typeof createReactAgent>,
-  messages: AgentMessage[]
+  messages: AgentMessage[],
+  options: AgentRuntimeOptions = {},
 ): AsyncGenerator<AgentStreamChunk> {
   try {
-    const formattedMessages = messages.map(m => ({
-      role: m.role,
-      content: m.content,
-    }));
-    
+    const formattedMessages = buildLangChainMessages(messages);
+
     // Use BOTH modes: 'values' for structure, 'messages' for token streaming
-    const stream = await agent.stream(
-      { messages: formattedMessages },
-      {
-        streamMode: ['values', 'messages'] as any,
-        // Allow longer tool/reasoning loops (more Cursor-like persistence)
-        recursionLimit: 50,
-      } as any
-    );
-    
+    const stream = await agent.stream({ messages: formattedMessages }, {
+      streamMode: ['values', 'messages'] as any,
+      // Allow longer tool/reasoning loops (more Cursor-like persistence)
+      recursionLimit: 50,
+      signal: options.signal,
+    } as any);
+
     // Track what we've yielded to avoid duplicates
     const yieldedToolCalls = new Set<string>();
     const yieldedToolResults = new Set<string>();
     let lastProcessedMsgCount = formattedMessages.length;
-    // Track if all tools are done (for distinguishing reasoning vs final content)
-    let allToolsDone = true;
+    // Track pending tool calls (for distinguishing reasoning vs final content)
+    let pendingToolCalls = 0;
     // Track if we've seen any tool calls in this response turn.
     // Anything before the first tool call should be treated as "reasoning/narration"
     // so the UI can show the Cursor-like loop: plan → tool → update → tool → answer.
     let hasSeenToolCallThisTurn = false;
-    
+    // Track the last set of messages so we can persist the raw assistant/tool
+    // transcript for the next user turn.
+    let lastStepMessages: any[] | null = null;
+
     for await (const event of stream) {
+      if (options.signal?.aborted) {
+        break;
+      }
+
       // Events come as [streamMode, data] tuples when using multiple modes
       // or just data when using single mode
       let mode: string;
       let data: any;
-      
+
       if (Array.isArray(event) && event.length === 2 && typeof event[0] === 'string') {
         [mode, data] = event;
       } else if (Array.isArray(event) && event[0]?._getType) {
@@ -359,10 +539,10 @@ export async function* streamAgentResponse(
         mode = 'values';
         data = event;
       }
-      
+
       // DEBUG: Enhanced logging
       if (import.meta.env.DEV) {
-        const msgType = mode === 'messages' && data?.[0]?._getType?.() || 'n/a';
+        const msgType = (mode === 'messages' && data?.[0]?._getType?.()) || 'n/a';
         const hasContent = mode === 'messages' && data?.[0]?.content;
         const hasToolCalls = mode === 'messages' && data?.[0]?.tool_calls?.length > 0;
         console.log(`🔄 [${mode}] type:${msgType} content:${!!hasContent} tools:${hasToolCalls}`);
@@ -371,26 +551,35 @@ export async function* streamAgentResponse(
       if (mode === 'messages') {
         const [msg] = Array.isArray(data) ? data : [data];
         if (!msg) continue;
-        
+
         const msgType = msg._getType?.() || msg.type || msg.constructor?.name || 'unknown';
-        
+
         // AIMessageChunk - streaming text tokens
         if (msgType === 'ai' || msgType === 'AIMessage' || msgType === 'AIMessageChunk') {
           const rawContent = msg.content;
           const toolCalls = msg.tool_calls || [];
-          
+
           // Handle content that can be string or array of content blocks
           let content: string = '';
+          let thinkingContent: string = '';
           if (typeof rawContent === 'string') {
             content = rawContent;
           } else if (Array.isArray(rawContent)) {
             // Content blocks format: [{type: 'text', text: '...'}, ...]
             content = rawContent
               .filter((block: any) => block.type === 'text' || typeof block === 'string')
-              .map((block: any) => typeof block === 'string' ? block : block.text || '')
+              .map((block: any) => (typeof block === 'string' ? block : block.text || ''))
+              .join('');
+            thinkingContent = rawContent
+              .filter((block: any) => block?.type === 'thinking')
+              .map((block: any) => block.thinking || '')
               .join('');
           }
-          
+
+          if (thinkingContent) {
+            yield { type: 'reasoning', reasoning: thinkingContent };
+          }
+
           // If chunk has content, stream it
           if (content && content.length > 0) {
             // Determine if this is reasoning/narration vs final answer content.
@@ -398,29 +587,34 @@ export async function* streamAgentResponse(
             // - Between tool calls/results: treat as reasoning
             // - After all tools are done: treat as final content
             const isReasoning =
-              !hasSeenToolCallThisTurn ||
-              toolCalls.length > 0 ||
-              !allToolsDone;
-            yield {
-              type: isReasoning ? 'reasoning' : 'content',
-              [isReasoning ? 'reasoning' : 'content']: content,
-            };
+              !hasSeenToolCallThisTurn || toolCalls.length > 0 || pendingToolCalls > 0;
+            if (isReasoning) {
+              yield { type: 'reasoning', reasoning: content };
+            } else {
+              yield { type: 'content', content };
+            }
           }
-          
+
           // Track tool calls from message chunks
           if (toolCalls.length > 0) {
             hasSeenToolCallThisTurn = true;
-            allToolsDone = false;
+            pendingToolCalls += toolCalls.length;
             for (const tc of toolCalls) {
               const toolId = tc.id || `tool-${Date.now()}-${Math.random().toString(36).slice(2)}`;
               if (!yieldedToolCalls.has(toolId)) {
                 yieldedToolCalls.add(toolId);
+                let parsedArgs: Record<string, any>;
+                try {
+                  parsedArgs = tc.function?.arguments ? JSON.parse(tc.function.arguments) : {};
+                } catch {
+                  parsedArgs = {};
+                }
                 yield {
                   type: 'tool_call',
                   toolCall: {
                     id: toolId,
                     name: tc.name || tc.function?.name || 'unknown',
-                    args: tc.args || (tc.function?.arguments ? JSON.parse(tc.function.arguments) : {}),
+                    args: tc.args || parsedArgs,
                     status: 'running',
                   },
                 };
@@ -428,13 +622,14 @@ export async function* streamAgentResponse(
             }
           }
         }
-        
+
         // ToolMessage in messages mode
         if (msgType === 'tool' || msgType === 'ToolMessage') {
           const toolCallId = msg.tool_call_id || '';
           if (toolCallId && !yieldedToolResults.has(toolCallId)) {
             yieldedToolResults.add(toolCallId);
-            const result = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+            const result =
+              typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
             yield {
               type: 'tool_result',
               toolCall: {
@@ -445,28 +640,31 @@ export async function* streamAgentResponse(
                 status: 'completed',
               },
             };
-            // After tool result, next AI content could be reasoning or final
-            allToolsDone = true;
+            // After tool result, decrement pending count
+            pendingToolCalls = Math.max(0, pendingToolCalls - 1);
           }
         }
       }
-      
+
       // Handle 'values' mode - state snapshots for structure
       if (mode === 'values' && data?.messages) {
         const stepMessages = data.messages || [];
-        
+        if (options.captureHistory) {
+          lastStepMessages = stepMessages;
+        }
+
         // Process new messages for tool calls/results we might have missed
         for (let i = lastProcessedMsgCount; i < stepMessages.length; i++) {
           const msg = stepMessages[i];
           const msgType = msg._getType?.() || msg.type || 'unknown';
-          
+
           // Catch tool calls from values mode (backup)
           if ((msgType === 'ai' || msgType === 'AIMessage') && !yieldedToolCalls.size) {
             const toolCalls = msg.tool_calls || [];
             for (const tc of toolCalls) {
               const toolId = tc.id || `tool-${Date.now()}`;
               if (!yieldedToolCalls.has(toolId)) {
-                allToolsDone = false;
+                pendingToolCalls++;
                 yieldedToolCalls.add(toolId);
                 yield {
                   type: 'tool_call',
@@ -480,13 +678,14 @@ export async function* streamAgentResponse(
               }
             }
           }
-          
+
           // Catch tool results from values mode (backup)
           if (msgType === 'tool' || msgType === 'ToolMessage') {
             const toolCallId = msg.tool_call_id || '';
             if (toolCallId && !yieldedToolResults.has(toolCallId)) {
               yieldedToolResults.add(toolCallId);
-              const result = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+              const result =
+                typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
               yield {
                 type: 'tool_result',
                 toolCall: {
@@ -497,28 +696,44 @@ export async function* streamAgentResponse(
                   status: 'completed',
                 },
               };
-              allToolsDone = true;
+              pendingToolCalls = Math.max(0, pendingToolCalls - 1);
             }
           }
         }
-        
+
         lastProcessedMsgCount = stepMessages.length;
       }
     }
-    
+
+    if (options.signal?.aborted) {
+      yield { type: 'cancelled' };
+      return;
+    }
+
     // DEBUG: Stream completed normally
     if (import.meta.env.DEV) {
       console.log('✅ Stream completed normally, yielding done');
     }
-    yield { type: 'done' };
+
+    yield {
+      type: 'done',
+      historyMessages:
+        options.captureHistory && lastStepMessages
+          ? serializeAgentHistoryMessages(lastStepMessages, formattedMessages.length)
+          : undefined,
+    };
   } catch (error) {
+    if (isAbortError(error, options.signal)) {
+      yield { type: 'cancelled' };
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     // DEBUG: Stream error
     if (import.meta.env.DEV) {
       console.error('❌ Stream error:', message, error);
     }
-    yield { 
-      type: 'error', 
+    yield {
+      type: 'error',
       error: message,
     };
   }
@@ -530,17 +745,13 @@ export async function* streamAgentResponse(
  */
 export const invokeAgent = async (
   agent: ReturnType<typeof createReactAgent>,
-  messages: AgentMessage[]
+  messages: AgentMessage[],
 ): Promise<string> => {
-  const formattedMessages = messages.map(m => ({
-    role: m.role,
-    content: m.content,
-  }));
-  
+  const formattedMessages = buildLangChainMessages(messages);
+
   const result = await agent.invoke({ messages: formattedMessages });
-  
+
   // result.messages is the full conversation state
   const lastMessage = result.messages[result.messages.length - 1];
   return lastMessage?.content?.toString() ?? 'No response generated.';
 };
-

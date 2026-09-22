@@ -1,0 +1,29 @@
+name: Setup GitNexus Web
+description: Setup Node.js 22, build gitnexus-shared, install web dependencies
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        # Vite 7 requires Node ^20.19.0 || >=22.12.0 (require(esm) support).
+        node-version: 22
+        cache: npm
+        cache-dependency-path: gitnexus-web/package-lock.json
+
+    - name: Install web dependencies
+      run: npm ci
+      shell: bash
+      working-directory: gitnexus-web
+      env:
+        # Browsers are installed explicitly by e2e. Typecheck only needs types.
+        PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+    # Compile shared with the web package's TypeScript 5. Do not npm-ci
+    # gitnexus-shared (TypeScript 7 optional-platform install, ~7 minutes).
+    - name: Build gitnexus-shared
+      # node + lib/tsc.js — same on Windows/macOS/Linux. Do not use .bin/tsc
+      # (tsc.cmd on Windows; execFileSync cannot launch .cmd without a shell).
+      run: node ../gitnexus-web/node_modules/typescript/lib/tsc.js
+      shell: bash
+      working-directory: gitnexus-shared

@@ -2,27 +2,48 @@
  * Unit Tests: MCP Tool Definitions
  *
  * Tests: GITNEXUS_TOOLS from tools.ts
- * - All tools are defined
+ * - All 17 tools are defined (per-repo + group_list/group_sync)
  * - Each tool has valid name, description, inputSchema
  * - Required fields are correct
  * - Optional repo parameter is present on tools that need it
  */
 import { describe, it, expect } from 'vitest';
-import { GITNEXUS_TOOLS, type ToolDefinition } from '../../src/mcp/tools.js';
+import {
+  GITNEXUS_TOOLS,
+  LIST_REPOS_DEFAULT_LIMIT,
+  LIST_REPOS_MAX_LIMIT,
+} from '../../src/mcp/tools.js';
+import { getResourceTemplates, type ResourceTemplate } from '../../src/mcp/resources.js';
+import { GROUP_IMPACT_TRUNCATION_REASONS } from '../../src/core/group/types.js';
+
+const GROUP_TOOLS = new Set(['group_list', 'group_sync']);
+const MUTATING_TOOLS = new Set(['rename', 'group_sync']);
+// Read-only tools that legitimately reach external systems. Add a tool name
+// here when introducing a read-only tool that needs openWorldHint: true.
+const OPEN_WORLD_READ_ONLY_TOOLS = new Set(['query']);
 
 describe('GITNEXUS_TOOLS', () => {
-  it('exports exactly 13 tools', () => {
-    expect(GITNEXUS_TOOLS).toHaveLength(8);
+  it('exports all tools (8 base + 1 explain + 1 pdg_query + 3 route/tool/shape + 1 api_impact + 1 trace + 2 group)', () => {
+    expect(GITNEXUS_TOOLS).toHaveLength(18);
   });
 
   it('contains all expected tool names', () => {
-    const names = GITNEXUS_TOOLS.map(t => t.name);
+    const names = GITNEXUS_TOOLS.map((t) => t.name);
     expect(names).toEqual(
       expect.arrayContaining([
-        'list_repos', 'query', 'cypher', 'context',
-        'detect_changes', 'rename', 'impact', 'unity_ui_trace',
-
-      ])
+        'list_repos',
+        'query',
+        'cypher',
+        'context',
+        'detect_changes',
+        'check',
+        'rename',
+        'impact',
+        'explain',
+        'pdg_query',
+        'api_impact',
+        'trace',
+      ]),
     );
   });
 
@@ -32,88 +53,482 @@ describe('GITNEXUS_TOOLS', () => {
       expect(typeof tool.name).toBe('string');
       expect(tool.description).toBeTruthy();
       expect(typeof tool.description).toBe('string');
+      expect(tool.annotations).toBeDefined();
       expect(tool.inputSchema).toBeDefined();
       expect(tool.inputSchema.type).toBe('object');
       expect(tool.inputSchema.properties).toBeDefined();
       expect(Array.isArray(tool.inputSchema.required)).toBe(true);
+      expect(tool.inputSchema.additionalProperties).toBe(false);
     }
   });
 
-  it('query tool requires "query" parameter', () => {
-    const queryTool = GITNEXUS_TOOLS.find(t => t.name === 'query')!;
-    expect(queryTool.inputSchema.required).toContain('query');
-    expect(queryTool.inputSchema.properties.query).toBeDefined();
-    expect(queryTool.inputSchema.properties.query.type).toBe('string');
+  it('impact and trace advertise depth as a maxDepth alias (#3261)', () => {
+    for (const name of ['impact', 'trace'] as const) {
+      const tool = GITNEXUS_TOOLS.find((t) => t.name === name)!;
+      expect(tool.inputSchema.properties.depth).toMatchObject({
+        type: 'number',
+        description: expect.stringMatching(/maxDepth/),
+        minimum: 0,
+      });
+      expect(tool.inputSchema.properties.maxDepth).toBeDefined();
+    }
   });
 
-  it('cypher tool requires "query" parameter', () => {
-    const cypherTool = GITNEXUS_TOOLS.find(t => t.name === 'cypher')!;
-    expect(cypherTool.inputSchema.required).toContain('query');
+  it('each tool exposes all MCP safety annotations', () => {
+    for (const tool of GITNEXUS_TOOLS) {
+      expect(typeof tool.annotations.readOnlyHint).toBe('boolean');
+      expect(typeof tool.annotations.destructiveHint).toBe('boolean');
+      expect(typeof tool.annotations.idempotentHint).toBe('boolean');
+      expect(typeof tool.annotations.openWorldHint).toBe('boolean');
+    }
+  });
+
+  it('read-only tools are marked non-destructive and idempotent', () => {
+    for (const tool of GITNEXUS_TOOLS) {
+      if (MUTATING_TOOLS.has(tool.name)) continue;
+
+      expect(tool.annotations.readOnlyHint).toBe(true);
+      expect(tool.annotations.destructiveHint).toBe(false);
+      expect(tool.annotations.idempotentHint).toBe(true);
+      expect(tool.annotations.openWorldHint).toBe(OPEN_WORLD_READ_ONLY_TOOLS.has(tool.name));
+    }
+  });
+
+  it('query is marked open-world because it may use external embeddings', () => {
+    const queryTool = GITNEXUS_TOOLS.find((t) => t.name === 'query')!;
+    expect(queryTool.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    });
+  });
+
+  it('rename and group_sync are marked mutating and non-idempotent', () => {
+    for (const name of ['rename', 'group_sync'] as const) {
+      const tool = GITNEXUS_TOOLS.find((t) => t.name === name)!;
+      expect(tool.annotations).toEqual({
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      });
+    }
+  });
+
+  it('query tool requires "search_query" parameter (renamed from "query" for #2175)', () => {
+    const queryTool = GITNEXUS_TOOLS.find((t) => t.name === 'query')!;
+    expect(queryTool.inputSchema.required).toContain('search_query');
+    // The legacy "query" key must NOT be advertised — Claude Code drops it (#2175).
+    expect(queryTool.inputSchema.required).not.toContain('query');
+    expect(queryTool.inputSchema.properties.query).toBeUndefined();
+    expect(queryTool.inputSchema.properties.search_query).toBeDefined();
+    expect(queryTool.inputSchema.properties.search_query.type).toBe('string');
+  });
+
+  it('cypher tool requires "statement" parameter (renamed from "query" for #2175)', () => {
+    const cypherTool = GITNEXUS_TOOLS.find((t) => t.name === 'cypher')!;
+    expect(cypherTool.inputSchema.required).toContain('statement');
+    expect(cypherTool.inputSchema.required).not.toContain('query');
+    expect(cypherTool.inputSchema.properties.query).toBeUndefined();
+    expect(cypherTool.inputSchema.properties.statement).toBeDefined();
+    expect(cypherTool.inputSchema.properties.statement.type).toBe('string');
+    expect(cypherTool.inputSchema.properties.params).toBeDefined();
+    expect(cypherTool.inputSchema.properties.params.type).toBe('object');
+    expect(cypherTool.inputSchema.properties.params.description).toContain('prepared statement');
   });
 
   it('context tool has no required parameters', () => {
-    const contextTool = GITNEXUS_TOOLS.find(t => t.name === 'context')!;
+    const contextTool = GITNEXUS_TOOLS.find((t) => t.name === 'context')!;
     expect(contextTool.inputSchema.required).toEqual([]);
   });
 
-  it('impact tool requires target and direction', () => {
-    const impactTool = GITNEXUS_TOOLS.find(t => t.name === 'impact')!;
-    expect(impactTool.inputSchema.required).toContain('target');
-    expect(impactTool.inputSchema.required).toContain('direction');
+  it('context tool advertises file as a compatibility alias for file_path', () => {
+    const contextTool = GITNEXUS_TOOLS.find((t) => t.name === 'context')!;
+    expect(contextTool.inputSchema.properties.file_path).toBeDefined();
+    expect(contextTool.inputSchema.properties.file).toMatchObject({ type: 'string' });
   });
 
+  it('trace tool advertises file as a compatibility alias for from_file', () => {
+    const traceTool = GITNEXUS_TOOLS.find((t) => t.name === 'trace')!;
+    expect(traceTool.inputSchema.properties.from_file).toBeDefined();
+    expect(traceTool.inputSchema.properties.file).toMatchObject({ type: 'string' });
+    expect(traceTool.inputSchema.properties.file.description).toContain('from_file');
+  });
+
+  it('api_impact tool avoids top-level schema combinators for Bedrock compatibility (#2487)', () => {
+    const apiImpactTool = GITNEXUS_TOOLS.find((t) => t.name === 'api_impact')!;
+    expect(apiImpactTool.inputSchema).not.toHaveProperty('anyOf');
+    expect(apiImpactTool.inputSchema).not.toHaveProperty('oneOf');
+    expect(apiImpactTool.inputSchema).not.toHaveProperty('allOf');
+    // route/file stay optional in the transport schema; callTool keeps the
+    // runtime guard so providers that reject top-level combinators can load it.
+    expect(apiImpactTool.inputSchema.required).toEqual([]);
+    expect(apiImpactTool.description).toContain('Requires at least "route" or "file"');
+  });
+
+  it('impact tool requires direction and advertises target, name, or symbol without combinators', () => {
+    const impactTool = GITNEXUS_TOOLS.find((t) => t.name === 'impact')!;
+    expect(impactTool.inputSchema.required).toContain('direction');
+    expect(impactTool.inputSchema.required).not.toContain('target');
+    expect(impactTool.inputSchema.properties.name).toMatchObject({ type: 'string' });
+    expect(impactTool.inputSchema.properties.symbol).toMatchObject({ type: 'string' });
+    expect(impactTool.inputSchema).not.toHaveProperty('anyOf');
+    expect(impactTool.inputSchema).not.toHaveProperty('oneOf');
+    expect(impactTool.inputSchema).not.toHaveProperty('allOf');
+  });
+
+  it('impact tool advertises the PDG-only `line` statement anchor (integer, min 0, not required)', () => {
+    const impactTool = GITNEXUS_TOOLS.find((t) => t.name === 'impact')!;
+    const line = (impactTool.inputSchema.properties as Record<string, any>).line;
+    expect(line).toBeDefined();
+    expect(line.type).toBe('integer');
+    // minimum is 0 (not 1) so strict adapters that materialize an omitted
+    // optional numeric field as `0` are not rejected client-side (#2279); a
+    // positive line is enforced backend-side for a real pdg anchor.
+    expect(line.minimum).toBe(0);
+    // Statement-anchored slice is optional — never required.
+    expect(impactTool.inputSchema.required).not.toContain('line');
+    // The description names the mode:'pdg' statement-anchor semantics and the
+    // literal-0 compatibility convention — without contradicting the top-level
+    // "omit line for whole-symbol pdg" contract (#2283).
+    expect(line.description).toMatch(/statement anchor/i);
+    expect(line.description).toMatch(/pdg/i);
+    expect(line.description).toMatch(/literal 0 is tolerated only .* on the callgraph path/i);
+    expect(line.description).toMatch(/omit line for whole-symbol pdg/i);
+    // Must NOT claim pdg "requires a positive line" — that contradicts the valid
+    // no-line whole-symbol pdg call documented in the top-level description.
+    expect(line.description).not.toMatch(/requires a positive line/i);
+    // The top-level description mentions the statement-anchored slice and result shape.
+    expect(impactTool.description).toMatch(/statement-anchored|STATEMENT-ANCHORED/);
+    expect(impactTool.description).toContain('affectedStatements');
+    expect(impactTool.description).toContain('target metadata');
+    expect(impactTool.description).toContain('truncatedBy');
+  });
+
+  it('documents riskSharedAxes as a compare aid, not the edit gate', () => {
+    const impactTool = GITNEXUS_TOOLS.find((t) => t.name === 'impact')!;
+    expect(impactTool.description).toContain('riskSharedAxes');
+    expect(impactTool.description).toContain('Never substitute it for `risk`');
+    expect(impactTool.description).toContain('IMPACT_MAX_CHUNKS=0');
+    expect(impactTool.description).toContain('sampled a subset of impacted symbols');
+    expect(impactTool.description).toContain('Graph-RAG');
+    expect(impactTool.description).toContain('cross-repo crossing overlay');
+    expect(impactTool.description).toContain('known HIGH/CRITICAL warnings survive');
+  });
+
+  it.each(['query', 'context', 'impact'])(
+    '%s advertises an optional positive maxTokens budget',
+    (name) => {
+      const tool = GITNEXUS_TOOLS.find((definition) => definition.name === name)!;
+      const maxTokens = tool.inputSchema.properties.maxTokens;
+      expect(maxTokens).toMatchObject({ type: 'integer', minimum: 1 });
+      expect(tool.inputSchema.required).not.toContain('maxTokens');
+    },
+  );
+
   it('rename tool requires new_name', () => {
-    const renameTool = GITNEXUS_TOOLS.find(t => t.name === 'rename')!;
+    const renameTool = GITNEXUS_TOOLS.find((t) => t.name === 'rename')!;
     expect(renameTool.inputSchema.required).toContain('new_name');
   });
 
+  it('trace tool advertises cross-repo @group support plus pdg/crossDepth flags (U3)', () => {
+    const traceTool = GITNEXUS_TOOLS.find((t) => t.name === 'trace')!;
+    const props = traceTool.inputSchema.properties as Record<
+      string,
+      { type?: string; default?: unknown; minimum?: number; description?: string }
+    >;
+    // Experimental cross-repo flags are advertised and optional.
+    expect(props.pdg).toBeDefined();
+    expect(props.pdg.type).toBe('boolean');
+    expect(props.crossDepth).toBeDefined();
+    expect(props.crossDepth.type).toBe('number');
+    expect(traceTool.inputSchema.required).toEqual([]);
+    // The repo param and top-level description both name the @group entry point.
+    expect(props.repo.description).toMatch(/@groupName/);
+    expect(traceTool.description).toMatch(/CROSS-REPO/i);
+    expect(traceTool.description).toContain('ContractLink');
+    expect(traceTool.description).toContain('crossings');
+  });
+
   it('detect_changes tool has no required parameters', () => {
-    const detectTool = GITNEXUS_TOOLS.find(t => t.name === 'detect_changes')!;
+    const detectTool = GITNEXUS_TOOLS.find((t) => t.name === 'detect_changes')!;
     expect(detectTool.inputSchema.required).toEqual([]);
   });
 
-  it('list_repos tool has no parameters', () => {
-    const listTool = GITNEXUS_TOOLS.find(t => t.name === 'list_repos')!;
-    expect(Object.keys(listTool.inputSchema.properties)).toHaveLength(0);
+  it('list_repos tool exposes optional limit/offset pagination params', () => {
+    const listTool = GITNEXUS_TOOLS.find((t) => t.name === 'list_repos')!;
+    const props = listTool.inputSchema.properties;
+    expect(props.limit).toBeDefined();
+    expect(props.limit.type).toBe('integer');
+    expect(props.offset).toBeDefined();
+    expect(props.offset.type).toBe('integer');
+    // Pagination is opt-in: zero-arg callers must still be valid.
     expect(listTool.inputSchema.required).toEqual([]);
+    // No `repo` param on list_repos (it lists all repos).
+    expect(props.repo).toBeUndefined();
+    // Description must teach an LLM to page through every repository.
+    expect(listTool.description.toLowerCase()).toContain('paginat');
+    expect(listTool.description).toContain('nextOffset');
+    expect(listTool.description).toContain('hasMore');
   });
 
-  it('all tools except list_repos have optional repo parameter', () => {
+  it('list_repos schema bounds match the exported pagination constants', () => {
+    const listTool = GITNEXUS_TOOLS.find((t) => t.name === 'list_repos')!;
+    const { limit, offset } = listTool.inputSchema.properties;
+    expect(limit.minimum).toBe(1);
+    expect(limit.maximum).toBe(LIST_REPOS_MAX_LIMIT);
+    expect(limit.default).toBe(LIST_REPOS_DEFAULT_LIMIT);
+    expect(offset.minimum).toBe(0);
+    expect(offset.default).toBe(0);
+    // Sane, documented bounds (guards against accidental constant drift).
+    expect(LIST_REPOS_DEFAULT_LIMIT).toBeLessThanOrEqual(LIST_REPOS_MAX_LIMIT);
+    expect(LIST_REPOS_DEFAULT_LIMIT).toBeGreaterThan(0);
+  });
+
+  it('per-repo tools have optional repo parameter for backend selection', () => {
     for (const tool of GITNEXUS_TOOLS) {
       if (tool.name === 'list_repos') continue;
+      if (GROUP_TOOLS.has(tool.name)) continue;
       expect(tool.inputSchema.properties.repo).toBeDefined();
       expect(tool.inputSchema.properties.repo.type).toBe('string');
-      // repo should never be required
       expect(tool.inputSchema.required).not.toContain('repo');
     }
   });
 
+  it('repo descriptions explain the cwd default and mutating exception (#3073)', () => {
+    expect(GITNEXUS_TOOLS.find((tool) => tool.name === 'list_repos')?.description).toMatch(
+      /process cwd/i,
+    );
+    expect(GITNEXUS_TOOLS.find((tool) => tool.name === 'list_repos')?.description).toMatch(
+      /unindexed nested Git checkout/i,
+    );
+    for (const tool of GITNEXUS_TOOLS) {
+      if (tool.name === 'list_repos' || GROUP_TOOLS.has(tool.name)) continue;
+      const description = tool.inputSchema.properties.repo.description;
+      if (tool.name === 'rename') {
+        expect(description).toMatch(/mutating tools require an explicit repo/i);
+      } else {
+        expect(description).toMatch(/process cwd/i);
+        expect(description).toMatch(/unindexed nested Git checkout/i);
+      }
+    }
+  });
+
+  it('per-repo tools have an optional branch scope param (#2106); group/list tools do not', () => {
+    for (const tool of GITNEXUS_TOOLS) {
+      if (tool.name === 'list_repos' || GROUP_TOOLS.has(tool.name)) {
+        expect(tool.inputSchema.properties.branch).toBeUndefined();
+        continue;
+      }
+      expect(tool.inputSchema.properties.branch, tool.name).toBeDefined();
+      expect(tool.inputSchema.properties.branch.type).toBe('string');
+      // Optional — omitting it keeps the default/primary-branch behavior.
+      expect(tool.inputSchema.required).not.toContain('branch');
+    }
+  });
+
+  it('group tools without backend repo param omit repo property', () => {
+    for (const name of ['group_list', 'group_sync'] as const) {
+      const tool = GITNEXUS_TOOLS.find((t) => t.name === name)!;
+      expect(tool.inputSchema.properties).not.toHaveProperty('repo');
+    }
+  });
+
+  // U27: `RegistryWriteOutcome` has four members, three of which a group_sync
+  // MCP call can actually return (`not-attempted` needs `skipWrite`/no
+  // `groupDir`, neither reachable through this tool). An agent that only knows
+  // 'written' and 'preserved' reads the third — nothing readable AND no prior
+  // registry — as "your previous contracts survived", which is a claim about a
+  // file that does not exist (R4).
+  it('group_sync description names every registry outcome reachable through the tool', () => {
+    const syncTool = GITNEXUS_TOOLS.find((t) => t.name === 'group_sync')!;
+    const d = syncTool.description;
+    expect(d).toContain('registryOutcome');
+    expect(d).toContain("'written'");
+    expect(d).toContain("'preserved'");
+    expect(d).toContain("'superseded'");
+    expect(d).toContain("'no-prior-registry'");
+    // Naming the value is not describing it: the outcome an agent has to act on
+    // differently is "there is no contracts.json on disk at all".
+    expect(d).toMatch(/no previous contracts\.json|no contracts\.json (exists|was written)/i);
+    // `not-attempted` is unreachable through this tool; documenting it would
+    // advertise an outcome no caller can observe.
+    expect(d).not.toContain('not-attempted');
+    expect(d).toContain('READ THE RESULT:');
+    expect(d).toContain('degradedLinks');
+    expect(d).toContain('failedRepos');
+    expect(d).toContain('warnings');
+    // 'preserved' rewrites contracts.json (keeping the previous contracts and
+    // cross-links, refreshing the diagnostic lists). ITS clause may not say the
+    // file was left alone — that sent an operator reading an unchanged mtime to
+    // conclude the sync never ran. Scoped to that clause rather than the whole
+    // description, because 'superseded' genuinely does leave the file untouched
+    // and describing it accurately must not trip this.
+    const preservedClause = d.slice(d.indexOf("'preserved'"), d.indexOf("'superseded'"));
+    expect(preservedClause).not.toMatch(/did NOT write|untouched|left alone|unwritten/i);
+    // ...and the superseded clause must say exactly that, or the two collapse
+    // back into one word for two different things on disk.
+    const supersededClause = d.slice(d.indexOf("'superseded'"), d.indexOf("'no-prior-registry'"));
+    expect(supersededClause).toMatch(/untouched|not recorded/i);
+  });
+
+  it('impact, query, and context expose optional service with minLength', () => {
+    for (const n of ['impact', 'query', 'context'] as const) {
+      const tool = GITNEXUS_TOOLS.find((t) => t.name === n)!;
+      const svc = tool.inputSchema.properties.service;
+      expect(svc, n).toBeDefined();
+      expect(svc!.minLength).toBe(1);
+    }
+  });
+
+  it('impact schema bounds match cross-impact validation ranges', () => {
+    const impact = GITNEXUS_TOOLS.find((t) => t.name === 'impact')!;
+    expect(impact.inputSchema.properties.maxDepth.minimum).toBe(1);
+    expect(impact.inputSchema.properties.maxDepth.maximum).toBe(32);
+    expect(impact.inputSchema.properties.minConfidence.minimum).toBe(0);
+    expect(impact.inputSchema.properties.minConfidence.maximum).toBe(1);
+    expect(impact.inputSchema.properties.timeoutMs.maximum).toBe(3600000);
+  });
+
   it('detect_changes scope has correct enum values', () => {
-    const detectTool = GITNEXUS_TOOLS.find(t => t.name === 'detect_changes')!;
+    const detectTool = GITNEXUS_TOOLS.find((t) => t.name === 'detect_changes')!;
     const scopeProp = detectTool.inputSchema.properties.scope;
     expect(scopeProp.enum).toEqual(['unstaged', 'staged', 'all', 'compare']);
   });
 
+  // ─── explain (#2083 M3 U6) ─────────────────────────────────────────
+
+  it('explain tool is anchorless-optional with a bounded limit and a branch scope', () => {
+    const explainTool = GITNEXUS_TOOLS.find((t) => t.name === 'explain')!;
+    expect(explainTool).toBeDefined();
+    // Anchorless calls (enumerate all findings) must be valid.
+    expect(explainTool.inputSchema.required).toEqual([]);
+    expect(explainTool.inputSchema.properties.target).toBeDefined();
+    expect(explainTool.inputSchema.properties.target.type).toBe('string');
+    const limit = explainTool.inputSchema.properties.limit;
+    expect(limit).toBeDefined();
+    expect(limit.type).toBe('integer');
+    expect(limit.minimum).toBe(1);
+    expect(limit.maximum).toBeGreaterThan(0);
+    // Branch-scoped per #2106 (injected via BRANCH_SCOPED_TOOLS).
+    expect(explainTool.inputSchema.properties.branch).toBeDefined();
+  });
+
+  it('explain description names the --pdg requirement and the KTD10 contract caveats', () => {
+    const explainTool = GITNEXUS_TOOLS.find((t) => t.name === 'explain')!;
+    const d = explainTool.description;
+    expect(d).toContain('--pdg');
+    expect(d).toContain('intra-procedural');
+    // The named blind-spot classes (plan KTD10) must reach the consumer.
+    expect(d.toLowerCase()).toContain('closure/callback');
+    expect(d.toLowerCase()).toContain('property/field');
+    expect(d.toLowerCase()).toContain('guard-style');
+    expect(d.toLowerCase()).toContain('cross-function');
+    expect(d.toLowerCase()).toContain('commonjs');
+    expect(d.toLowerCase()).toContain('exception');
+  });
+
+  it('api_impact tool has no required parameters', () => {
+    const apiImpactTool = GITNEXUS_TOOLS.find((t) => t.name === 'api_impact')!;
+    expect(apiImpactTool).toBeDefined();
+    expect(apiImpactTool.inputSchema.required).toEqual([]);
+    expect(apiImpactTool.inputSchema.properties.route).toBeDefined();
+    expect(apiImpactTool.inputSchema.properties.file).toBeDefined();
+    expect(apiImpactTool.inputSchema.properties.repo).toBeDefined();
+  });
+
   it('impact relationTypes is array of strings', () => {
-    const impactTool = GITNEXUS_TOOLS.find(t => t.name === 'impact')!;
+    const impactTool = GITNEXUS_TOOLS.find((t) => t.name === 'impact')!;
     const relProp = impactTool.inputSchema.properties.relationTypes;
     expect(relProp.type).toBe('array');
     expect(relProp.items).toEqual({ type: 'string' });
   });
 
-  it('unity_ui_trace requires target and goal', () => {
-    const traceTool = GITNEXUS_TOOLS.find(t => t.name === 'unity_ui_trace')!;
-    expect(traceTool.inputSchema.required).toContain('target');
-    expect(traceTool.inputSchema.required).toContain('goal');
+  it('impact advertises a mode param (callgraph default; pdg opt-in) — not a new tool (KTD1)', () => {
+    // KTD1: pdg impact ships as a PARAM on the existing tool, so the tool count
+    // must NOT change (asserted at 17 above) and `impact` must expose `mode`.
+    const impactTool = GITNEXUS_TOOLS.find((t) => t.name === 'impact')!;
+    const modeProp = impactTool.inputSchema.properties.mode;
+    expect(modeProp).toBeDefined();
+    expect(modeProp.type).toBe('string');
+    expect(modeProp.enum).toEqual(['callgraph', 'pdg']);
+    expect(modeProp.default).toBe('callgraph');
+    // The description must teach the opt-in / intra-procedural / --pdg contract.
+    expect(modeProp.description).toContain('pdg');
+    expect(modeProp.description).toContain('--pdg');
+    expect(modeProp.description.toLowerCase()).toContain('intra-procedural');
+    expect(modeProp.description).toContain('affectedStatements');
+    expect(modeProp.description).toContain('UNKNOWN-risk');
+    // The tool-level description must mention the mode so an LLM discovers it.
+    expect(impactTool.description.toLowerCase()).toContain('mode');
+    expect(impactTool.description).toContain('pdg');
   });
 
+  it('route_map description defers to api_impact for pre-change analysis', () => {
+    const routeMapTool = GITNEXUS_TOOLS.find((t) => t.name === 'route_map')!;
+    expect(routeMapTool.description).toContain('api_impact');
+    expect(routeMapTool.description).toContain('pre-change analysis');
+  });
 
+  it('shape_check description defers to api_impact for pre-change analysis', () => {
+    const shapeCheckTool = GITNEXUS_TOOLS.find((t) => t.name === 'shape_check')!;
+    expect(shapeCheckTool.description).toContain('api_impact');
+    expect(shapeCheckTool.description).toContain('pre-change analysis');
+  });
+});
 
-  it('query tool exposes phase3 evidence and hydration controls', () => {
-    const query = GITNEXUS_TOOLS.find(t => t.name === 'query')!;
-    expect(query.inputSchema.properties.unity_evidence_mode).toBeDefined();
-    expect(query.inputSchema.properties.hydration_policy).toBeDefined();
-    expect(query.inputSchema.properties.resource_path_prefix).toBeDefined();
-    expect(query.inputSchema.properties.binding_kind).toBeDefined();
+// U28: a cross-repo answer that is a floor says so with `truncated` +
+// `truncationReason`, and the agent-facing surfaces have to teach that
+// vocabulary — an agent that cannot tell a retryable runtime limit from a
+// structural one retries a query that will return the same floor forever (R8).
+describe('cross-repo incompleteness vocabulary', () => {
+  const impactDescription = (): string =>
+    GITNEXUS_TOOLS.find((t) => t.name === 'impact')!.description;
+
+  const groupStatusTemplate = (): ResourceTemplate =>
+    getResourceTemplates().find((t) => t.uriTemplate === 'gitnexus://group/{name}/status')!;
+
+  it('impact description names every truncation reason the group surfaces can return', () => {
+    const d = impactDescription();
+    expect(d).toContain('truncationReason');
+    // Iterates the RUNTIME array on purpose: a hand-listed expectation here
+    // would keep passing after a fourth reason is added and left undescribed,
+    // which is the only failure this guard exists to catch.
+    for (const reason of GROUP_IMPACT_TRUNCATION_REASONS) {
+      expect(
+        d,
+        `truncationReason '${reason}' is not explained in the impact description`,
+      ).toContain(`'${reason}'`);
+    }
+  });
+
+  it("impact description gives 'incomplete-sync' a re-sync remedy, not a retry", () => {
+    const d = impactDescription();
+    // The structural cause and its remedy: the bridge is missing those repos'
+    // contracts, so the same query returns the same floor until a sync fixes it.
+    expect(d).toContain('group_sync');
+    expect(d).toMatch(/'incomplete-sync'[\s\S]{0,600}group_sync/);
+    // ...and truncated:true must no longer read as "the fan-out ran out of
+    // room": on 'incomplete-sync' zero crossings may have been attempted.
+    expect(d).toMatch(/truncated:true does NOT always mean/i);
+  });
+
+  it('group status resource description explains the absent / empty / populated tri-state', () => {
+    const d = groupStatusTemplate().description;
+    expect(d).toContain('unreadableRepos');
+    // Three states, one vocabulary (R8): absent = the sync never recorded which
+    // repos it could read, empty = it measured none, populated = it named them.
+    // Describing it as a two-state turns "unknown" into "none".
+    expect(d).toMatch(/absent/i);
+    expect(d).toMatch(/empty/i);
+    expect(d).toMatch(/populated/i);
+  });
+
+  it('group status resource description tells an absent repo from an unresolvable one', () => {
+    const d = groupStatusTemplate().description;
+    expect(d).toContain('missing');
+    expect(d).toContain('unresolvable');
+    expect(d).toContain('unresolvableReason');
   });
 });

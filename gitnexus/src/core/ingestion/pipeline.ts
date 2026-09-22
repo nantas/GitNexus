@@ -1,626 +1,623 @@
-import { createKnowledgeGraph } from '../graph/graph.js';
-import { processStructure } from './structure-processor.js';
-import { processParsing, type ParsingFileInput } from './parsing-processor.js';
-import {
-  processImports,
-  processImportsFromExtracted,
-  buildImportResolutionContext
-} from './import-processor.js';
-import { processCalls, processCallsFromExtracted, processRoutesFromExtracted } from './call-processor.js';
-import { processHeritage, processHeritageFromExtracted } from './heritage-processor.js';
-import { computeMRO } from './mro-processor.js';
-import { processCommunities } from './community-processor.js';
-import { processProcesses } from './process-processor.js';
-import { processUnityResources } from './unity-resource-processor.js';
-import { applyUnityLifecycleSyntheticCalls } from './unity-lifecycle-synthetic-calls.js';
-import { resolveUnityConfig } from '../config/unity-config.js';
+import { summarizeCSharpContainers } from '../tree-sitter/csharp-container-diagnostics.js';
+import { unityResourcesPhase } from './pipeline-phases/unity-resources.js';
+import { unityLifecyclePhase } from './pipeline-phases/unity-lifecycle.js';
+import { unityProcessSubtypePhase } from './pipeline-phases/unity-process-subtype.js';
+import type { UnityResourceProcessingResult } from './unity-resource-processor.js';
 import { loadCSharpDefineProfileFromCsproj } from '../tree-sitter/csharp-define-profile.js';
-import { normalizeCSharpPreprocessorBranches } from '../tree-sitter/csharp-preproc-normalizer.js';
-import { createResolutionContext } from './resolution-context.js';
-import { createASTCache } from './ast-cache.js';
-import { PipelineProgress, PipelineResult, type PipelineRunOptions, type CSharpPreprocDiagnostics } from '../../types/pipeline.js';
-import { walkRepositoryPaths, readFileContents, walkUnityResourcePaths } from './filesystem-walker.js';
-import { getLanguageFromFilename } from './utils.js';
-import { SupportedLanguages } from '../../config/supported-languages.js';
-import { isLanguageAvailable } from '../tree-sitter/parser-loader.js';
-import { createWorkerPool, WorkerPool } from './workers/worker-pool.js';
-import { selectEntriesByScopeRules } from './scope-filter.js';
-import fs from 'node:fs';
+import { setCSharpDefineSymbols } from '../tree-sitter/csharp-preproc-normalizer.js';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+/**
+ * Pipeline orchestrator — dependency-ordered ingestion pipeline.
+ *
+ * The pipeline is composed of named phases with explicit dependencies.
+ * Each phase is defined in its own file under `pipeline-phases/`.
+ * The runner in `pipeline-phases/runner.ts` executes phases in
+ * topological order, passing typed outputs from upstream phases as
+ * inputs to downstream phases.
+ *
+ * To add a new phase:
+ * 1. Create a new file in `pipeline-phases/` following the pattern
+ * 2. Export it from `pipeline-phases/index.ts`
+ * 3. Add it to the `ALL_PHASES` array below
+ *
+ * See ARCHITECTURE.md for the full phase dependency diagram.
+ */
 
-const isDev = process.env.NODE_ENV === 'development';
+import { createKnowledgeGraph } from '../graph/graph.js';
+import type { KnowledgeGraph } from '../graph/types.js';
+import { GLOBAL_NAME_FALLBACK_REASON } from '../graph/edge-reasons.js';
+import { GraphEmitSink, type GraphEmitManifest } from '../lbug/graph-emit-sink.js';
+import { type PipelineProgress } from 'gitnexus-shared';
+import { PipelineResult } from '../../types/pipeline.js';
+import {
+  runPipeline,
+  getPhaseOutput,
+  scanPhase,
+  structurePhase,
+  markdownPhase,
+  cobolPhase,
+  parsePhase,
+  routesPhase,
+  toolsPhase,
+  ormPhase,
+  crossFilePhase,
+  scopeResolutionPhase,
+  springConfigPhase,
+  springAutoConfigurationPhase,
+  springAopPhase,
+  springDestinationsPhase,
+  springAopInheritancePhase,
+  pruneLocalSymbolsPhase,
+  taintSummariesPhase,
+  callSummariesPhase,
+  mroPhase,
+  diPhase,
+  communitiesPhase,
+  processesPhase,
+  PhaseRegistry,
+  type ScopeResolutionOutput,
+  type PipelinePhase,
+  type PipelineContext,
+  type CommunitiesOutput,
+  type ProcessesOutput,
+} from './pipeline-phases/index.js';
 
-/** Max bytes of source content to load per parse chunk. Each chunk's source +
- *  parsed ASTs + extracted records + worker serialization overhead all live in
- *  memory simultaneously, so this must be conservative. 20MB source ≈ 200-400MB
- *  peak working memory per chunk after parse expansion. */
-const CHUNK_BYTE_BUDGET = 20 * 1024 * 1024; // 20MB
-
-/** Max AST trees to keep in LRU cache */
-const AST_CACHE_CAP = 50;
-
-export interface PipelineOptions extends PipelineRunOptions {
-  /** Skip MRO, community detection, and process extraction for faster test runs. */
+export interface PipelineOptions {
+  csharpDefineCsproj?: string;
+  csharpDefineSymbols?: string[];
+  includeExtensions?: string[];
+  scopeRules?: string[];
+  /**
+   * Skip MRO, community detection, and process extraction for faster test runs.
+   * The `pruneLocalSymbols` phase still runs — it is graph construction (it cleans
+   * up inert local symbols), not graph analysis — so set `keepLocalValueSymbols`
+   * to retain those nodes under `skipGraphPhases`.
+   */
   skipGraphPhases?: boolean;
+  /**
+   * Skip only Leiden community detection and process/flow extraction (#3016).
+   * MRO/DI still run. Used on warm incremental analyze so persisted
+   * Community/Process rows can be kept instead of wipe+rewrite.
+   */
+  skipDerivedGraphPhases?: boolean;
+  /**
+   * Explicit local Spring Boot Actuator snapshot input. Accepts a directory
+   * containing endpoint-named JSON files or a JSON bundle keyed by endpoint.
+   * Undefined keeps runtime enrichment completely disabled.
+   */
+  springActuatorPath?: string;
+  /** Repo-relative Actuator inputs retained only for a cleanup scan. */
+  springActuatorScanExclusions?: readonly string[];
+  /**
+   * Explicit local AsyncAPI 3.x document input, read by the `springDestinations`
+   * phase. Accepts a directory of documents or a single document; the path is
+   * resolved against the repository root, so a committed `docs/asyncapi` and an
+   * absolute cache populated out of band are equally natural. Undefined keeps
+   * specification reading completely disabled.
+   *
+   * There is deliberately no glob-based auto-discovery to go with it. Scanning
+   * a repository for anything that parses as a document would make every
+   * existing index grow destination nodes on its next run without an operator
+   * having decided anything — the same reason new contract extractors ship
+   * opt-in rather than on.
+   */
+  asyncApiSpecPath?: string;
+  /** Per-advice Spring AOP candidate inspection cap. `0` disables this cap. */
+  springAopMaxCandidateInspectionsPerAdvice?: number;
+  /** Aggregate Spring AOP candidate inspection cap for one analysis. `0` disables this cap. */
+  springAopMaxCandidateInspections?: number;
+  /** Per-advice Spring AOP `ADVISED_BY` edge cap. `0` disables this cap. */
+  springAopMaxAdvisedEdgesPerAdvice?: number;
+  /** Aggregate Spring AOP advice-edge cap for one analysis. `0` disables this cap. */
+  springAopMaxAdvisedEdges?: number;
+  /**
+   * Build the control-flow-graph / PDG substrate (#2081 M1, opt-in via `--pdg`).
+   * Off by default: workers skip all CFG work and emit no `cfgSideChannel`, and
+   * scope-resolution emits no BasicBlock nodes or CFG edges — so the default
+   * graph is byte-identical to a pre-#2081 run. Folded into the parse-cache key
+   * so a pdg-off warm cache is not reused on a `--pdg` run.
+   */
+  pdg?: boolean;
+  /**
+   * Per-function source-line cap for worker-side CFG construction.
+   * `undefined` ⇒ the worker applies `DEFAULT_PDG_MAX_FUNCTION_LINES`; `0` ⇒ no
+   * cap (unlimited). Bounds the cost of a pathological mega-function; over-cap
+   * functions are skipped (no CFG emitted for them). No CLI flag in M1 —
+   * programmatic / server analyze-worker path only.
+   */
+  pdgMaxFunctionLines?: number;
+  /**
+   * Per-function CFG edge cap for the scope-resolution emit step.
+   * `undefined` ⇒ `DEFAULT_MAX_CFG_EDGES_PER_FUNCTION`; `0` ⇒ no cap (unlimited).
+   * Over-cap functions stop at the cap and log a structured drop warning (no
+   * silent truncation). No CLI flag in M1 — programmatic / server path only.
+   */
+  pdgMaxEdgesPerFunction?: number;
+  /**
+   * Per-function REACHING_DEF edge cap for the scope-resolution emit step
+   * (#2082 M2). `undefined` ⇒ `DEFAULT_PDG_MAX_REACHING_DEF_EDGES_PER_FUNCTION`
+   * (4000); `0` ⇒ no cap (unlimited). Emit-time-only — NOT folded into the
+   * parse-cache chunk key (the worker never sees it); recorded in
+   * `RepoMeta.pdg` so a cap change forces a full writeback. No CLI flag —
+   * programmatic / server path only, like the M1 caps.
+   */
+  pdgMaxReachingDefEdgesPerFunction?: number;
+  /**
+   * Per-function CDG (control-dependence) edge cap for the scope-resolution
+   * emit step (#2085 M5). `undefined` ⇒ `DEFAULT_PDG_MAX_CDG_EDGES_PER_FUNCTION`
+   * (5000); `0` ⇒ no cap (unlimited). Emit-time-only — NOT folded into the
+   * parse-cache chunk key; recorded resolved in `RepoMeta.pdg` so introducing
+   * CDG (an absent stamp key) forces a full writeback for pre-CDG `--pdg`
+   * indexes. No CLI flag — programmatic / server path only.
+   */
+  pdgMaxCdgEdgesPerFunction?: number;
+  /**
+   * Per-function taint findings cap for the scope-resolution taint pass
+   * (#2083 M3). `undefined` ⇒ `DEFAULT_PDG_MAX_TAINT_FINDINGS_PER_FUNCTION`
+   * (200); `0` ⇒ no cap (unlimited). Emit-time-only — NOT folded into the
+   * parse-cache chunk key; recorded resolved in `RepoMeta.pdg` so a cap
+   * change forces a full writeback. No CLI flag or rc key (KTD8) —
+   * programmatic / server path only, like the other pdg caps.
+   */
+  pdgMaxTaintFindingsPerFunction?: number;
+  /**
+   * Per-finding taint hop cap (#2083 M3, KTD6 — bounds the persisted
+   * hop-encoded `reason`). `undefined` ⇒ `DEFAULT_PDG_MAX_TAINT_HOPS` (32);
+   * `0` ⇒ no cap (unlimited). Same emit-time-only / RepoMeta-stamped /
+   * no-CLI-flag discipline as `pdgMaxTaintFindingsPerFunction`.
+   */
+  pdgMaxTaintHops?: number;
+  /**
+   * Per-run cross-function findings cap (#2084 M4 review P1-3). `undefined` ⇒
+   * `DEFAULT_PDG_MAX_INTERPROC_FINDINGS` (2000); `0` ⇒ no cap. Consumed by the
+   * `taintSummaries` phase; RepoMeta-stamped, no CLI flag (KTD8) — same
+   * discipline as the per-function taint caps.
+   */
+  pdgMaxInterprocFindings?: number;
+  /** Per-finding cross-function hop cap (#2084 review P1-3). `undefined` ⇒
+   *  `DEFAULT_MAX_INTERPROC_HOPS` (32); `0` ⇒ no cap. */
+  pdgMaxInterprocHops?: number;
+  /** Per-run `TAINT_PATH` edge cap (#2084 review P1-3). `undefined` ⇒
+   *  `DEFAULT_PDG_MAX_INTERPROC_EDGES` (1000); `0` ⇒ no cap. */
+  pdgMaxInterprocEdges?: number;
+  /** Per-run `CALL_SUMMARY` edge cap (PDG FU-C, U-C3). `undefined` ⇒
+   *  `DEFAULT_PDG_MAX_CALL_SUMMARY_EDGES` (0 = unlimited); `0` ⇒ no cap.
+   *  Programmatic only, no CLI flag (KTD8) — same discipline as the other
+   *  pdg caps. */
+  pdgMaxCallSummaryEdges?: number;
+  /**
+   * Streaming/chunked PDG graph emit (#2202). When true, the BasicBlock +
+   * intra-file PDG-edge layer (CFG / REACHING_DEF / CDG / POST_DOMINATE /
+   * TAINTED / SANITIZES) is streamed to CSV-on-disk during the scope-resolution
+   * emit loop instead of being materialized in the in-memory graph, bounding
+   * peak RSS to O(chunk) rather than O(graph) at full-kernel scale. Already
+   * gated by the caller to full-rebuild runs only (the incremental writeback
+   * reads BasicBlocks back from the in-memory graph). Memory-only — produces a
+   * byte-identical persisted graph and is NOT part of `RepoMeta.pdg`, so
+   * toggling it never trips `pdgModeMismatch`. Default/false ⇒ today's
+   * whole-graph emit.
+   */
+  streamPdgEmit?: boolean;
+  /**
+   * Streamed structural graph emit (#2680). When true, relationships that no
+   * mid-pipeline phase reads back (CALLS, IMPORTS, ACCESSES, CONTAINS, ...) are
+   * streamed to CSV-on-disk from the parse boundary onward instead of being
+   * retained in the in-memory graph — measured ~2.9x reduction of graph heap.
+   *
+   * NOT free: the `communities`, `processes`, `taintSummaries` and
+   * `callSummaries` phases all consume the whole CALLS graph and are disabled
+   * under this flag. The caller (`run-analyze`) gates it to full rebuilds.
+   * Requires `graphEmitCsvDir`.
+   */
+  streamGraphEmit?: boolean;
+  /** Directory for the streamed structural CSVs. Required when
+   *  `streamGraphEmit` is on; supplied by the caller, which owns storage-path
+   *  resolution (and its native-safe relocation). */
+  graphEmitCsvDir?: string;
+  /** Streamed PDG-emit write buffer (rows) when `streamPdgEmit` is on (#2202).
+   *  `undefined` ⇒ `DEFAULT_PDG_EMIT_CHUNK_ROWS`. Memory-only; does not affect
+   *  emitted bytes. */
+  pdgEmitChunkSize?: number;
+  /**
+   * Request parsing with the worker pool disabled. The sequential parser was
+   * removed — the worker pool is the sole parse path — so setting this now
+   * makes the parse phase throw a `WorkerPoolDisabledError` (equivalent to
+   * `--workers 0`). Retained so callers get an actionable error rather than a
+   * silently-different result.
+   */
+  skipWorkers?: boolean;
+  /**
+   * @internal Test-only override for the worker script URL the pool
+   * spawns. When unset, parse-impl resolves `parse-worker.js` from the
+   * adjacent `workers/` directory (or the compiled `dist/` fallback
+   * under vitest). Integration tests use this to inject a custom
+   * worker script that deterministically triggers worker-pool
+   * resilience paths (e.g., crash-on-poison-file). Do not use from production
+   * call sites.
+   */
+  workerUrlForTest?: URL;
+  /**
+   * Incremental-indexing parse cache. When provided:
+   *   - The parse phase looks up each chunk's content hash in
+   *     `parseCache.entries`. On hit, it replays the cached
+   *     `ParseWorkerResult[]` instead of dispatching to workers.
+   *   - On miss, it runs the workers as today and stores the new
+   *     results in `parseCache.entries` keyed by chunk hash.
+   * The caller (`run-analyze.ts`) is responsible for loading the cache
+   * before the pipeline runs and persisting it after. Cache survives
+   * `--force` because keys are content-addressed.
+   * See `gitnexus/src/storage/parse-cache.ts`.
+   */
+  parseCache?: import('../../storage/parse-cache.js').ParseCache;
+  /**
+   * Worker pool size override, threaded from the CLI `--workers` flag
+   * via `AnalyzeOptions`. When set, parse-impl passes this directly to
+   * `createWorkerPool` so the pool sizing bypasses the env-var fallback
+   * in `resolveAutoPoolSize`. The env-var channel
+   * (`GITNEXUS_WORKER_POOL_SIZE`) remains as a back-compat fallback when
+   * this field is undefined. Must be a positive integer — `0` hard-errors
+   * (sequential parsing was removed; equivalent to `skipWorkers`), expressed
+   * in the same units as `--workers <N>` so long-running hosts (eval-server,
+   * MCP daemon) can size per-call without leaking `process.env` state across
+   * analyze invocations.
+   */
+  workerPoolSize?: number;
+  /**
+   * Number of chunks whose file contents may be read into memory in
+   * parallel while the worker pool is busy dispatching the current
+   * chunk. Pre-fetching overlaps disk I/O for chunk N+1..N+K with the
+   * worker compute on chunk N — modest but real wall-clock win on
+   * repos large enough to chunk. Worker dispatch itself remains serial
+   * because `WorkerPool.dispatch` is not reentrant (concurrent calls
+   * would race on the shared per-slot busy/in-flight state).
+   *
+   * `1` matches today's pure-serial behavior; `2` is the documented
+   * default (`GITNEXUS_PARSE_CHUNK_CONCURRENCY`). Falls back to the
+   * env var when undefined; defaults to 2 when neither is set.
+   */
+  parseChunkConcurrency?: number;
+  /**
+   * Byte budget per parse chunk (in bytes). When set, parse-impl uses
+   * this instead of the `GITNEXUS_CHUNK_BYTE_BUDGET` env var or the
+   * built-in 2 MB default. Smaller values produce more chunks (finer
+   * cache-hit granularity, more worker dispatches); larger values
+   * batch more files per dispatch.
+   *
+   * Threading the value through options instead of the env var lets
+   * tests vary the chunk layout per-call without `vi.resetModules` and
+   * lets long-running hosts (eval-server, MCP daemon) size per-call
+   * without leaking `process.env` state across invocations.
+   */
+  chunkByteBudget?: number;
+  /**
+   * Keep inert block-local value symbols (Const/Variable/Static) that the
+   * `pruneLocalSymbols` phase would otherwise drop. Mirrors the
+   * `GITNEXUS_KEEP_LOCAL_VALUE_SYMBOLS` env var, but threaded per-call so
+   * long-running hosts (eval-server, MCP daemon) can opt out without leaking
+   * `process.env` state across invocations. When undefined, the env var decides.
+   */
+  keepLocalValueSymbols?: boolean;
+  /**
+   * Extra fetch-wrapper function names to treat as HTTP consumers, threaded
+   * from `.gitnexusrc` `fetchWrappers` via `AnalyzeOptions` (#1589/#1852
+   * residual). The routes phase unions these with the auto-detected `fetch()`
+   * wrappers when scanning for `route_map` consumers, so a wrapper named outside
+   * the built-in convention (or built on axios / a custom client) is still
+   * traced. Empty/undefined leaves behavior unchanged.
+   */
+  fetchWrappers?: readonly string[];
 }
+
+// ── Phase registry ─────────────────────────────────────────────────────────
+
+/**
+ * All pipeline phases with their dependency relationships.
+ *
+ * Phase dependency graph:
+ *
+ *   scan → structure → [springConfig, markdown, cobol] → parse → [routes, tools, orm]
+ *     → crossFile → scopeResolution → [springAutoConfiguration, springAop,
+ *       springDestinations] → pruneLocalSymbols
+ *     → mro → springAopInheritance → di → communities → processes
+ *
+ * To add a new phase: create a file in pipeline-phases/, export the phase
+ * object, and `.register()` it at the appropriate position below. Opt-in
+ * phases pass an `enabledWhen` predicate (issue #2080 phase-registry seam) —
+ * the legacy `if (!skipGraphPhases)` guard is now expressed that way on the
+ * three graph phases, with no change in behaviour.
+ *
+ * Exported for the parity test (`pipeline-phase-registry.test.ts`), which
+ * asserts the produced list is byte-identical to the legacy array for every
+ * options combination.
+ */
+export function buildPhaseList(options?: PipelineOptions): PipelinePhase[] {
+  return (
+    new PhaseRegistry<PipelineOptions>()
+      .register(scanPhase)
+      .register(structurePhase)
+      .register(springConfigPhase)
+      .register(markdownPhase)
+      .register(cobolPhase)
+      .register(parsePhase)
+      .register(routesPhase)
+      .register(toolsPhase)
+      .register(ormPhase)
+      .register(crossFilePhase)
+      .register(scopeResolutionPhase)
+      .register(springAutoConfigurationPhase)
+      .register(springAopPhase)
+      // Async messaging overlay. Must follow scopeResolution twice over: the
+      // owner Method/Function nodes have to exist, and each provider's
+      // `applyCaptureSideChannel` has to have restored the messaging facts onto
+      // the main thread. It also reads the Property nodes springConfig emits.
+      .register(springDestinationsPhase)
+      .register(pruneLocalSymbolsPhase)
+      // M4 (#2084): interprocedural taint fixpoint — the first real opt-in
+      // pdg-gated phase. Off ⇒ absent ⇒ byte-identical graph. No always-on
+      // phase depends on it (a filtered-out dep would throw in getPhaseOutput).
+      .register(taintSummariesPhase, { enabledWhen: (o) => o.pdg === true })
+      .register(callSummariesPhase, { enabledWhen: (o) => o.pdg === true })
+      .register(mroPhase, { enabledWhen: (o) => !o.skipGraphPhases })
+      .register(springAopInheritancePhase, { enabledWhen: (o) => !o.skipGraphPhases })
+      .register(diPhase, { enabledWhen: (o) => !o.skipGraphPhases })
+      .register(communitiesPhase, {
+        enabledWhen: (o) => !o.skipGraphPhases && o.skipDerivedGraphPhases !== true,
+      })
+      .register(unityResourcesPhase, {
+        enabledWhen: (o) => !o.skipGraphPhases && !o.skipDerivedGraphPhases,
+      })
+      .register(unityLifecyclePhase, {
+        enabledWhen: (o) => !o.skipGraphPhases && !o.skipDerivedGraphPhases,
+      })
+      .register(
+        { ...processesPhase, deps: [...processesPhase.deps, 'unity-lifecycle'] },
+        {
+          enabledWhen: (o) => !o.skipGraphPhases && o.skipDerivedGraphPhases !== true,
+        },
+      )
+      .register(unityProcessSubtypePhase, {
+        enabledWhen: (o) => !o.skipGraphPhases && !o.skipDerivedGraphPhases,
+      })
+      // Normalize a missing options object once here so phase predicates above
+      // take a required PipelineOptions and need no `?.` guard (#2080 review S1).
+      .build(options ?? {})
+  );
+}
+
+// ── Pipeline orchestrator ─────────────────────────────────────────────────
 
 export const runPipelineFromRepo = async (
   repoPath: string,
   onProgress: (progress: PipelineProgress) => void,
   options?: PipelineOptions,
 ): Promise<PipelineResult> => {
+  const symbols = options?.csharpDefineCsproj
+    ? [
+        ...(
+          await loadCSharpDefineProfileFromCsproj(
+            path.resolve(repoPath, options.csharpDefineCsproj),
+          )
+        ).symbols,
+      ]
+    : options?.csharpDefineSymbols;
+  setCSharpDefineSymbols(symbols);
+  options = { ...options, csharpDefineSymbols: symbols };
   const graph = createKnowledgeGraph();
-  const ctx = createResolutionContext();
-  const symbolTable = ctx.symbols;
-  let astCache = createASTCache(AST_CACHE_CAP);
+  const pipelineStart = Date.now();
 
-  const cleanup = () => {
-    astCache.clear();
-    ctx.clear();
+  // Streamed structural emit (#2680). The sink is a write-routing façade over
+  // `graph`; it streams nothing until `beginStreaming()` fires at the parse
+  // boundary.
+  //
+  // A missing `graphEmitCsvDir` is a caller bug, not a reason to quietly skip
+  // streaming: this is on by default, so a programmatic host that builds its own
+  // `PipelineOptions` (eval-server, the MCP daemon, a test) would otherwise ask
+  // for streaming, silently not get it, and still see a successful run. Fail
+  // loudly instead — the whole point of the surrounding work is that a degraded
+  // outcome must never look like a clean one.
+  let graphEmitSink: GraphEmitSink | undefined;
+  if (options?.streamGraphEmit === true) {
+    if (options.graphEmitCsvDir === undefined) {
+      throw new Error(
+        'streamGraphEmit was requested but graphEmitCsvDir is missing. The caller owns ' +
+          'storage-path resolution (see resolveNativeSafeStorageDir in run-analyze.ts); ' +
+          'pass the directory, or leave streamGraphEmit unset to run without streaming.',
+      );
+    }
+    graphEmitSink = new GraphEmitSink(graph, options.graphEmitCsvDir);
+  }
+
+  const phases = buildPhaseList(options);
+  const ctx: PipelineContext = {
+    repoPath,
+    graph: graphEmitSink ?? graph,
+    onProgress,
+    options,
+    pipelineStart,
+    graphEmit: graphEmitSink,
   };
 
-  let csharpDefineSymbols: Set<string> | undefined;
-  const csharpUndefinedSymbols = new Set<string>();
-  let csharpPreprocDiagnostics: CSharpPreprocDiagnostics | undefined;
-
+  let graphEmitManifest: GraphEmitManifest | undefined;
+  let results;
   try {
-    if (options?.csharpDefineCsproj) {
-      const defineProfile = await loadCSharpDefineProfileFromCsproj(options.csharpDefineCsproj);
-      csharpDefineSymbols = defineProfile.symbols;
-      csharpPreprocDiagnostics = {
-        enabled: true,
-        sourcePath: defineProfile.sourcePath,
-        defineSymbolCount: defineProfile.symbols.size,
-        normalizedFiles: 0,
-        fallbackFiles: 0,
-        skippedFiles: 0,
-        expressionErrors: 0,
-        undefinedSymbols: [],
-      };
-    }
+    results = await runPipeline(phases, ctx);
+    graphEmitManifest = graphEmitSink?.finalize();
+  } finally {
+    // Release per-pair fds when the pipeline threw before finalize ran.
+    graphEmitSink?.close();
+  }
 
-    // ── Phase 1: Scan paths only (no content read) ─────────────────────
-    onProgress({
-      phase: 'extracting',
-      percent: 0,
-      message: 'Scanning repository...',
-    });
+  // Resolved-call index for the name-fallback census: read through the SINK,
+  // whose field-wise scan includes every streamed edge, not through `graph`,
+  // which under streaming holds none of them.
+  const resolvedCalleeNamesByCaller = collectResolvedCalleeNames(graphEmitSink ?? graph, graph);
 
-    const scannedFiles = await walkRepositoryPaths(repoPath, (current, total, filePath) => {
-      const scanProgress = Math.round((current / total) * 15);
-      onProgress({
-        phase: 'extracting',
-        percent: scanProgress,
-        message: 'Scanning repository...',
-        detail: filePath,
-        stats: { filesProcessed: current, totalFiles: total, nodesCreated: graph.nodeCount },
-      });
-    });
+  // Extract final results for the PipelineResult contract
+  const {
+    totalFiles,
+    usedWorkerPool,
+    reparsedFileCount,
+    parseCacheHitFileCount,
+    unavailableScopeLanguageFiles,
+  } = getPhaseOutput<{
+    totalFiles: number;
+    usedWorkerPool: boolean;
+    reparsedFileCount: number;
+    parseCacheHitFileCount: number;
+    unavailableScopeLanguageFiles: number;
+  }>(results, 'parse');
 
-    const scopeSelection = selectEntriesByScopeRules(scannedFiles, options?.scopeRules || []);
-    const scopedFiles = scopeSelection.selected;
+  let communityResult: CommunitiesOutput['communityResult'] | undefined;
+  let processResult: ProcessesOutput['processResult'] | undefined;
+  const scopeResolutionOutput = getPhaseOutput<ScopeResolutionOutput>(results, 'scopeResolution');
+  const scopeExtractionFailures = scopeResolutionOutput.scopeExtractionFailures;
+  const resolutionOutcomes = scopeResolutionOutput.resolutionOutcomes;
+  const undecidedSatisfaction = scopeResolutionOutput.undecidedSatisfaction;
+  // Streamed PDG-emit manifest (#2202): present only when streaming was on.
+  const pdgEmitManifest = scopeResolutionOutput.pdgEmitManifest;
+  const propertyInference = scopeResolutionOutput.propertyInference;
 
-    if (scopeSelection.diagnostics.appliedRuleCount > 0 && scopedFiles.length === 0) {
-      throw new Error('Scope filters matched zero files. Check your scope rules and extensions.');
-    }
+  // Presence check, not `!skipGraphPhases`: phases can now be filtered out by
+  // any `enabledWhen` predicate (streamGraphEmit disables communities/processes
+  // too), and `getPhaseOutput` THROWS on a phase that was never resolved. Keying
+  // off the options flag alone made every filtered-out combination crash here
+  // rather than return undefined results.
+  if (results.has('communities') && results.has('processes')) {
+    communityResult = getPhaseOutput<CommunitiesOutput>(results, 'communities').communityResult;
+    processResult = getPhaseOutput<ProcessesOutput>(results, 'processes').processResult;
+  }
 
-    const includeExtensions = new Set(
-      (options?.includeExtensions || [])
-        .map(ext => ext.trim().toLowerCase())
-        .filter(Boolean)
-        .map(ext => (ext.startsWith('.') ? ext : `.${ext}`)),
-    );
-    const extensionFiltered = includeExtensions.size > 0
-      ? scopedFiles.filter(f => includeExtensions.has(path.extname(f.path).toLowerCase()))
-      : scopedFiles;
-
-    const totalFiles = extensionFiltered.length;
-
-    onProgress({
-      phase: 'extracting',
-      percent: 15,
-      message: 'Repository scanned successfully',
-      stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: graph.nodeCount },
-    });
-
-    // ── Phase 2: Structure (paths only — no content needed) ────────────
-    onProgress({
-      phase: 'structure',
-      percent: 15,
-      message: 'Analyzing project structure...',
-      stats: { filesProcessed: 0, totalFiles, nodesCreated: graph.nodeCount },
-    });
-
-    const allPaths = extensionFiltered.map(f => f.path);
-    const unityCandidates = await walkUnityResourcePaths(repoPath);
-    const unityScopedPaths =
-      (options?.scopeRules && options.scopeRules.length > 0)
-        ? selectEntriesByScopeRules(
-          unityCandidates.map(path => ({ path })),
-          options.scopeRules,
-        ).selected.map(entry => entry.path)
-        : unityCandidates;
-    processStructure(graph, allPaths);
-
-    onProgress({
-      phase: 'structure',
-      percent: 20,
-      message: 'Project structure analyzed',
-      stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: graph.nodeCount },
-    });
-
-    // ── Phase 3+4: Chunked read + parse ────────────────────────────────
-    // Group parseable files into byte-budget chunks so only ~20MB of source
-    // is in memory at a time. Each chunk is: read → parse → extract → free.
-
-    const parseableScanned = extensionFiltered.filter(f => {
-      const lang = getLanguageFromFilename(f.path);
-      return lang && isLanguageAvailable(lang);
-    });
-
-    // Warn about files skipped due to unavailable parsers
-    const skippedByLang = new Map<string, number>();
-    for (const f of extensionFiltered) {
-      const lang = getLanguageFromFilename(f.path);
-      if (lang && !isLanguageAvailable(lang)) {
-        skippedByLang.set(lang, (skippedByLang.get(lang) || 0) + 1);
-      }
-    }
-    for (const [lang, count] of skippedByLang) {
-      console.warn(`Skipping ${count} ${lang} file(s) — ${lang} parser not available (native binding may not have built). Try: npm rebuild tree-sitter-${lang}`);
-    }
-    const totalParseable = parseableScanned.length;
-
-    if (totalParseable === 0) {
-      onProgress({
-        phase: 'parsing',
-        percent: 82,
-        message: 'No parseable files found — skipping parsing phase',
-        stats: { filesProcessed: 0, totalFiles: 0, nodesCreated: graph.nodeCount },
-      });
-    }
-
-    // Build byte-budget chunks
-    const chunks: string[][] = [];
-    let currentChunk: string[] = [];
-    let currentBytes = 0;
-    for (const file of parseableScanned) {
-      if (currentChunk.length > 0 && currentBytes + file.size > CHUNK_BYTE_BUDGET) {
-        chunks.push(currentChunk);
-        currentChunk = [];
-        currentBytes = 0;
-      }
-      currentChunk.push(file.path);
-      currentBytes += file.size;
-    }
-    if (currentChunk.length > 0) chunks.push(currentChunk);
-
-    const numChunks = chunks.length;
-
-    if (isDev) {
-      const totalMB = parseableScanned.reduce((s, f) => s + f.size, 0) / (1024 * 1024);
-      console.log(`📂 Scan: ${totalFiles} paths, ${totalParseable} parseable (${totalMB.toFixed(0)}MB), ${numChunks} chunks @ ${CHUNK_BYTE_BUDGET / (1024 * 1024)}MB budget`);
-    }
-
-    onProgress({
-      phase: 'parsing',
-      percent: 20,
-      message: `Parsing ${totalParseable} files in ${numChunks} chunk${numChunks !== 1 ? 's' : ''}...`,
-      stats: { filesProcessed: 0, totalFiles: totalParseable, nodesCreated: graph.nodeCount },
-    });
-
-    // Don't spawn workers for tiny repos — overhead exceeds benefit
-    const MIN_FILES_FOR_WORKERS = 15;
-    const MIN_BYTES_FOR_WORKERS = 512 * 1024;
-    const totalBytes = parseableScanned.reduce((s, f) => s + f.size, 0);
-
-    // Create worker pool once, reuse across chunks
-    let workerPool: WorkerPool | undefined;
-    if (totalParseable >= MIN_FILES_FOR_WORKERS || totalBytes >= MIN_BYTES_FOR_WORKERS) {
-      try {
-        let workerUrl = new URL('./workers/parse-worker.js', import.meta.url);
-        // When running under vitest, import.meta.url points to src/ where no .js exists.
-        // Fall back to the compiled dist/ worker so the pool can spawn real worker threads.
-        const thisDir = fileURLToPath(new URL('.', import.meta.url));
-        if (!fs.existsSync(fileURLToPath(workerUrl))) {
-          const distWorker = path.resolve(thisDir, '..', '..', '..', 'dist', 'core', 'ingestion', 'workers', 'parse-worker.js');
-          if (fs.existsSync(distWorker)) {
-            workerUrl = pathToFileURL(distWorker) as URL;
-          }
-        }
-        workerPool = createWorkerPool(workerUrl);
-      } catch (err) {
-        if (isDev) console.warn('Worker pool creation failed, using sequential fallback:', (err as Error).message);
-      }
-    }
-
-    let filesParsedSoFar = 0;
-
-    // AST cache sized for one chunk (sequential fallback uses it for import/call/heritage)
-    const maxChunkFiles = chunks.reduce((max, c) => Math.max(max, c.length), 0);
-    astCache = createASTCache(maxChunkFiles);
-
-    // Build import resolution context once — suffix index, file lists, resolve cache.
-    // Reused across all chunks to avoid rebuilding O(files × path_depth) structures.
-    const importCtx = buildImportResolutionContext(allPaths);
-    const allPathObjects = allPaths.map(p => ({ path: p }));
-
-    // Single-pass: parse + resolve imports/calls/heritage per chunk.
-    // Calls/heritage use the symbol table built so far (symbols from earlier chunks
-    // are already registered). This trades ~5% cross-chunk resolution accuracy for
-    // 200-400MB less memory — critical for Linux-kernel-scale repos.
-    const sequentialChunkFiles: ParsingFileInput[][] = [];
-
-    try {
-      for (let chunkIdx = 0; chunkIdx < numChunks; chunkIdx++) {
-        const chunkPaths = chunks[chunkIdx];
-
-        // Read content for this chunk only
-        const chunkContents = await readFileContents(repoPath, chunkPaths);
-        const chunkFiles: ParsingFileInput[] = chunkPaths
-          .filter(p => chunkContents.has(p))
-          .map((p) => {
-            const originalContent = chunkContents.get(p)!;
-            if (!csharpDefineSymbols || getLanguageFromFilename(p) !== SupportedLanguages.CSharp) {
-              return { path: p, content: originalContent };
-            }
-
-            const normalized = normalizeCSharpPreprocessorBranches(originalContent, csharpDefineSymbols);
-            csharpPreprocDiagnostics!.expressionErrors += normalized.diagnostics.expressionErrors;
-            for (const symbol of normalized.diagnostics.undefinedSymbols) {
-              csharpUndefinedSymbols.add(symbol);
-            }
-
-            if (!normalized.changed) {
-              csharpPreprocDiagnostics!.skippedFiles += 1;
-              return { path: p, content: originalContent };
-            }
-
-            csharpPreprocDiagnostics!.normalizedFiles += 1;
-            return {
-              path: p,
-              content: normalized.normalizedText,
-              rawContent: originalContent,
-            };
-          });
-
-        // Parse this chunk (workers or sequential fallback)
-        const chunkWorkerData = await processParsing(
-          graph, chunkFiles, symbolTable, astCache,
-          (current, _total, filePath) => {
-            const globalCurrent = filesParsedSoFar + current;
-            const parsingProgress = 20 + ((globalCurrent / totalParseable) * 62);
-            onProgress({
-              phase: 'parsing',
-              percent: Math.round(parsingProgress),
-              message: `Parsing chunk ${chunkIdx + 1}/${numChunks}...`,
-              detail: filePath,
-              stats: { filesProcessed: globalCurrent, totalFiles: totalParseable, nodesCreated: graph.nodeCount },
-            });
-          },
-          workerPool,
-          (count) => {
-            if (csharpPreprocDiagnostics) csharpPreprocDiagnostics.fallbackFiles += count;
-          },
-        );
-
-        const chunkBasePercent = 20 + ((filesParsedSoFar / totalParseable) * 62);
-
-        if (chunkWorkerData) {
-          // Imports
-          await processImportsFromExtracted(graph, allPathObjects, chunkWorkerData.imports, ctx, (current, total) => {
-            onProgress({
-              phase: 'parsing',
-              percent: Math.round(chunkBasePercent),
-              message: `Resolving imports (chunk ${chunkIdx + 1}/${numChunks})...`,
-              detail: `${current}/${total} files`,
-              stats: { filesProcessed: filesParsedSoFar, totalFiles: totalParseable, nodesCreated: graph.nodeCount },
-            });
-          }, repoPath, importCtx);
-          // Calls + Heritage + Routes — resolve in parallel (no shared mutable state between them)
-          // This is safe because each writes disjoint relationship types into idempotent id-keyed Maps,
-          // and the single-threaded event loop prevents races between synchronous addRelationship calls.
-          await Promise.all([
-            processCallsFromExtracted(
-              graph,
-              chunkWorkerData.calls,
-              ctx,
-              (current, total) => {
-                onProgress({
-                  phase: 'parsing',
-                  percent: Math.round(chunkBasePercent),
-                  message: `Resolving calls (chunk ${chunkIdx + 1}/${numChunks})...`,
-                  detail: `${current}/${total} files`,
-                  stats: { filesProcessed: filesParsedSoFar, totalFiles: totalParseable, nodesCreated: graph.nodeCount },
-                });
-              },
-              chunkWorkerData.constructorBindings,
-            ),
-            processHeritageFromExtracted(
-              graph,
-              chunkWorkerData.heritage,
-              ctx,
-              (current, total) => {
-                onProgress({
-                  phase: 'parsing',
-                  percent: Math.round(chunkBasePercent),
-                  message: `Resolving heritage (chunk ${chunkIdx + 1}/${numChunks})...`,
-                  detail: `${current}/${total} records`,
-                  stats: { filesProcessed: filesParsedSoFar, totalFiles: totalParseable, nodesCreated: graph.nodeCount },
-                });
-              },
-            ),
-            processRoutesFromExtracted(
-              graph,
-              chunkWorkerData.routes ?? [],
-              ctx,
-              (current, total) => {
-                onProgress({
-                  phase: 'parsing',
-                  percent: Math.round(chunkBasePercent),
-                  message: `Resolving routes (chunk ${chunkIdx + 1}/${numChunks})...`,
-                  detail: `${current}/${total} routes`,
-                  stats: { filesProcessed: filesParsedSoFar, totalFiles: totalParseable, nodesCreated: graph.nodeCount },
-                });
-              },
-            ),
-          ]);
-        } else {
-          await processImports(
-            graph,
-            chunkFiles,
-            astCache,
-            ctx,
-            undefined,
-            repoPath,
-            allPaths,
-            (count) => {
-              if (csharpPreprocDiagnostics) csharpPreprocDiagnostics.fallbackFiles += count;
-            },
-          );
-          sequentialChunkFiles.push(chunkFiles);
-        }
-
-        filesParsedSoFar += chunkFiles.length;
-
-        // Clear AST cache between chunks to free memory
-        astCache.clear();
-        // chunkContents + chunkFiles + chunkWorkerData go out of scope → GC reclaims
-      }
-    } finally {
-      await workerPool?.terminate();
-    }
-
-    // Sequential fallback chunks: use the same normalized-or-raw source for call/heritage resolution
-    for (const chunkFiles of sequentialChunkFiles) {
-      astCache = createASTCache(chunkFiles.length);
-      const rubyHeritage = await processCalls(graph, chunkFiles, astCache, ctx, undefined, (count) => {
-        if (csharpPreprocDiagnostics) csharpPreprocDiagnostics.fallbackFiles += count;
-      });
-      await processHeritage(graph, chunkFiles, astCache, ctx, undefined, (count) => {
-        if (csharpPreprocDiagnostics) csharpPreprocDiagnostics.fallbackFiles += count;
-      });
-      if (rubyHeritage.length > 0) {
-        await processHeritageFromExtracted(graph, rubyHeritage, ctx);
-      }
-      astCache.clear();
-    }
-
-    // Log resolution cache stats
-    if (isDev) {
-      const rcStats = ctx.getStats();
-      const total = rcStats.cacheHits + rcStats.cacheMisses;
-      const hitRate = total > 0 ? ((rcStats.cacheHits / total) * 100).toFixed(1) : '0';
-      console.log(`🔍 Resolution cache: ${rcStats.cacheHits} hits, ${rcStats.cacheMisses} misses (${hitRate}% hit rate)`);
-    }
-
-    // Free import resolution context — suffix index + resolve cache no longer needed
-    // (allPathObjects and importCtx hold ~94MB+ for large repos)
-    allPathObjects.length = 0;
-    importCtx.resolveCache.clear();
-    (importCtx as any).suffixIndex = null;
-    (importCtx as any).normalizedFileList = null;
-
-    let communityResult: Awaited<ReturnType<typeof processCommunities>> | undefined;
-    let processResult: Awaited<ReturnType<typeof processProcesses>> | undefined;
-    let unityResult: Awaited<ReturnType<typeof processUnityResources>> | undefined;
-
-    if (!options?.skipGraphPhases) {
-      // ── Phase 4.5: Method Resolution Order ──────────────────────────────
-      onProgress({
-        phase: 'parsing',
-        percent: 81,
-        message: 'Computing method resolution order...',
-        stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: graph.nodeCount },
-      });
-
-      const mroResult = computeMRO(graph);
-      if (isDev && mroResult.entries.length > 0) {
-        console.log(`🔀 MRO: ${mroResult.entries.length} classes analyzed, ${mroResult.ambiguityCount} ambiguities found, ${mroResult.overrideEdges} OVERRIDES edges`);
-      }
-
-      // ── Phase 5: Communities ───────────────────────────────────────────
-      onProgress({
-        phase: 'communities',
-        percent: 82,
-        message: 'Detecting code communities...',
-        stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: graph.nodeCount },
-      });
-
-      communityResult = await processCommunities(graph, (message, progress) => {
-        const communityProgress = 82 + (progress * 0.10);
-        onProgress({
-          phase: 'communities',
-          percent: Math.round(communityProgress),
-          message,
-          stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: graph.nodeCount },
-        });
-      });
-
-      if (isDev) {
-        console.log(`🏘️ Community detection: ${communityResult.stats.totalCommunities} communities found (modularity: ${communityResult.stats.modularity.toFixed(3)})`);
-      }
-
-      communityResult.communities.forEach(comm => {
-        graph.addNode({
-          id: comm.id,
-          label: 'Community' as const,
-          properties: {
-            name: comm.label,
-            filePath: '',
-            heuristicLabel: comm.heuristicLabel,
-            cohesion: comm.cohesion,
-            symbolCount: comm.symbolCount,
-          }
-        });
-      });
-
-      communityResult.memberships.forEach(membership => {
-        graph.addRelationship({
-          id: `${membership.nodeId}_member_of_${membership.communityId}`,
-          type: 'MEMBER_OF',
-          sourceId: membership.nodeId,
-          targetId: membership.communityId,
-          confidence: 1.0,
-          reason: 'leiden-algorithm',
-        });
-      });
-
-      // ── Phase 5.5: Unity resource bindings (before lifecycle injection) ─
-      onProgress({
-        phase: 'enriching',
-        percent: 93,
-        message: 'Extracting Unity resource bindings...',
-        stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: graph.nodeCount },
-      });
-
-      unityResult = await processUnityResources(graph, { repoPath, scopedPaths: unityScopedPaths });
-
-      // ── Phase 5.6: Unity lifecycle synthetic calls (auto-detect) ────────
-      const isUnityProject = allPaths.some(p => p.startsWith('Assets/') && p.endsWith('.cs'));
-      const unityConfig = resolveUnityConfig();
-      // Persistence is coupled to the Unity resource-binding indexing flow:
-      // if Unity project auto-detection is active, persist lifecycle metadata.
-      const persistLifecycleProcessMetadata = isUnityProject;
-      const unityLifecycleSyntheticResult = isUnityProject
-        ? applyUnityLifecycleSyntheticCalls(graph, {
-            maxSyntheticEdgesPerClass: unityConfig.config.maxSyntheticEdgesPerClass,
-            maxSyntheticEdgesTotal: unityConfig.config.maxSyntheticEdgesTotal,
-          })
-        : { syntheticEdgeCount: 0, lifecycleEdgeCount: 0, loaderEdgeCount: 0, hostCount: 0, rejectedHostCount: 0 };
-      const syntheticEdgeDetail = unityLifecycleSyntheticResult.syntheticEdgeCount > 0
-        ? ` (Unity synthetic edges: ${unityLifecycleSyntheticResult.syntheticEdgeCount})`
-        : '';
-
-      if (isDev && isUnityProject) {
-        console.log(
-          `[UnityLifecycle] auto-detected hosts=${unityLifecycleSyntheticResult.hostCount} syntheticEdges=${unityLifecycleSyntheticResult.syntheticEdgeCount} rejectedHosts=${unityLifecycleSyntheticResult.rejectedHostCount}`,
-        );
-      }
-
-      // ── Phase 6: Processes ─────────────────────────────────────────────
-      onProgress({
-        phase: 'processes',
-        percent: 94,
-        message: `Detecting execution flows...${syntheticEdgeDetail}`,
-        stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: graph.nodeCount },
-      });
-
-      let symbolCount = 0;
-      graph.forEachNode(n => { if (n.label !== 'File') symbolCount++; });
-      const dynamicMaxProcesses = Math.max(20, Math.min(300, Math.round(symbolCount / 10)));
-
-      processResult = await processProcesses(
-        graph,
-        communityResult.memberships,
-        (message, progress) => {
-          const processProgress = 94 + (progress * 0.05);
-          onProgress({
-            phase: 'processes',
-            percent: Math.round(processProgress),
-            message,
-            stats: { filesProcessed: totalFiles, totalFiles, nodesCreated: graph.nodeCount },
-          });
-        },
-        { maxProcesses: dynamicMaxProcesses, minSteps: 3 }
-      );
-
-      if (isDev) {
-        console.log(`🔄 Process detection: ${processResult.stats.totalProcesses} processes found (${processResult.stats.crossCommunityCount} cross-community)`);
-      }
-
-      processResult.processes.forEach(proc => {
-        graph.addNode({
-          id: proc.id,
-          label: 'Process' as const,
-          properties: {
-            name: proc.label,
-            filePath: '',
-            heuristicLabel: proc.heuristicLabel,
-            processType: proc.processType,
-            stepCount: proc.stepCount,
-            communities: proc.communities,
-            entryPointId: proc.entryPointId,
-            terminalId: proc.terminalId,
-            ...(persistLifecycleProcessMetadata
-              ? {
-                processSubtype: proc.processSubtype,
-                runtimeChainConfidence: proc.runtimeChainConfidence,
-                sourceReasons: proc.sourceReasons,
-                sourceConfidences: proc.sourceConfidences,
-              }
-              : {}),
-          }
-        });
-      });
-
-      processResult.steps.forEach(step => {
-        const persistedReason = persistLifecycleProcessMetadata ? (step.reason || 'trace-detection') : 'trace-detection';
-        const persistedConfidence = persistLifecycleProcessMetadata ? (step.confidence ?? 1.0) : 1.0;
-        graph.addRelationship({
-          id: `${step.nodeId}_step_${step.step}_${step.processId}`,
-          type: 'STEP_IN_PROCESS',
-          sourceId: step.nodeId,
-          targetId: step.processId,
-          confidence: persistedConfidence,
-          reason: persistedReason,
-          step: step.step,
-        });
-      });
-    }
-
-    onProgress({
-      phase: 'complete',
-      percent: 100,
-      message: communityResult && processResult
+  onProgress({
+    phase: 'complete',
+    percent: 100,
+    message:
+      communityResult && processResult
         ? `Graph complete! ${communityResult.stats.totalCommunities} communities, ${processResult.stats.totalProcesses} processes detected.`
         : 'Graph complete! (graph phases skipped)',
-      stats: {
-        filesProcessed: totalFiles,
-        totalFiles,
-        nodesCreated: graph.nodeCount
-      },
-    });
+    stats: {
+      filesProcessed: totalFiles,
+      totalFiles,
+      nodesCreated: graph.nodeCount,
+    },
+  });
 
-    astCache.clear();
+  const reports =
+    getPhaseOutput<import('./pipeline-phases/parse.js').ParseOutput>(results, 'parse')
+      .csharpPreprocReports ?? [];
+  const csharpPreprocDiagnostics = {
+    enabled: symbols !== undefined,
+    sourcePath: options?.csharpDefineCsproj,
+    defineSymbolCount: symbols?.length ?? 0,
+    normalizedFiles: reports.filter((r) => r.changed).length,
+    skippedFiles: reports.filter((r) => !r.changed).length,
+    fallbackFiles: 0,
+    expressionErrors: reports.reduce((sum, r) => sum + r.expressionErrors, 0),
+    undefinedSymbols: [...new Set(reports.flatMap((r) => r.undefinedSymbols))].sort(),
+  };
+  const result: PipelineResult = {
+    // The RAW graph, deliberately — NOT `graphEmitSink`. Phases above received
+    // the sink so their reads are complete, but `loadGraphToLbug` feeds this to
+    // `streamAllCSVsToDisk`, and the sink's complete iterator would then emit
+    // every streamed edge a SECOND time on top of the per-pair CSVs the sink
+    // already wrote and the manifest already COPYs. Returning the sink here
+    // silently doubles every streamed relationship in the persisted graph.
+    graph,
+    repoPath,
+    totalFileCount: totalFiles,
+    csharpPreprocDiagnostics,
+    csharpContainerDiagnostics: summarizeCSharpContainers(
+      reports.flatMap((r) => (r.containers ? [r.containers] : [])),
+    ),
+    scopeDiagnostics: getPhaseOutput<import('./pipeline-phases/scan.js').ScanOutput>(
+      results,
+      'scan',
+    ).scopeDiagnostics,
+    unityResult: results.get('unity-resources')?.output as
+      | UnityResourceProcessingResult
+      | undefined,
+    graphEmitManifest,
+    communityResult,
+    processResult,
+    resolutionOutcomes,
+    resolvedCalleeNamesByCaller,
+    undecidedSatisfaction,
+    usedWorkerPool,
+    reparsedFileCount,
+    parseCacheHitFileCount,
+    scopeExtractionFailures,
+    unavailableScopeLanguageFiles,
+    pdgEmitManifest,
+    propertyInference,
+  };
 
-    if (csharpPreprocDiagnostics) {
-      csharpPreprocDiagnostics.undefinedSymbols = [...csharpUndefinedSymbols].sort();
-    }
+  // #3016: hand back a way to run the derived phases `skipDerivedGraphPhases`
+  // held back. Which phases those are is answered by re-asking the registry
+  // with only that flag cleared — the one form of the question that stays
+  // correct when a different predicate (`skipGraphPhases`) also disables them,
+  // since then they are absent for a reason a deferred run cannot fix and the
+  // filter yields nothing. The sink guard mirrors the `graph` note above: a
+  // streaming run is a full rebuild, which never sets the skip flag, so an
+  // active sink here means the two got combined by mistake — and deferred
+  // phases writing into a finalized sink would emit past its manifest.
+  const deferredDerivedPhases =
+    options?.skipDerivedGraphPhases === true && graphEmitSink === undefined
+      ? buildPhaseList({ ...options, skipDerivedGraphPhases: false }).filter(
+          (p) =>
+            [
+              'communities',
+              'processes',
+              'unity-resources',
+              'unity-lifecycle',
+              'unity-process-subtype',
+            ].includes(p.name) && !results.has(p.name),
+        )
+      : [];
 
-    return {
-      graph,
-      repoPath,
-      totalFileCount: totalFiles,
-      communityResult,
-      processResult,
-      unityResult,
-      scopeDiagnostics: scopeSelection.diagnostics,
-      csharpPreprocDiagnostics,
+  if (deferredDerivedPhases.length > 0) {
+    result.runDeferredDerivedPhases = async () => {
+      const derived = await runPipeline(deferredDerivedPhases, ctx, results);
+      result.unityResult = derived.get('unity-resources')?.output as
+        | UnityResourceProcessingResult
+        | undefined;
+      // Presence-checked for the same reason as the block above: a phase the
+      // registry filtered out is absent, and `getPhaseOutput` throws on absent.
+      if (derived.has('communities')) {
+        result.communityResult = getPhaseOutput<CommunitiesOutput>(
+          derived,
+          'communities',
+        ).communityResult;
+      }
+      if (derived.has('processes')) {
+        result.processResult = getPhaseOutput<ProcessesOutput>(derived, 'processes').processResult;
+      }
     };
-  } catch (error) {
-    cleanup();
-    throw error;
   }
+
+  return result;
 };
+
+/**
+ * Caller node id → the simple names of every callee it has a CALLS edge to.
+ *
+ * `edges` may be the streaming sink or the raw graph; `nodes` is always the raw
+ * graph, which holds every node in both modes (only relationships stream). One
+ * O(E) field-wise pass, allocation-free per edge except for the per-caller set.
+ */
+export function collectResolvedCalleeNames(
+  edges: Pick<KnowledgeGraph, 'forEachRelationshipFields'>,
+  nodes: Pick<KnowledgeGraph, 'getNode'>,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const out = new Map<string, Set<string>>();
+  edges.forEachRelationshipFields((sourceId, targetId, type, _confidence, reason) => {
+    if (type !== 'CALLS' || reason === GLOBAL_NAME_FALLBACK_REASON) return;
+    const name = nodes.getNode(targetId)?.properties.name;
+    if (typeof name !== 'string' || name === '') return;
+    let names = out.get(sourceId);
+    if (names === undefined) {
+      names = new Set<string>();
+      out.set(sourceId, names);
+    }
+    names.add(name);
+  });
+  return out;
+}

@@ -1,13 +1,38 @@
 /**
  * Shared test helpers for language resolution integration tests.
  */
+import fs from 'node:fs';
 import path from 'path';
 import { runPipelineFromRepo } from '../../../src/core/ingestion/pipeline.js';
 import type { PipelineOptions } from '../../../src/core/ingestion/pipeline.js';
 import type { PipelineResult } from '../../../src/types/pipeline.js';
-import type { GraphRelationship } from '../../../src/core/graph/types.js';
+import type { GraphRelationship } from 'gitnexus-shared';
 
 export const FIXTURES = path.resolve(__dirname, '..', '..', 'fixtures', 'lang-resolution');
+export const CROSS_FILE_FIXTURES = path.resolve(
+  __dirname,
+  '..',
+  '..',
+  'fixtures',
+  'cross-file-binding',
+);
+
+/**
+ * Materialize an in-memory fixture repo under `root`, creating parent
+ * directories as needed.
+ *
+ * Writes in `Object.entries` order, i.e. the literal's own key order — some
+ * callers depend on that (a fixture whose second file must be written after
+ * the first for the property under test to mean anything), so this must stay
+ * insertion-ordered rather than sorting or parallelizing the writes.
+ */
+export function writeFixtureRepo(root: string, files: Record<string, string>): void {
+  for (const [relPath, content] of Object.entries(files)) {
+    const fullPath = path.join(root, relPath);
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+    fs.writeFileSync(fullPath, content, 'utf8');
+  }
+}
 
 export type RelEdge = {
   source: string;
@@ -39,16 +64,91 @@ export function getRelationships(result: PipelineResult, type: string): RelEdge[
   return edges;
 }
 
+export function getResolutionOutcomes(result: PipelineResult) {
+  return result.resolutionOutcomes ?? [];
+}
+
+/**
+ * Relationships whose source or target id does not resolve to a live graph node.
+ * A non-empty result means the graph has dangling edges (an endpoint that was
+ * never materialized) — e.g. a HAS_METHOD edge owned by a class node that the
+ * structure phase failed to create. Pass `types` to scope the check to specific
+ * relationship types (e.g. `['HAS_METHOD']`).
+ */
+export function findDanglingEdges(
+  result: PipelineResult,
+  types?: string[],
+): Array<{
+  type: string;
+  sourceId: string;
+  targetId: string;
+  missing: 'source' | 'target' | 'both';
+}> {
+  const out: Array<{
+    type: string;
+    sourceId: string;
+    targetId: string;
+    missing: 'source' | 'target' | 'both';
+  }> = [];
+  for (const rel of result.graph.iterRelationships()) {
+    if (types && !types.includes(rel.type)) continue;
+    const src = result.graph.getNode(rel.sourceId);
+    const tgt = result.graph.getNode(rel.targetId);
+    if (src && tgt) continue;
+    out.push({
+      type: rel.type,
+      sourceId: rel.sourceId,
+      targetId: rel.targetId,
+      missing: !src && !tgt ? 'both' : !src ? 'source' : 'target',
+    });
+  }
+  return out;
+}
+
 export function getNodesByLabel(result: PipelineResult, label: string): string[] {
   const names: string[] = [];
-  result.graph.forEachNode(n => {
+  result.graph.forEachNode((n) => {
     if (n.label === label) names.push(n.properties.name);
   });
   return names.sort();
 }
 
+/**
+ * Every node a single fixture file contributed, as sorted `Label:name` and
+ * `Label:qualifiedName` strings — for exact `toEqual` assertions on the whole
+ * file's output rather than spot checks.
+ */
+export function getNodesForFile(
+  result: PipelineResult,
+  filePathSuffix: string,
+): { names: string[]; labelled: string[]; qualified: string[] } {
+  const names: string[] = [];
+  const labelled: string[] = [];
+  const qualified: string[] = [];
+  result.graph.forEachNode((n) => {
+    if (!String(n.properties.filePath ?? '').endsWith(filePathSuffix)) return;
+    const name = n.properties.name;
+    names.push(name);
+    labelled.push(`${n.label}:${name}`);
+    qualified.push(`${n.label}:${String(n.properties.qualifiedName ?? name)}`);
+  });
+  return { names: names.sort(), labelled: labelled.sort(), qualified: qualified.sort() };
+}
+
 export function edgeSet(edges: Array<{ source: string; target: string }>): string[] {
-  return edges.map(e => `${e.source} → ${e.target}`).sort();
+  return edges.map((e) => `${e.source} → ${e.target}`).sort();
+}
+
+/** Get graph nodes by label with full properties (for parameterTypes assertions). */
+export function getNodesByLabelFull(
+  result: PipelineResult,
+  label: string,
+): Array<{ name: string; properties: Record<string, any> }> {
+  const nodes: Array<{ name: string; properties: Record<string, any> }> = [];
+  result.graph.forEachNode((n) => {
+    if (n.label === label) nodes.push({ name: n.properties.name, properties: n.properties });
+  });
+  return nodes.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Tests can pass { skipGraphPhases: true } as third arg for faster runs

@@ -37,8 +37,12 @@ function dedupeCandidates(candidates: RuntimeGraphCandidate[]): RuntimeGraphCand
   const out: RuntimeGraphCandidate[] = [];
   const seen = new Set<string>();
   for (const candidate of candidates) {
-    const source = normalizeName(candidate.sourceId) || `${normalizeName(candidate.sourceName)}@${normalizeName(candidate.sourceFilePath)}`;
-    const target = normalizeName(candidate.targetId) || `${normalizeName(candidate.targetName)}@${normalizeName(candidate.targetFilePath)}`;
+    const source =
+      normalizeName(candidate.sourceId) ||
+      `${normalizeName(candidate.sourceName)}@${normalizeName(candidate.sourceFilePath)}`;
+    const target =
+      normalizeName(candidate.targetId) ||
+      `${normalizeName(candidate.targetName)}@${normalizeName(candidate.targetFilePath)}`;
     const key = `${source}->${target}`;
     if (!source || !target || seen.has(key)) continue;
     seen.add(key);
@@ -59,17 +63,20 @@ async function resolveAnchorSymbols(input: GraphCandidateInput): Promise<AnchorS
       MATCH (n)
       WHERE n.filePath = $filePath AND n.name = $symbolName
       RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.startLine AS startLine
-      LIMIT ${maxSymbols}
+      ORDER BY id
+    LIMIT ${maxSymbols}
     `,
       { filePath: symbolFilePath, symbolName },
     );
     if (Array.isArray(byFile) && byFile.length > 0) {
-      return byFile.map((row) => ({
-        id: normalizeName(row.id),
-        name: normalizeName(row.name),
-        filePath: normalizeName(row.filePath) || undefined,
-        startLine: Number(row.startLine || 1),
-      })).filter((row) => row.id && row.name);
+      return byFile
+        .map((row) => ({
+          id: normalizeName(row.id),
+          name: normalizeName(row.name),
+          filePath: normalizeName(row.filePath) || undefined,
+          startLine: Number(row.startLine || 1),
+        }))
+        .filter((row) => row.id && row.name);
     }
   }
 
@@ -78,6 +85,7 @@ async function resolveAnchorSymbols(input: GraphCandidateInput): Promise<AnchorS
     MATCH (n)
     WHERE n.name IN $symbolNames
     RETURN n.id AS id, n.name AS name, n.filePath AS filePath, n.startLine AS startLine
+    ORDER BY id
     LIMIT ${maxSymbols}
   `,
     { symbolNames: [symbolName] },
@@ -125,6 +133,7 @@ export async function extractRuntimeGraphCandidates(
       RETURN s.id AS sourceId, s.name AS sourceName, s.filePath AS sourceFilePath, s.startLine AS sourceStartLine,
              t.id AS targetId, t.name AS targetName, t.filePath AS targetFilePath, t.startLine AS targetStartLine,
              r.reason AS reason
+      ORDER BY sourceId, targetId, reason
       LIMIT ${maxEdgesPerSymbol}
     `,
       { symbolId: symbol.id },
@@ -141,6 +150,7 @@ export async function extractRuntimeGraphCandidates(
       RETURN m.id AS sourceId, m.name AS sourceName, m.filePath AS sourceFilePath, m.startLine AS sourceStartLine,
              t.id AS targetId, t.name AS targetName, t.filePath AS targetFilePath, t.startLine AS targetStartLine,
              r.reason AS reason
+      ORDER BY sourceId, targetId, reason
       LIMIT ${maxEdgesPerSymbol}
     `,
       { symbolId: symbol.id },
@@ -156,6 +166,7 @@ export async function extractRuntimeGraphCandidates(
       RETURN caller.id AS sourceId, caller.name AS sourceName, caller.filePath AS sourceFilePath, caller.startLine AS sourceStartLine,
              s.id AS targetId, s.name AS targetName, s.filePath AS targetFilePath, s.startLine AS targetStartLine,
              r.reason AS reason
+      ORDER BY sourceId, targetId, reason
       LIMIT ${maxEdgesPerSymbol}
     `,
       { symbolId: symbol.id },
@@ -172,6 +183,7 @@ export async function extractRuntimeGraphCandidates(
       RETURN caller.id AS sourceId, caller.name AS sourceName, caller.filePath AS sourceFilePath, caller.startLine AS sourceStartLine,
              m.id AS targetId, m.name AS targetName, m.filePath AS targetFilePath, m.startLine AS targetStartLine,
              r.reason AS reason
+      ORDER BY sourceId, targetId, reason
       LIMIT ${maxEdgesPerSymbol}
     `,
       { symbolId: symbol.id },

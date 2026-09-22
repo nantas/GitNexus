@@ -1,0 +1,127 @@
+/**
+ * Shared AST utilities for the embedding pipeline.
+ * Centralizes parser caching and tree-sitter node lookups
+ * used by both chunker.ts and structural-extractor.ts.
+ */
+
+import {
+  createParserForLanguage,
+  isLanguageAvailable,
+  resolveLanguageKey,
+} from '../tree-sitter/parser-loader.js';
+import { parseSourceSafe } from '../tree-sitter/safe-parse.js';
+import { getLanguageForFileContent, getProvider } from '../ingestion/languages/index.js';
+
+const parserCache = new Map<string, any>();
+
+/**
+ * Ensure parser is initialized and language is loaded, then parse content.
+ * Returns null if language is unavailable or parsing fails.
+ */
+export const ensureAndParse = async (content: string, filePath: string): Promise<any | null> => {
+  // Same classifier as ingest. Filename-only maps `.h` → C++, so Objective-C
+  // headers (and method snippets from those headers) would parse with the
+  // wrong grammar and miss class_interface / protocol_declaration / methods.
+  const language = getLanguageForFileContent(filePath, content);
+  if (!language) return null;
+  if (!isLanguageAvailable(language)) return null;
+
+  const parserKey = resolveLanguageKey(language, filePath);
+  let parserInstance = parserCache.get(parserKey);
+  if (!parserInstance) {
+    parserInstance = await createParserForLanguage(language, filePath);
+    parserCache.set(parserKey, parserInstance);
+  }
+
+  // Same text the ingestion worker parses — otherwise a provider whose
+  // `preprocessSource` repairs a declaration (Swift conditional directives,
+  // C++ UE macros, Dart extension types) would leave embeddings looking at an
+  // error-recovered tree. Resolved from `language` so the transform and the
+  // parser always come from the same provider. Length-preserving, so node
+  // offsets still index `content`.
+  const parseContent = getProvider(language).preprocessSource?.(content, filePath) ?? content;
+
+  return parseSourceSafe(parserInstance, parseContent);
+};
+
+const FUNCTION_LIKE_TYPES = new Set([
+  'function_declaration',
+  'function_definition',
+  'method_declaration',
+  'method_definition',
+  'function_item',
+  'function_signature_item',
+  'arrow_function',
+  'function_expression',
+  'generator_function_declaration',
+  'generator_function',
+  'async_function_declaration',
+  'async_arrow_function',
+  'constructor_declaration',
+  'constructor_definition',
+  'compact_constructor_declaration',
+  'short_function_declaration',
+  'proc_declaration',
+  'func_literal',
+  'local_function_statement',
+  'anonymous_function',
+  'lambda_literal',
+  'init_declaration',
+  'deinit_declaration',
+]);
+
+/**
+ * Find the first function/method-like declaration in a snippet AST.
+ * Used by the chunker when parsing node.content where absolute line
+ * numbers don't apply.
+ */
+export const findFunctionNode = (root: any): any | null => {
+  // Iterative DFS — avoids stack overflow on deeply nested ASTs.
+  const stack = [root];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    if (FUNCTION_LIKE_TYPES.has(node.type)) return node;
+    for (let i = node.namedChildCount - 1; i >= 0; i--) {
+      const child = node.namedChild(i);
+      if (child) stack.push(child);
+    }
+  }
+  return null;
+};
+
+/**
+ * Find the first class/struct/interface/enum-like declaration in an AST.
+ * Used when parsing node.content (a snippet, not a full file) where
+ * absolute line numbers don't apply.
+ */
+export const findDeclarationNode = (root: any): any | null => {
+  const CLASS_LIKE_TYPES = new Set([
+    'class_declaration',
+    'class_definition',
+    'struct_declaration',
+    'struct_item',
+    'interface_declaration',
+    'interface_definition',
+    'protocol_declaration', // Objective-C protocol
+    'class_interface', // Objective-C class, category, or extension
+    'class_implementation', // Objective-C implementation
+    'enum_declaration',
+    'enum_item',
+    'type_declaration', // Go: type X struct
+    'declaration', // Go: type X struct
+    'object_declaration', // Kotlin: object
+    'impl_item', // Rust: impl
+  ]);
+
+  // Iterative DFS — avoids stack overflow on deeply nested ASTs.
+  const stack = [root];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    if (CLASS_LIKE_TYPES.has(node.type)) return node;
+    for (let i = node.namedChildCount - 1; i >= 0; i--) {
+      const child = node.namedChild(i);
+      if (child) stack.push(child);
+    }
+  }
+  return null;
+};

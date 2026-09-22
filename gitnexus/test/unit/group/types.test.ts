@@ -1,0 +1,152 @@
+import { describe, it, expect } from 'vitest';
+import type {
+  GroupConfig,
+  ContractType,
+  ExtractedContract,
+  CrossLink,
+  ContractRegistry,
+  GroupManifestLink,
+  GroupImpactResult,
+  MatchType,
+} from '../../../src/core/group/types.js';
+
+describe('Group types', () => {
+  it('GroupConfig has required fields', () => {
+    const config: GroupConfig = {
+      version: 1,
+      name: 'company',
+      description: 'All company microservices',
+      repos: { 'hr/hiring/backend': 'hr-hiring-backend' },
+      links: [],
+      packages: {},
+      detect: {
+        http: true,
+        graphql: true,
+        grpc: true,
+        thrift: true,
+        topics: true,
+        includes: true,
+        workspace_deps: true,
+      },
+      matching: {},
+    };
+    expect(config.version).toBe(1);
+    expect(config.name).toBe('company');
+  });
+
+  it('ContractRegistry has required structure', () => {
+    const registry: ContractRegistry = {
+      version: 1,
+      generatedAt: '2026-03-31T10:00:00Z',
+      repoSnapshots: {
+        'hr/hiring/backend': { indexedAt: '2026-03-30T21:14:14Z', lastCommit: '5838fb8d' },
+      },
+      missingRepos: [],
+      contracts: [],
+      crossLinks: [],
+    };
+    expect(registry.version).toBe(1);
+    expect(registry.contracts).toHaveLength(0);
+  });
+
+  it('ExtractedContract accepts all contract types', () => {
+    const types: ContractType[] = ['http', 'graphql', 'grpc', 'topic', 'lib', 'custom'];
+    types.forEach((t) => {
+      const contract: ExtractedContract = {
+        contractId: `${t}::test`,
+        type: t,
+        role: 'provider',
+        symbolUid: 'uid-123',
+        symbolRef: { filePath: 'src/test.ts', name: 'testFn' },
+        symbolName: 'testFn',
+        confidence: 1.0,
+        meta: {},
+      };
+      expect(contract.type).toBe(t);
+    });
+  });
+
+  it('ExtractedContract accepts thrift contract type', () => {
+    const contract: ExtractedContract = {
+      contractId: 'thrift::billing.v1.OrderService/PlaceOrder',
+      type: 'thrift',
+      role: 'provider',
+      symbolUid: 'uid-thrift',
+      symbolRef: { filePath: 'idl/order.thrift', name: 'OrderService.PlaceOrder' },
+      symbolName: 'OrderService.PlaceOrder',
+      confidence: 0.9,
+      meta: {},
+    };
+    expect(contract.type).toBe('thrift');
+  });
+
+  it('DetectConfig includes thrift toggle', () => {
+    const config: GroupConfig = {
+      version: 1,
+      name: 'company',
+      description: 'All company microservices',
+      repos: { orders: 'orders-repo' },
+      links: [],
+      packages: {},
+      detect: {
+        http: true,
+        graphql: true,
+        grpc: true,
+        thrift: true,
+        topics: true,
+        includes: true,
+        workspace_deps: true,
+      },
+      matching: {},
+    };
+    expect(config.detect.thrift).toBe(true);
+  });
+
+  it('CrossLink stores match metadata', () => {
+    const link: CrossLink = {
+      from: {
+        repo: 'frontend',
+        symbolUid: 'uid-1',
+        symbolRef: { filePath: 'src/api.ts', name: 'fetchUsers' },
+      },
+      to: {
+        repo: 'backend',
+        symbolUid: 'uid-2',
+        symbolRef: { filePath: 'src/ctrl.ts', name: 'UserController.list' },
+      },
+      type: 'http',
+      contractId: 'http::GET::/api/users',
+      matchType: 'exact',
+      confidence: 1.0,
+    };
+    const _m: MatchType = link.matchType;
+    expect(_m).toBe('exact');
+  });
+
+  it('GroupManifestLink is valid', () => {
+    const l: GroupManifestLink = {
+      from: 'a',
+      to: 'b',
+      type: 'http',
+      contract: '/x',
+      role: 'provider',
+    };
+    expect(l.contract).toBe('/x');
+  });
+
+  it('uses the shared closed union for unused impact-axis reasons', () => {
+    type UnusedAxis = NonNullable<GroupImpactResult['riskScale']>['unusedAxes'][number];
+    const valid = {
+      axis: 'processes',
+      reason: 'enrichment-query-failed',
+    } satisfies UnusedAxis;
+    const invalid = {
+      axis: 'processes',
+      // @ts-expect-error unknown reasons must not widen the shared contract
+      reason: 'not-a-real-reason',
+    } satisfies UnusedAxis;
+
+    expect(valid.reason).toBe('enrichment-query-failed');
+    expect(invalid.reason).toBe('not-a-real-reason');
+  });
+});

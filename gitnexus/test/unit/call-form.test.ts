@@ -1,18 +1,25 @@
 import { describe, it, expect } from 'vitest';
-import { inferCallForm, extractReceiverName, type SyntaxNode } from '../../src/core/ingestion/utils.js';
-import { createSymbolTable } from '../../src/core/ingestion/symbol-table.js';
+import {
+  inferCallForm,
+  extractReceiverName,
+} from '../../src/core/ingestion/utils/call-analysis.js';
+import type { SyntaxNode } from '../../src/core/ingestion/utils/ast-helpers.js';
+import { createSymbolTable } from '../../src/core/ingestion/model/symbol-table.js';
 import Parser from 'tree-sitter';
 import TypeScript from 'tree-sitter-typescript';
 import Python from 'tree-sitter-python';
 import Java from 'tree-sitter-java';
 import CSharp from 'tree-sitter-c-sharp';
-import Kotlin from 'tree-sitter-kotlin';
+import { requireVendoredGrammar } from '../../src/core/tree-sitter/vendored-grammars.js';
 import Go from 'tree-sitter-go';
 import Rust from 'tree-sitter-rust';
 import CPP from 'tree-sitter-cpp';
 import PHP from 'tree-sitter-php';
-import { LANGUAGE_QUERIES } from '../../src/core/ingestion/tree-sitter-queries.js';
 import { SupportedLanguages } from '../../src/config/supported-languages.js';
+import { getProvider } from '../../src/core/ingestion/languages/index.js';
+
+// Vendored grammar — loaded from vendor/ by absolute path, never node_modules (#2111).
+const Kotlin = requireVendoredGrammar('tree-sitter-kotlin');
 
 /**
  * Helper: parse code, run the language query, and return all @call captures
@@ -23,7 +30,8 @@ function extractCallCaptures(
   code: string,
   language: string,
 ): Array<{ callNode: SyntaxNode; nameNode: SyntaxNode; calledName: string }> {
-  const queryStr = LANGUAGE_QUERIES[language];
+  const provider = getProvider(language as SupportedLanguages);
+  const queryStr = provider.treeSitterQueries;
   if (!queryStr) throw new Error(`No query for ${language}`);
 
   const tree = parser.parse(code);
@@ -57,7 +65,7 @@ describe('inferCallForm', () => {
     it('detects free call', () => {
       parser.setLanguage(TypeScript.typescript);
       const captures = extractCallCaptures(parser, 'doStuff()', SupportedLanguages.TypeScript);
-      const match = captures.find(c => c.calledName === 'doStuff');
+      const match = captures.find((c) => c.calledName === 'doStuff');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('free');
     });
@@ -65,7 +73,7 @@ describe('inferCallForm', () => {
     it('detects member call', () => {
       parser.setLanguage(TypeScript.typescript);
       const captures = extractCallCaptures(parser, 'user.save()', SupportedLanguages.TypeScript);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('member');
     });
@@ -75,7 +83,7 @@ describe('inferCallForm', () => {
     it('detects free call', () => {
       parser.setLanguage(Python);
       const captures = extractCallCaptures(parser, 'print_result()', SupportedLanguages.Python);
-      const match = captures.find(c => c.calledName === 'print_result');
+      const match = captures.find((c) => c.calledName === 'print_result');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('free');
     });
@@ -83,7 +91,7 @@ describe('inferCallForm', () => {
     it('detects member call', () => {
       parser.setLanguage(Python);
       const captures = extractCallCaptures(parser, 'self.save()', SupportedLanguages.Python);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('member');
     });
@@ -94,7 +102,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(Java);
       const code = `class Foo { void run() { doStuff(); } }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Java);
-      const match = captures.find(c => c.calledName === 'doStuff');
+      const match = captures.find((c) => c.calledName === 'doStuff');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('free');
     });
@@ -103,7 +111,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(Java);
       const code = `class Foo { void run() { user.save(); } }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Java);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('member');
     });
@@ -114,7 +122,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(CSharp);
       const code = `class Foo { void Run() { DoStuff(); } }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.CSharp);
-      const match = captures.find(c => c.calledName === 'DoStuff');
+      const match = captures.find((c) => c.calledName === 'DoStuff');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('free');
     });
@@ -123,7 +131,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(CSharp);
       const code = `class Foo { void Run() { user.Save(); } }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.CSharp);
-      const match = captures.find(c => c.calledName === 'Save');
+      const match = captures.find((c) => c.calledName === 'Save');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('member');
     });
@@ -134,7 +142,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(Go);
       const code = `package main\nfunc main() { doStuff() }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Go);
-      const match = captures.find(c => c.calledName === 'doStuff');
+      const match = captures.find((c) => c.calledName === 'doStuff');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('free');
     });
@@ -143,7 +151,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(Go);
       const code = `package main\nfunc main() { user.Save() }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Go);
-      const match = captures.find(c => c.calledName === 'Save');
+      const match = captures.find((c) => c.calledName === 'Save');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('member');
     });
@@ -154,7 +162,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(Rust);
       const code = `fn main() { do_stuff(); }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Rust);
-      const match = captures.find(c => c.calledName === 'do_stuff');
+      const match = captures.find((c) => c.calledName === 'do_stuff');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('free');
     });
@@ -163,7 +171,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(Rust);
       const code = `fn main() { user.save(); }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Rust);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('member');
     });
@@ -172,7 +180,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(Rust);
       const code = `fn main() { Foo::new(); }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Rust);
-      const match = captures.find(c => c.calledName === 'new');
+      const match = captures.find((c) => c.calledName === 'new');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('free');
     });
@@ -183,7 +191,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(CPP);
       const code = `void main() { doStuff(); }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.CPlusPlus);
-      const match = captures.find(c => c.calledName === 'doStuff');
+      const match = captures.find((c) => c.calledName === 'doStuff');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('free');
     });
@@ -192,7 +200,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(CPP);
       const code = `void main() { obj.run(); }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.CPlusPlus);
-      const match = captures.find(c => c.calledName === 'run');
+      const match = captures.find((c) => c.calledName === 'run');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('member');
     });
@@ -203,7 +211,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(PHP.php);
       const code = `<?php doStuff(); ?>`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.PHP);
-      const match = captures.find(c => c.calledName === 'doStuff');
+      const match = captures.find((c) => c.calledName === 'doStuff');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('free');
     });
@@ -212,7 +220,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(PHP.php);
       const code = `<?php $user->save(); ?>`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.PHP);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('member');
     });
@@ -221,7 +229,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(PHP.php);
       const code = `<?php Foo::bar(); ?>`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.PHP);
-      const match = captures.find(c => c.calledName === 'bar');
+      const match = captures.find((c) => c.calledName === 'bar');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('member');
     });
@@ -232,7 +240,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(Kotlin);
       const code = `fun main() { doStuff() }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Kotlin);
-      const match = captures.find(c => c.calledName === 'doStuff');
+      const match = captures.find((c) => c.calledName === 'doStuff');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('free');
     });
@@ -241,7 +249,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(Kotlin);
       const code = `fun main() { user.save() }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Kotlin);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('member');
     });
@@ -250,7 +258,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(Kotlin);
       const code = `fun main() { val x = Foo() }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Kotlin);
-      const match = captures.find(c => c.calledName === 'Foo');
+      const match = captures.find((c) => c.calledName === 'Foo');
       expect(match).toBeDefined();
       // Kotlin Foo() is syntactically a call_expression, not constructor_invocation
       // Constructor discrimination happens in Phase 2 via symbol kind matching
@@ -261,7 +269,7 @@ describe('inferCallForm', () => {
       parser.setLanguage(Kotlin);
       const code = `open class Base\nclass Derived : Base()`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Kotlin);
-      const match = captures.find(c => c.calledName === 'Base');
+      const match = captures.find((c) => c.calledName === 'Base');
       // constructor_invocation is captured by heritage queries, not call queries
       // If it happens to be captured, it should be 'constructor'
       if (match) {
@@ -278,7 +286,7 @@ describe('extractReceiverName', () => {
     it('extracts simple identifier receiver', () => {
       parser.setLanguage(TypeScript.typescript);
       const captures = extractCallCaptures(parser, 'user.save()', SupportedLanguages.TypeScript);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('user');
     });
@@ -287,15 +295,19 @@ describe('extractReceiverName', () => {
       parser.setLanguage(TypeScript.typescript);
       const code = `class Foo { run() { this.save(); } }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.TypeScript);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('this');
     });
 
     it('returns undefined for chained call receiver', () => {
       parser.setLanguage(TypeScript.typescript);
-      const captures = extractCallCaptures(parser, 'getUser().save()', SupportedLanguages.TypeScript);
-      const match = captures.find(c => c.calledName === 'save');
+      const captures = extractCallCaptures(
+        parser,
+        'getUser().save()',
+        SupportedLanguages.TypeScript,
+      );
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBeUndefined();
     });
@@ -303,7 +315,7 @@ describe('extractReceiverName', () => {
     it('returns undefined for free call', () => {
       parser.setLanguage(TypeScript.typescript);
       const captures = extractCallCaptures(parser, 'doStuff()', SupportedLanguages.TypeScript);
-      const match = captures.find(c => c.calledName === 'doStuff');
+      const match = captures.find((c) => c.calledName === 'doStuff');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBeUndefined();
     });
@@ -311,7 +323,7 @@ describe('extractReceiverName', () => {
     it('extracts receiver from optional chain call user?.save()', () => {
       parser.setLanguage(TypeScript.typescript);
       const captures = extractCallCaptures(parser, 'user?.save()', SupportedLanguages.TypeScript);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('user');
     });
@@ -320,7 +332,7 @@ describe('extractReceiverName', () => {
       parser.setLanguage(TypeScript.typescript);
       const code = `class Foo { run() { this?.save(); } }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.TypeScript);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('this');
     });
@@ -330,7 +342,7 @@ describe('extractReceiverName', () => {
     it('extracts simple identifier receiver', () => {
       parser.setLanguage(Python);
       const captures = extractCallCaptures(parser, 'user.save()', SupportedLanguages.Python);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('user');
     });
@@ -338,7 +350,7 @@ describe('extractReceiverName', () => {
     it('extracts "self" as receiver', () => {
       parser.setLanguage(Python);
       const captures = extractCallCaptures(parser, 'self.save()', SupportedLanguages.Python);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('self');
     });
@@ -349,7 +361,7 @@ describe('extractReceiverName', () => {
       parser.setLanguage(Java);
       const code = `class Foo { void run() { user.save(); } }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Java);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('user');
     });
@@ -360,7 +372,7 @@ describe('extractReceiverName', () => {
       parser.setLanguage(Go);
       const code = `package main\nfunc main() { user.Save() }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Go);
-      const match = captures.find(c => c.calledName === 'Save');
+      const match = captures.find((c) => c.calledName === 'Save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('user');
     });
@@ -371,7 +383,7 @@ describe('extractReceiverName', () => {
       parser.setLanguage(Rust);
       const code = `fn main() { user.save(); }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Rust);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('user');
     });
@@ -382,7 +394,7 @@ describe('extractReceiverName', () => {
       parser.setLanguage(CSharp);
       const code = `class Foo { void Run() { user.Save(); } }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.CSharp);
-      const match = captures.find(c => c.calledName === 'Save');
+      const match = captures.find((c) => c.calledName === 'Save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('user');
     });
@@ -391,7 +403,7 @@ describe('extractReceiverName', () => {
       parser.setLanguage(CSharp);
       const code = `class Foo { void Run() { user?.Save(); } }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.CSharp);
-      const match = captures.find(c => c.calledName === 'Save');
+      const match = captures.find((c) => c.calledName === 'Save');
       // C# conditional_access_expression (user?.Save()) is now captured via member_binding_expression
       expect(match).toBeDefined();
       expect(inferCallForm(match!.callNode, match!.nameNode)).toBe('member');
@@ -404,7 +416,7 @@ describe('extractReceiverName', () => {
       parser.setLanguage(Kotlin);
       const code = `fun main() { user.save() }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Kotlin);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('user');
     });
@@ -413,7 +425,7 @@ describe('extractReceiverName', () => {
       parser.setLanguage(Kotlin);
       const code = `fun main() { user?.save() }`;
       const captures = extractCallCaptures(parser, code, SupportedLanguages.Kotlin);
-      const match = captures.find(c => c.calledName === 'save');
+      const match = captures.find((c) => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('user');
     });
@@ -443,13 +455,17 @@ describe('ownerId on SymbolDefinition', () => {
     expect(def!.ownerId).toBeUndefined();
   });
 
-  it('propagates ownerId through lookupFuzzy', () => {
+  it('propagates ownerId through a free Function registration', () => {
+    // Post-A4 Unit 4, Method is no longer in FREE_CALLABLE_TYPES so this test
+    // exercises ownerId propagation through the free-callable index using
+    // a Function label. Method-with-ownerId propagation is covered via
+    // methodsByName in method-registry.test.ts.
     const st = createSymbolTable();
-    st.add('src/foo.ts', 'save', 'Method:src/foo.ts:save', 'Method', {
+    st.add('src/foo.ts', 'save', 'Function:src/foo.ts:save', 'Function', {
       ownerId: 'Class:src/foo.ts:User',
     });
 
-    const defs = st.lookupFuzzy('save');
+    const defs = st.lookupCallableByName('save');
     expect(defs).toHaveLength(1);
     expect(defs[0].ownerId).toBe('Class:src/foo.ts:User');
   });

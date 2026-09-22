@@ -58,11 +58,16 @@ function hasStructuredVerifierAnchors(input: VerifyRuntimeChainInput): boolean {
   if (hasValue(input.resourceSeedPath)) return true;
   if (hasValue(input.symbolName)) return true;
   if (hasValue(input.symbolFilePath)) return true;
-  if (Array.isArray(input.mappedSeedTargets) && input.mappedSeedTargets.some((value) => hasValue(value))) return true;
   if (
-    Array.isArray(input.resourceBindings)
-    && input.resourceBindings.some((binding) => hasValue(binding?.resourcePath))
-  ) return true;
+    Array.isArray(input.mappedSeedTargets) &&
+    input.mappedSeedTargets.some((value) => hasValue(value))
+  )
+    return true;
+  if (
+    Array.isArray(input.resourceBindings) &&
+    input.resourceBindings.some((binding) => hasValue(binding?.resourcePath))
+  )
+    return true;
   return false;
 }
 
@@ -90,10 +95,13 @@ function toGraphOnlyRuntimeChainResult(input: {
   });
 
   const hops: RuntimeChainHop[] = input.candidates.slice(0, 20).map((candidate) => ({
-    hop_type: String(candidate.reason || '').startsWith('unity-rule-')
-      || String(candidate.reason || '').toLowerCase().includes('bridge')
-      ? 'code_loader'
-      : 'code_runtime',
+    hop_type:
+      String(candidate.reason || '').startsWith('unity-rule-') ||
+      String(candidate.reason || '')
+        .toLowerCase()
+        .includes('bridge')
+        ? 'code_loader'
+        : 'code_runtime',
     anchor: `${candidate.sourceFilePath || candidate.sourceName}:${candidate.sourceStartLine || 1}->${candidate.targetFilePath || candidate.targetName}:${candidate.targetStartLine || 1}`,
     confidence: String(candidate.reason || '').startsWith('unity-rule-') ? 'high' : 'medium',
     note: String(candidate.reason || '').startsWith('unity-rule-')
@@ -130,27 +138,37 @@ function buildDefaultVerifyNextCommand(input: {
   symbolName?: string;
   resourceSeedPath?: string;
 }): string {
-  const escapedQuery = resolveFollowUpSubject(input)
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"');
+  const escapedQuery = resolveFollowUpSubject(input).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `node gitnexus/dist/cli/index.js query --unity-resources on --unity-hydration parity --runtime-chain-verify on-demand "${escapedQuery}"`;
 }
 
-async function verifyRuleDrivenRuntimeChain(input: VerifyRuntimeChainInput): Promise<RuntimeChainResult> {
+async function verifyRuleDrivenRuntimeChain(
+  input: VerifyRuntimeChainInput,
+): Promise<RuntimeChainResult> {
   const ruleId = input.rule?.id;
   if (!ruleId) {
-    return { status: 'failed', evidence_level: 'none', evidence_source: 'analyze_time', hops: [], gaps: [] };
+    return {
+      status: 'failed',
+      evidence_level: 'none',
+      evidence_source: 'analyze_time',
+      hops: [],
+      gaps: [],
+    };
   }
   try {
-    const rows = await input.executeParameterized(`
+    const rows = await input.executeParameterized(
+      `
       MATCH (s)-[r:CodeRelation {type: 'CALLS'}]->(t)
       WHERE r.reason CONTAINS $ruleId
         AND r.reason STARTS WITH 'unity-rule-'
       RETURN s.name AS sourceName, s.filePath AS sourceFilePath, s.startLine AS sourceStartLine,
              t.name AS targetName, t.filePath AS targetFilePath, t.startLine AS targetStartLine,
              r.reason AS reason
+      ORDER BY s.id, t.id, r.reason
       LIMIT 20
-    `, { ruleId });
+    `,
+      { ruleId },
+    );
     if (rows.length > 0) {
       const hops: RuntimeChainHop[] = rows.map((row) => ({
         hop_type: 'code_runtime' as RuntimeChainHopType,
@@ -183,7 +201,8 @@ export async function verifyRuntimeChainOnDemand(
   input: VerifyRuntimeChainInput,
 ): Promise<RuntimeChainResult | undefined> {
   if (!input.rule) {
-    if (!hasStructuredVerifierAnchors(input) || !String(input.symbolName || '').trim()) return undefined;
+    if (!hasStructuredVerifierAnchors(input) || !String(input.symbolName || '').trim())
+      return undefined;
     const candidates = await extractRuntimeGraphCandidates({
       executeParameterized: input.executeParameterized,
       symbolName: input.symbolName,
@@ -233,11 +252,11 @@ function buildGraphOnlyRuntimeClaim(input: {
   resourceSeedPath?: string;
   minimumEvidenceSatisfied?: boolean;
 }): RuntimeClaim {
-  const normalizedStatus: RuntimeClaim['status'] = (
-    input.runtimeChain.status === 'pending' ? 'failed' : input.runtimeChain.status
-  );
-  const verificationFailed = normalizedStatus === 'failed'
-    || (input.runtimeChain.evidence_level === 'none' && normalizedStatus !== 'verified_full');
+  const normalizedStatus: RuntimeClaim['status'] =
+    input.runtimeChain.status === 'pending' ? 'failed' : input.runtimeChain.status;
+  const verificationFailed =
+    normalizedStatus === 'failed' ||
+    (input.runtimeChain.evidence_level === 'none' && normalizedStatus !== 'verified_full');
   const nextAction = buildDefaultVerifyNextCommand({
     queryText: input.queryText,
     symbolName: input.symbolName,
@@ -254,9 +273,10 @@ function buildGraphOnlyRuntimeClaim(input: {
     },
     status: verificationFailed ? 'failed' : normalizedStatus,
     evidence_level: input.runtimeChain.evidence_level,
-    guarantees: (!verificationFailed && normalizedStatus === 'verified_full')
-      ? ['runtime_chain_graph_closure']
-      : [],
+    guarantees:
+      !verificationFailed && normalizedStatus === 'verified_full'
+        ? ['runtime_chain_graph_closure']
+        : [],
     non_guarantees: [
       'no_runtime_execution',
       'no_dynamic_data_flow_proof',
@@ -266,15 +286,16 @@ function buildGraphOnlyRuntimeClaim(input: {
     gaps: input.runtimeChain.gaps,
     ...(verificationFailed
       ? {
-        reason: 'rule_matched_but_verification_failed' as const,
-        next_action: nextAction,
-      }
+          reason: 'rule_matched_but_verification_failed' as const,
+          next_action: nextAction,
+        }
       : {}),
   };
 
-  const chainClosed = base.status === 'verified_full'
-    && base.evidence_level === 'verified_chain'
-    && base.gaps.length === 0;
+  const chainClosed =
+    base.status === 'verified_full' &&
+    base.evidence_level === 'verified_chain' &&
+    base.gaps.length === 0;
   if (input.minimumEvidenceSatisfied === false && !chainClosed) {
     return {
       ...base,

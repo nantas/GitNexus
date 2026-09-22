@@ -1,0 +1,398 @@
+/**
+ * Tests for incremental DB writeback subgraph extraction.
+ *
+ * Locks the Finding 1 fix (PR #1479 review): cross-file edges between
+ * two unchanged files MUST land in the writeback subgraph when a third
+ * (changed) file alters their cross-file resolution. The pre-fix
+ * behaviour silently dropped those edges, leaving stale rows in the DB.
+ *
+ * These tests use synthetic graphs constructed via createKnowledgeGraph
+ * directly — they don't run the parser, so they're cheap and stable.
+ */
+
+import { describe, it, expect } from 'vitest';
+import type { GraphNode, GraphRelationship } from 'gitnexus-shared';
+import { createKnowledgeGraph } from '../../src/core/graph/graph.js';
+import {
+  extractChangedSubgraph,
+  computeEffectiveWriteSet,
+} from '../../src/core/incremental/subgraph-extract.js';
+import {
+  SPRING_AUTO_CONFIGURATION_SYNTHETIC_DESCRIPTION,
+  SPRING_AUTO_CONFIGURATION_SYNTHETIC_ID_PREFIX,
+} from '../../src/core/ingestion/frameworks/spring/auto-configuration.js';
+
+const makeFileNode = (id: string, filePath: string, label = 'Function'): GraphNode =>
+  ({
+    id,
+    label,
+    properties: { filePath, name: id },
+  }) as unknown as GraphNode;
+
+const makeWideNode = (id: string, label: 'Community' | 'Process'): GraphNode =>
+  ({
+    id,
+    label,
+    properties: {},
+  }) as unknown as GraphNode;
+
+const makeRel = (
+  id: string,
+  sourceId: string,
+  targetId: string,
+  type = 'CALLS',
+  reason = 'test',
+): GraphRelationship =>
+  ({
+    id,
+    sourceId,
+    targetId,
+    type,
+    reason,
+    properties: {},
+  }) as unknown as GraphRelationship;
+
+describe('extractChangedSubgraph', () => {
+  it('includes nodes whose filePath is in the explicit toWriteSet', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('a', '/repo/a.ts'));
+    g.addNode(makeFileNode('c', '/repo/c.ts'));
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/c.ts']));
+
+    expect(sub.nodes.map((n) => n.id).sort()).toEqual(['c']);
+  });
+
+  it('always includes graph-wide nodes (Community, Process)', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('a', '/repo/a.ts'));
+    g.addNode(makeWideNode('comm-1', 'Community'));
+    g.addNode(makeWideNode('proc-1', 'Process'));
+
+    const sub = extractChangedSubgraph(g, new Set([])); // no files changed
+
+    expect(sub.nodes.map((n) => n.id).sort()).toEqual(['comm-1', 'proc-1']);
+  });
+
+  it('omits Community/Process when includeDerivedGraphWide is false (#3016)', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('a', '/repo/a.ts'));
+    g.addNode(makeWideNode('comm-1', 'Community'));
+    g.addNode(makeWideNode('proc-1', 'Process'));
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/a.ts']), {
+      includeDerivedGraphWide: false,
+    });
+
+    expect(sub.nodes.map((n) => n.id).sort()).toEqual(['a']);
+  });
+
+  it('always includes Spring auto-configuration synthetic Class nodes', () => {
+    const g = createKnowledgeGraph();
+    g.addNode({
+      id: `${SPRING_AUTO_CONFIGURATION_SYNTHETIC_ID_PREFIX}com.example.ExternalAutoConfiguration`,
+      label: 'Class',
+      properties: {
+        name: 'ExternalAutoConfiguration',
+        filePath: '/repo/META-INF/spring.factories',
+        description: SPRING_AUTO_CONFIGURATION_SYNTHETIC_DESCRIPTION,
+      },
+    });
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/unrelated.ts']));
+
+    expect(sub.nodes.map((node) => node.id)).toEqual([
+      `${SPRING_AUTO_CONFIGURATION_SYNTHETIC_ID_PREFIX}com.example.ExternalAutoConfiguration`,
+    ]);
+  });
+
+  it('always includes Destination nodes, which carry no filePath when resolved', () => {
+    // The defect this pins: a RESOLVED destination stores `filePath: ''` so the
+    // incremental DETACH DELETE cannot cut a node shared across files — which
+    // also made the include test below (`filePath && toWriteSet.has(filePath)`)
+    // reject it. A newly added file publishing to a new topic reported
+    // `added=1`, exit 0, and put neither the destination nor the publisher's
+    // edge into the graph, so after the first index every new topic was
+    // invisible until a full rebuild.
+    const g = createKnowledgeGraph();
+    g.addNode({
+      id: 'Destination:orders.v1',
+      label: 'Destination',
+      properties: { name: 'orders.v1', filePath: '', address: 'orders.v1', broker: 'kafka' },
+    });
+    g.addNode(makeFileNode('new:publish', '/repo/new-publisher.java', 'Method'));
+    g.addRelationship(
+      makeRel('e1', 'new:publish', 'Destination:orders.v1', 'PUBLISHES_TO', 'spring-kafka:arg0[0]'),
+    );
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/new-publisher.java']));
+
+    expect(sub.nodes.map((n) => n.id).sort()).toEqual(['Destination:orders.v1', 'new:publish']);
+    expect(sub.relationships.map((r) => r.id)).toEqual(['e1']);
+  });
+
+  it('re-includes a destination whose only referrers are unchanged files', () => {
+    // The other half. `deleteAllDestinations` clears the layer before the
+    // writeback, so anything not re-included here is DELETED rather than left
+    // stale — including the edges of files outside the write set, which come
+    // back because the destination is one of their endpoints.
+    const g = createKnowledgeGraph();
+    g.addNode({
+      id: 'Destination:orders.v1',
+      label: 'Destination',
+      properties: { name: 'orders.v1', filePath: '', address: 'orders.v1', broker: 'kafka' },
+    });
+    g.addNode(makeFileNode('old:consume', '/repo/untouched.java', 'Method'));
+    g.addRelationship(
+      makeRel(
+        'e1',
+        'old:consume',
+        'Destination:orders.v1',
+        'CONSUMES_FROM',
+        'spring-KafkaListener',
+      ),
+    );
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/somewhere-else.java']));
+
+    expect(sub.nodes.map((n) => n.id)).toEqual(['Destination:orders.v1']);
+    expect(sub.relationships.map((r) => r.id)).toEqual(['e1']);
+  });
+
+  it('includes an UNRESOLVED destination too, though it does carry a filePath', () => {
+    // It would ride the ordinary per-file rule, but the delete-all removes it
+    // as well, so leaving it to that rule would drop it rather than stale it.
+    const g = createKnowledgeGraph();
+    g.addNode({
+      id: 'Destination:site-keyed',
+      label: 'Destination',
+      properties: {
+        name: '${app.topic}',
+        filePath: '/repo/untouched.java',
+        resolution: 'unresolved-config-key',
+      },
+    });
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/other.java']));
+
+    expect(sub.nodes.map((n) => n.id)).toEqual(['Destination:site-keyed']);
+  });
+
+  it('keeps Destination graph-wide even when the derived layer is preserved', () => {
+    // #3016's `includeDerivedGraphWide: false` withholds Community/Process
+    // because those are NOT delete-alled on that path. Destination is, so
+    // withholding it would drop the layer outright.
+    const g = createKnowledgeGraph();
+    g.addNode({
+      id: 'Destination:orders.v1',
+      label: 'Destination',
+      properties: { name: 'orders.v1', filePath: '', address: 'orders.v1' },
+    });
+    g.addNode(makeWideNode('community:1', 'Community'));
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/x.ts']), {
+      includeDerivedGraphWide: false,
+    });
+
+    expect(sub.nodes.map((n) => n.id)).toEqual(['Destination:orders.v1']);
+  });
+
+  it('includes a relationship when at least one endpoint is writable', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('a:fn', '/repo/a.ts'));
+    g.addNode(makeFileNode('c:fn', '/repo/c.ts'));
+    g.addRelationship(makeRel('e1', 'a:fn', 'c:fn', 'CALLS'));
+
+    // toWriteSet already includes A (the orchestrator expanded it via
+    // computeEffectiveWriteSet) — both endpoints writable, edge fires.
+    const sub = extractChangedSubgraph(g, new Set(['/repo/a.ts', '/repo/c.ts']));
+
+    expect(sub.nodes.map((n) => n.id).sort()).toEqual(['a:fn', 'c:fn']);
+    expect(sub.relationships.map((r) => r.id)).toEqual(['e1']);
+  });
+
+  it('skips a relationship entirely between unchanged files', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('x:fn', '/repo/x.ts'));
+    g.addNode(makeFileNode('y:fn', '/repo/y.ts'));
+    g.addRelationship(makeRel('e1', 'x:fn', 'y:fn', 'CALLS'));
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/c.ts']));
+
+    expect(sub.nodes).toEqual([]);
+    expect(sub.relationships).toEqual([]);
+  });
+
+  it('always includes TAINT_PATH edges even between two unchanged files (#2084 M4 U6)', () => {
+    // A cross-function TAINT_PATH whose endpoints (a.ts, c.ts) are both
+    // unchanged, but an intermediate function on the changed b.ts invalidated
+    // the flow. Endpoint-writability alone would skip it (stale finding);
+    // TAINT_PATH is graph-wide so it is always re-extracted (the orchestrator
+    // delete-alls the old rows first). A plain CALLS edge between the same
+    // unchanged files stays excluded — only TAINT_PATH gets this treatment.
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('a:handle', '/repo/a.ts'));
+    g.addNode(makeFileNode('c:sink', '/repo/c.ts'));
+    g.addRelationship(makeRel('tp1', 'a:handle', 'c:sink', 'TAINT_PATH'));
+    g.addRelationship(makeRel('call1', 'a:handle', 'c:sink', 'CALLS'));
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/b.ts']));
+
+    expect(sub.relationships.map((r) => r.id)).toEqual(['tp1']);
+  });
+
+  it('always includes INJECTS edges even between two unchanged files (#2200)', () => {
+    // A DI consumer→implementer INJECTS edge whose endpoints (consumer.java,
+    // impl.java) are both unchanged, but the interface (or a sibling
+    // implementer) on the changed third.java altered the fan-out.
+    // Endpoint-writability alone would strand the stale edge; INJECTS is
+    // graph-wide so it is always re-extracted (the orchestrator
+    // unconditionally delete-alls the old rows first). A plain CALLS edge
+    // between the same unchanged files stays excluded.
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('consumer:Class', '/repo/consumer.java'));
+    g.addNode(makeFileNode('impl:Class', '/repo/impl.java'));
+    g.addRelationship(makeRel('inj1', 'consumer:Class', 'impl:Class', 'INJECTS'));
+    g.addRelationship(makeRel('call1', 'consumer:Class', 'impl:Class', 'CALLS'));
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/third.java']));
+
+    expect(sub.relationships.map((r) => r.id)).toEqual(['inj1']);
+  });
+
+  it('always includes ADVISED_BY edges even between two unchanged files (#2416)', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('service:Method', '/repo/Service.java', 'Method'));
+    g.addNode(makeFileNode('aspect:Method', '/repo/Aspect.java', 'Method'));
+    g.addRelationship(
+      makeRel('advised1', 'service:Method', 'aspect:Method', 'ADVISED_BY', 'spring-aop:v1:{}'),
+    );
+    g.addRelationship(makeRel('call1', 'service:Method', 'aspect:Method', 'CALLS'));
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/AnnotationShadow.java']));
+
+    expect(sub.relationships.map((relationship) => relationship.id)).toEqual(['advised1']);
+  });
+
+  it('always includes Spring DECLARES edges between unchanged metadata and classes (#2415)', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('metadata:File', '/repo/META-INF/spring.factories', 'File'));
+    g.addNode(makeFileNode('config:Class', '/repo/AutoConfig.java', 'Class'));
+    g.addRelationship(
+      makeRel(
+        'declares1',
+        'metadata:File',
+        'config:Class',
+        'DECLARES',
+        'spring-auto-configuration-factory',
+      ),
+    );
+    g.addRelationship(makeRel('call1', 'metadata:File', 'config:Class', 'CALLS'));
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/unrelated.ts']));
+
+    expect(sub.relationships.map((relationship) => relationship.id)).toEqual(['declares1']);
+  });
+
+  it('does not make another metadata system graph-wide just because it uses DECLARES', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('metadata:File', '/repo/META-INF/example.metadata', 'File'));
+    g.addNode(makeFileNode('target:Class', '/repo/Target.java', 'Class'));
+    g.addRelationship(
+      makeRel('declares1', 'metadata:File', 'target:Class', 'DECLARES', 'example-discovery'),
+    );
+
+    const sub = extractChangedSubgraph(g, new Set(['/repo/unrelated.ts']));
+
+    expect(sub.relationships).toEqual([]);
+  });
+});
+
+describe('computeEffectiveWriteSet (Finding 1)', () => {
+  it('does not expand through graph-wide ADVISED_BY edges rebuilt by their owner phase', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('aspect:advice', '/repo/Aspect.java', 'Method'));
+    for (let index = 0; index < 100; index += 1) {
+      const serviceId = `service:${index}`;
+      g.addNode(makeFileNode(serviceId, `/repo/Service${index}.java`, 'Method'));
+      g.addRelationship(
+        makeRel(`advised:${index}`, serviceId, 'aspect:advice', 'ADVISED_BY', 'spring-aop:v1:{}'),
+      );
+    }
+
+    const effective = computeEffectiveWriteSet(g, new Set(['/repo/Aspect.java']));
+
+    expect([...effective]).toEqual(['/repo/Aspect.java']);
+  });
+
+  it('barrel re-export — expands the writable set to the consumer file', () => {
+    // Scenario: file C (a barrel) used to re-export from B; now re-exports
+    // from D. File A is unchanged byte-wise but its CALLS to foo() now
+    // resolve to D instead of B. Both A and D are unchanged at the file
+    // level — but A's edges have shifted.
+    //
+    // Pre-fix: toWriteSet={C} → A's nodes not deleted, A→D edge not
+    //          inserted (neither endpoint writable). DB ends up with
+    //          stale A→B and missing A→D.
+    // Post-fix: the new graph has A→C (A still imports the barrel), so
+    //          A crosses the writable boundary and joins the effective
+    //          write set. deleteNodesForFile(A) then clears the stale
+    //          rows and the subgraph carries the new A→D edge.
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('a:fn', '/repo/a.ts'));
+    g.addNode(makeFileNode('b:fn', '/repo/b.ts'));
+    g.addNode(makeFileNode('c:re-export', '/repo/c.ts'));
+    g.addNode(makeFileNode('d:fn', '/repo/d.ts'));
+    g.addRelationship(makeRel('e1', 'a:fn', 'c:re-export', 'IMPORTS'));
+    g.addRelationship(makeRel('e2', 'a:fn', 'd:fn', 'CALLS'));
+
+    const effective = computeEffectiveWriteSet(g, new Set(['/repo/c.ts']));
+
+    expect([...effective].sort()).toEqual(['/repo/a.ts', '/repo/c.ts']);
+  });
+
+  it('picks up edges pointing INTO the changed file (symmetric case)', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('b:fn', '/repo/b.ts'));
+    g.addNode(makeFileNode('c:fn', '/repo/c.ts'));
+    g.addRelationship(makeRel('e1', 'b:fn', 'c:fn', 'CALLS'));
+
+    const effective = computeEffectiveWriteSet(g, new Set(['/repo/c.ts']));
+
+    expect([...effective].sort()).toEqual(['/repo/b.ts', '/repo/c.ts']);
+  });
+
+  it('does not expand when no edge crosses the writable boundary', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('x:fn', '/repo/x.ts'));
+    g.addNode(makeFileNode('y:fn', '/repo/y.ts'));
+    g.addRelationship(makeRel('e1', 'x:fn', 'y:fn', 'CALLS'));
+
+    const effective = computeEffectiveWriteSet(g, new Set(['/repo/c.ts']));
+
+    expect([...effective].sort()).toEqual(['/repo/c.ts']);
+  });
+
+  it('ignores edges to graph-wide nodes (no filePath)', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('a:fn', '/repo/a.ts'));
+    g.addNode(makeWideNode('comm-1', 'Community'));
+    g.addRelationship(makeRel('e1', 'a:fn', 'comm-1', 'BELONGS_TO'));
+
+    const effective = computeEffectiveWriteSet(g, new Set(['/repo/a.ts']));
+
+    expect([...effective].sort()).toEqual(['/repo/a.ts']);
+  });
+
+  it('does not mutate the input set', () => {
+    const g = createKnowledgeGraph();
+    g.addNode(makeFileNode('a:fn', '/repo/a.ts'));
+    g.addNode(makeFileNode('c:fn', '/repo/c.ts'));
+    g.addRelationship(makeRel('e1', 'a:fn', 'c:fn', 'CALLS'));
+
+    const input = new Set(['/repo/c.ts']);
+    computeEffectiveWriteSet(g, input);
+
+    expect([...input]).toEqual(['/repo/c.ts']);
+  });
+});

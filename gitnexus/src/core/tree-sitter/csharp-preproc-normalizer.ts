@@ -48,7 +48,8 @@ class ExprParser {
   private parseOr(): boolean {
     let value = this.parseAnd();
     while (this.match('or')) {
-      value = value || this.parseAnd();
+      const rhs = this.parseAnd();
+      value = value || rhs;
     }
     return value;
   }
@@ -56,7 +57,8 @@ class ExprParser {
   private parseAnd(): boolean {
     let value = this.parseUnary();
     while (this.match('and')) {
-      value = value && this.parseUnary();
+      const rhs = this.parseUnary();
+      value = value && rhs;
     }
     return value;
   }
@@ -197,7 +199,12 @@ export function normalizeCSharpPreprocessorBranches(
   source: string,
   defines: Set<string>,
 ): CSharpPreprocNormalizationResult {
-  if (!source.includes('#if') && !source.includes('#elif') && !source.includes('#else') && !source.includes('#endif')) {
+  if (
+    !source.includes('#if') &&
+    !source.includes('#elif') &&
+    !source.includes('#else') &&
+    !source.includes('#endif')
+  ) {
     return {
       normalizedText: source,
       changed: false,
@@ -212,9 +219,7 @@ export function normalizeCSharpPreprocessorBranches(
     };
   }
 
-  const lineEnding = deriveLineEnding(source);
-  const trailingLineEnding = hasTrailingLineEnding(source);
-  const lines = source.split(/\r?\n/);
+  const lines = source.split(/(\r\n|\n|\r)/);
   const outputLines: string[] = [];
   const stack: ConditionalFrame[] = [];
   const undefinedSymbols = new Set<string>();
@@ -227,6 +232,10 @@ export function normalizeCSharpPreprocessorBranches(
   let unmatchedEndif = 0;
 
   for (const line of lines) {
+    if (/^[\r\n]+$/.test(line)) {
+      outputLines.push(line);
+      continue;
+    }
     const directive = line.match(/^\s*#\s*(if|elif|else|endif)\b(.*)$/);
     if (directive) {
       directivesSeen += 1;
@@ -282,7 +291,7 @@ export function normalizeCSharpPreprocessorBranches(
         active = top ? top.currentActive : true;
       }
 
-      outputLines.push('');
+      outputLines.push(' '.repeat(line.length));
       continue;
     }
 
@@ -295,13 +304,10 @@ export function normalizeCSharpPreprocessorBranches(
       changed = true;
       inactiveLines += 1;
     }
-    outputLines.push('');
+    outputLines.push(' '.repeat(line.length));
   }
 
-  let normalizedText = outputLines.join(lineEnding);
-  if (trailingLineEnding && !normalizedText.endsWith(lineEnding)) {
-    normalizedText += lineEnding;
-  }
+  const normalizedText = outputLines.join('');
 
   return {
     normalizedText,
@@ -315,4 +321,21 @@ export function normalizeCSharpPreprocessorBranches(
       unterminatedIfBlocks: stack.length,
     },
   };
+}
+
+// Each analyze run initializes its own main-thread and worker module state.
+let configuredDefines: Set<string> | undefined;
+let lastNormalization: CSharpPreprocNormalizationResult | undefined;
+export function getLastCSharpNormalization(): CSharpPreprocNormalizationResult | undefined {
+  return lastNormalization;
+}
+export function setCSharpDefineSymbols(symbols?: readonly string[]): void {
+  configuredDefines = symbols === undefined ? undefined : new Set(symbols);
+}
+export function preprocessCSharpSource(source: string): string {
+  lastNormalization =
+    configuredDefines === undefined
+      ? undefined
+      : normalizeCSharpPreprocessorBranches(source, configuredDefines);
+  return lastNormalization?.normalizedText ?? source;
 }

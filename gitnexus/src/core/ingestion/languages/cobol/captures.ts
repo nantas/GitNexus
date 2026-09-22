@@ -1,0 +1,455 @@
+/**
+ * `emitScopeCaptures` for COBOL.
+ *
+ * Wraps the existing regex tagger (`extractCobolSymbolsWithRegex`) and
+ * produces parser-agnostic `CaptureMatch[]` matching the RFC §5.1
+ * vocabulary. The central `ScopeExtractor` consumes these captures
+ * without knowing whether they came from tree-sitter or regex.
+ *
+ * Pure given the input source text. No I/O, no globals consulted.
+ * The regex tagger is synchronous — no async needed.
+ */
+
+import type { Capture, CaptureMatch, Range } from 'gitnexus-shared';
+import {
+  extractCobolSymbolsWithRegex,
+  preprocessCobolSource,
+} from '../../cobol/cobol-preprocessor.js';
+
+// ---------------------------------------------------------------------------
+// Capture building helpers
+// ---------------------------------------------------------------------------
+
+function capture(name: string, range: Range, text: string): Capture {
+  return { name, range, text };
+}
+
+function rangeOf(startLine: number, startCol: number, endLine: number, endCol: number): Range {
+  return { startLine, startCol, endLine, endCol };
+}
+
+/**
+ * Build a single CaptureMatch from a record of captures.
+ * Returns null if the record is empty.
+ */
+function matchFrom(grouped: Record<string, Capture>): CaptureMatch | null {
+  if (Object.keys(grouped).length === 0) return null;
+  return Object.freeze(grouped) as CaptureMatch;
+}
+
+/**
+ * Compute end column for a single-line capture from the source lines array.
+ */
+function endColFrom(line: string): number {
+  return line.length > 0 ? line.length - 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Main entry point
+// ---------------------------------------------------------------------------
+
+export function emitCobolScopeCaptures(
+  sourceText: string,
+  _filePath: string,
+  _cachedTree?: unknown,
+): readonly CaptureMatch[] {
+  const lines = sourceText.split(/\r?\n/);
+  // Preprocess: strip patch markers from columns 1-6
+  const cleaned = preprocessCobolSource(sourceText);
+  // Run the regex tagger on the preprocessed source
+  const extracted = extractCobolSymbolsWithRegex(cleaned, _filePath);
+
+  const out: CaptureMatch[] = [];
+  const procedurePointers = new Set(
+    extracted.dataItems
+      .filter((item) => /(?:PROCEDURE|FUNCTION)-POINTER/.test(item.usage?.toUpperCase() ?? ''))
+      .map((item) => item.name.toUpperCase()),
+  );
+  // Fallback for declarations the clause parser missed. Scan CLEANED lines —
+  // on raw fixed-format sources the sequence number (cols 1-6) satisfied
+  // `\d+` and the LEVEL NUMBER got captured as the name, so the set never
+  // contained the real pointer name and the whole feature no-op'd (#2522
+  // review, H3). COBOL data names must contain a letter, so `[A-Z]` first
+  // rejects level numbers.
+  for (const line of cleaned.split(/\r?\n/)) {
+    const declaration = line.match(
+      /^\s*\d{1,2}\s+([A-Z][A-Z0-9-]*).*\b(?:PROCEDURE|FUNCTION)-POINTER\b/i,
+    );
+    if (declaration !== null) procedurePointers.add(declaration[1]!.toUpperCase());
+  }
+
+  // ── 1. PROGRAM-ID → @scope.module ───────────────────────────────────
+  // The primary program name (first PROGRAM-ID encountered)
+  if (extracted.programName) {
+    const name = extracted.programName;
+    const lastLine = lines.length;
+
+    const progDef = extracted.programs.find((p) => p.name.toUpperCase() === name.toUpperCase());
+    const startLine = progDef?.startLine ?? 1;
+    const endLine = progDef?.endLine ?? lastLine;
+    const startCol = 0;
+    const endCol = endColFrom(lines[Math.min(endLine, lines.length) - 1] ?? '');
+
+    const progIdLine = findProgramIdLine(cleaned, name);
+    // Determine PROGRAM-ID name column: free-format has no fixed column;
+    // fixed-format uses column 7 (after 6-char sequence area replaced by preprocessing)
+    const isFreeFormat = />>SOURCE\s+(?:FORMAT\s+(?:IS\s+)?)?FREE/i.test(cleaned);
+    const nameCol = isFreeFormat ? findProgramIdNameColumn(lines, progIdLine) : 7;
+    const nameRange =
+      progIdLine !== -1
+        ? rangeOf(progIdLine, nameCol, progIdLine, lines[progIdLine - 1]?.length ?? endCol)
+        : rangeOf(startLine, startCol, endLine, endCol);
+
+    const grouped: Record<string, Capture> = {
+      '@scope.module': capture(
+        '@scope.module',
+        rangeOf(startLine, startCol, endLine, endCol),
+        name,
+      ),
+      '@declaration.program': capture(
+        '@declaration.program',
+        rangeOf(startLine, startCol, endLine, endCol),
+        name,
+      ),
+      '@declaration.name': capture('@declaration.name', nameRange, name),
+    };
+
+    if (progDef?.procedureUsing && progDef.procedureUsing.length > 0) {
+      grouped['@declaration.parameter-count'] = capture(
+        '@declaration.parameter-count',
+        nameRange,
+        String(progDef.procedureUsing.length),
+      );
+    }
+
+    const m = matchFrom(grouped);
+    if (m !== null) out.push(m);
+  }
+
+  // ── 2. Nested / additional programs → @scope.module ──────────────
+  for (const prog of extracted.programs) {
+    if (extracted.programName && prog.name.toUpperCase() === extracted.programName.toUpperCase())
+      continue;
+
+    const startLine = prog.startLine;
+    const endLine = prog.endLine;
+    const startCol = 0;
+    const endCol = endColFrom(lines[Math.min(endLine, lines.length) - 1] ?? '');
+
+    const progIdLine = findProgramIdLine(cleaned, prog.name);
+    const isFreeFormatNested = />>SOURCE\s+(?:FORMAT\s+(?:IS\s+)?)?FREE/i.test(cleaned);
+    const nameColNested = isFreeFormatNested ? findProgramIdNameColumn(lines, progIdLine) : 7;
+    const nameRange =
+      progIdLine !== -1
+        ? rangeOf(progIdLine, nameColNested, progIdLine, lines[progIdLine - 1]?.length ?? endCol)
+        : rangeOf(startLine, startCol, endLine, endCol);
+
+    const grouped: Record<string, Capture> = {
+      '@scope.module': capture(
+        '@scope.module',
+        rangeOf(startLine, startCol, endLine, endCol),
+        prog.name,
+      ),
+      '@declaration.program': capture(
+        '@declaration.program',
+        rangeOf(startLine, startCol, endLine, endCol),
+        prog.name,
+      ),
+      '@declaration.name': capture('@declaration.name', nameRange, prog.name),
+    };
+
+    if (prog.procedureUsing && prog.procedureUsing.length > 0) {
+      grouped['@declaration.parameter-count'] = capture(
+        '@declaration.parameter-count',
+        nameRange,
+        String(prog.procedureUsing.length),
+      );
+    }
+
+    const m = matchFrom(grouped);
+    if (m !== null) out.push(m);
+  }
+
+  // ── 3. PROCEDURE DIVISION sections → @scope.function ─────────────
+  for (const section of extracted.sections) {
+    const lineIdx = section.line - 1;
+    if (lineIdx < 0 || lineIdx >= lines.length) continue;
+
+    const sectionLine = lines[lineIdx];
+    const startCol = 0;
+    const endCol = endColFrom(sectionLine);
+    const nameRange = rangeOf(section.line, startCol, section.line, endCol);
+
+    const grouped: Record<string, Capture> = {
+      '@scope.function': capture('@scope.function', nameRange, section.name),
+      '@declaration.function': capture('@declaration.function', nameRange, section.name),
+      '@declaration.name': capture('@declaration.name', nameRange, section.name),
+    };
+
+    const m = matchFrom(grouped);
+    if (m !== null) out.push(m);
+  }
+
+  // ── 4. Paragraphs → @scope.function ──────────────────────────────
+  for (const para of extracted.paragraphs) {
+    const lineIdx = para.line - 1;
+    if (lineIdx < 0 || lineIdx >= lines.length) continue;
+
+    const paraLine = lines[lineIdx];
+    const startCol = 0;
+    const endCol = endColFrom(paraLine);
+    const nameRange = rangeOf(para.line, startCol, para.line, endCol);
+
+    const grouped: Record<string, Capture> = {
+      '@scope.function': capture('@scope.function', nameRange, para.name),
+      '@declaration.function': capture('@declaration.function', nameRange, para.name),
+      '@declaration.name': capture('@declaration.name', nameRange, para.name),
+    };
+
+    const m = matchFrom(grouped);
+    if (m !== null) out.push(m);
+  }
+
+  // ── 5. COPY → @import.statement ──────────────────────────────────
+  for (const copy of extracted.copies) {
+    const lineIdx = copy.line - 1;
+    if (lineIdx < 0 || lineIdx >= lines.length) continue;
+
+    const copyLine = lines[lineIdx];
+    const startCol = 0;
+    const endCol = endColFrom(copyLine);
+    const stmtRange = rangeOf(copy.line, startCol, copy.line, endCol);
+
+    const grouped: Record<string, Capture> = {
+      '@import.statement': capture('@import.statement', stmtRange, copy.target),
+      '@import.name': capture('@import.name', stmtRange, copy.target),
+    };
+
+    const m = matchFrom(grouped);
+    if (m !== null) out.push(m);
+  }
+
+  // ── 6. CALL (quoted/referenced) → @reference.call ────────────────
+  for (const call of extracted.calls) {
+    const lineIdx = call.line - 1;
+    if (lineIdx < 0 || lineIdx >= lines.length) continue;
+
+    const callLine = lines[lineIdx];
+    const startCol = 0;
+    const endCol = endColFrom(callLine);
+    const stmtRange = rangeOf(call.line, startCol, call.line, endCol);
+
+    const grouped: Record<string, Capture> = {
+      '@reference.call': capture('@reference.call', stmtRange, call.target),
+      '@reference.name': capture('@reference.name', stmtRange, call.target),
+    };
+
+    // Arity from CALL USING parameters
+    if (call.parameters && call.parameters.length > 0) {
+      grouped['@reference.arity'] = capture(
+        '@reference.arity',
+        stmtRange,
+        String(call.parameters.length),
+      );
+    }
+
+    const m = matchFrom(grouped);
+    if (m !== null) out.push(m);
+  }
+
+  // ── 7. PERFORM → @reference.call ─────────────────────────────────
+  for (const perf of extracted.performs) {
+    const lineIdx = perf.line - 1;
+    if (lineIdx < 0 || lineIdx >= lines.length) continue;
+
+    const perfLine = lines[lineIdx];
+    const startCol = 0;
+    const endCol = endColFrom(perfLine);
+    const stmtRange = rangeOf(perf.line, startCol, perf.line, endCol);
+
+    const grouped: Record<string, Capture> = {
+      '@reference.call': capture('@reference.call', stmtRange, perf.target),
+      '@reference.name': capture('@reference.name', stmtRange, perf.target),
+    };
+
+    const m = matchFrom(grouped);
+    if (m !== null) out.push(m);
+  }
+
+  // ── 8. GO TO → @reference.call ───────────────────────────────────
+  for (const gt of extracted.gotos) {
+    const lineIdx = gt.line - 1;
+    if (lineIdx < 0 || lineIdx >= lines.length) continue;
+
+    const gtLine = lines[lineIdx];
+    const startCol = 0;
+    const endCol = endColFrom(gtLine);
+    const stmtRange = rangeOf(gt.line, startCol, gt.line, endCol);
+
+    const grouped: Record<string, Capture> = {
+      '@reference.call': capture('@reference.call', stmtRange, gt.target),
+      '@reference.name': capture('@reference.name', stmtRange, gt.target),
+    };
+
+    const m = matchFrom(grouped);
+    if (m !== null) out.push(m);
+  }
+
+  // ── 9. Procedure-pointer value flow ────────────────────────────────
+  // ISO COBOL exposes callable values through USAGE PROCEDURE-POINTER,
+  // SET ... TO ENTRY, and dynamic CALL data-items. The regex provider emits
+  // the same normalized facts as AST-backed providers so shared ingestion
+  // remains language-agnostic.
+  for (const program of extracted.programs) {
+    for (let index = 0; index < (program.procedureUsing?.length ?? 0); index++) {
+      const parameter = program.procedureUsing![index]!;
+      const ownerRange = rangeOf(program.startLine, 0, program.endLine, 0);
+      out.push({
+        '@callable-flow.formal': capture('@callable-flow.formal', ownerRange, program.name),
+        '@callable-flow.owner': capture('@callable-flow.owner', ownerRange, program.name),
+        '@callable-flow.binding': capture(
+          '@callable-flow.binding',
+          rangeOf(program.startLine, 0, program.startLine, parameter.length),
+          parameter,
+        ),
+        '@callable-flow.parameter-index': capture(
+          '@callable-flow.parameter-index',
+          ownerRange,
+          String(index),
+        ),
+        '@callable-flow.passing-mode': capture(
+          '@callable-flow.passing-mode',
+          ownerRange,
+          'reference',
+        ),
+      });
+    }
+  }
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    // Comment lines must not seed flows — a commented-out SET produced a
+    // live seed and a false CALLS edge from dead code (#2522 review, M1).
+    // Fixed format marks comments with '*'/'/' in indicator column 7; free
+    // format uses '*>' (also valid inline, so strip the tail).
+    if (line[6] === '*' || line[6] === '/') continue;
+    const code = line.split('*>')[0]!;
+    const lineNumber = index + 1;
+    const lineRange = rangeOf(lineNumber, 0, lineNumber, endColFrom(line));
+    const entry = code.match(
+      /\bSET\s+([A-Z0-9][A-Z0-9-]*)\s+TO\s+ENTRY\s+(?:"([^"]+)"|'([^']+)')/i,
+    );
+    if (entry !== null) {
+      const destination = entry[1]!;
+      const target = entry[2] ?? entry[3]!;
+      if (procedurePointers.has(destination.toUpperCase())) {
+        out.push({
+          '@callable-flow.seed': capture('@callable-flow.seed', lineRange, line),
+          '@callable-flow.destination': capture(
+            '@callable-flow.destination',
+            lineRange,
+            destination,
+          ),
+          '@callable-flow.target': capture('@callable-flow.target', lineRange, target),
+          '@callable-flow.target-name': capture('@callable-flow.target-name', lineRange, target),
+        });
+      }
+      continue;
+    }
+    const copy = code.match(/\bSET\s+([A-Z0-9][A-Z0-9-]*)\s+TO\s+([A-Z0-9][A-Z0-9-]*)\b/i);
+    if (
+      copy !== null &&
+      procedurePointers.has(copy[1]!.toUpperCase()) &&
+      procedurePointers.has(copy[2]!.toUpperCase())
+    ) {
+      out.push({
+        '@callable-flow.copy': capture('@callable-flow.copy', lineRange, line),
+        '@callable-flow.destination': capture('@callable-flow.destination', lineRange, copy[1]!),
+        '@callable-flow.source': capture('@callable-flow.source', lineRange, copy[2]!),
+      });
+    }
+  }
+
+  for (const call of extracted.calls) {
+    const line = lines[call.line - 1] ?? '';
+    const lineRange = rangeOf(call.line, 0, call.line, endColFrom(line));
+    for (let index = 0; index < (call.parameters?.length ?? 0); index++) {
+      const parameter = call.parameters![index]!;
+      out.push({
+        '@callable-flow.argument': capture('@callable-flow.argument', lineRange, line),
+        '@callable-flow.source': capture('@callable-flow.source', lineRange, parameter),
+        '@callable-flow.parameter-index': capture(
+          '@callable-flow.parameter-index',
+          lineRange,
+          String(index),
+        ),
+        ...(!call.isQuoted && procedurePointers.has(call.target.toUpperCase())
+          ? {}
+          : {
+              '@callable-flow.direct-callee-name': capture(
+                '@callable-flow.direct-callee-name',
+                lineRange,
+                call.target,
+              ),
+            }),
+      });
+    }
+    if (!call.isQuoted && procedurePointers.has(call.target.toUpperCase())) {
+      out.push({
+        '@callable-flow.invoke': capture('@callable-flow.invoke', lineRange, line),
+        '@callable-flow.callee': capture('@callable-flow.callee', lineRange, call.target),
+        '@callable-flow.invocation-kind': capture(
+          '@callable-flow.invocation-kind',
+          lineRange,
+          'indirect',
+        ),
+        '@callable-flow.arity': capture(
+          '@callable-flow.arity',
+          lineRange,
+          String(call.parameters?.length ?? 0),
+        ),
+      });
+    }
+  }
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Find the PROGRAM-ID. line for a given program name in the cleaned source.
+ * Returns 1-based line number, or -1 if not found.
+ */
+function findProgramIdLine(cleanedSource: string, programName: string): number {
+  const lines = cleanedSource.split(/\r?\n/);
+  const upper = programName.toUpperCase();
+  const re = new RegExp(`\\bPROGRAM-ID\\.\\s*${escapeRegex(upper)}\\b`, 'i');
+  for (let i = 0; i < lines.length; i++) {
+    if (re.test(lines[i])) return i + 1; // 1-based
+  }
+  return -1;
+}
+
+/** Simple regex escape for special chars. */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Find the column position of the program name on the PROGRAM-ID line.
+ * Searches for `PROGRAM-ID. name` and returns the column where name starts.
+ * Returns 0 as fallback if the line can't be parsed (the range will be
+ * from column 0 which is still valid for capture bounds).
+ */
+function findProgramIdNameColumn(lines: string[], lineNum: number): number {
+  if (lineNum < 1 || lineNum > lines.length) return 0;
+  const line = lines[lineNum - 1];
+  const m = line.match(/\bPROGRAM-ID\.\s+([A-Z0-9][A-Z0-9-]*)/i);
+  if (!m || m.index === undefined) return 0;
+  // Column = index of start of capture group 1
+  const nameStart = m.index + m[0].length - m[1].length;
+  return nameStart;
+}

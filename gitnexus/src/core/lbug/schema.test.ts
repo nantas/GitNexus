@@ -15,9 +15,8 @@ test('RELATION_SCHEMA includes audited fallback pairs for Property/Delegate link
   ];
 
   for (const pair of requiredPairs) {
-    assert.match(
-      RELATION_SCHEMA,
-      new RegExp(pair.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')),
+    assert.ok(
+      RELATION_SCHEMA.replaceAll('`', '').includes(pair.replaceAll('`', '')),
       `Missing relationship pair in schema: ${pair}`,
     );
   }

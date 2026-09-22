@@ -1,15 +1,16 @@
 /**
  * Hybrid Search with Reciprocal Rank Fusion (RRF)
- * 
+ *
  * Combines BM25 (keyword) and semantic (embedding) search results.
  * Uses RRF to merge rankings without needing score normalization.
- * 
+ *
  * This is the same approach used by Elasticsearch, Pinecone, and other
  * production search systems.
  */
 
 import { searchFTSFromLbug, type BM25SearchResult } from './bm25-index.js';
 import type { SemanticSearchResult } from '../embeddings/types.js';
+import type { FtsDisabledReason } from './fts-policy.js';
 
 /**
  * RRF constant - standard value used in the literature
@@ -19,17 +20,17 @@ const RRF_K = 60;
 
 export interface HybridSearchResult {
   filePath: string;
-  score: number;           // RRF score
-  rank: number;            // Final rank
-  sources: ('bm25' | 'semantic')[];  // Which methods found this
-  
+  score: number; // RRF score
+  rank: number; // Final rank
+  sources: ('bm25' | 'semantic')[]; // Which methods found this
+
   // Metadata from semantic search (if available)
   nodeId?: string;
   name?: string;
   label?: string;
   startLine?: number;
   endLine?: number;
-  
+
   // Original scores for debugging
   bm25Score?: number;
   semanticScore?: number;
@@ -37,7 +38,7 @@ export interface HybridSearchResult {
 
 /**
  * Perform hybrid search combining BM25 and semantic results
- * 
+ *
  * @param bm25Results - Results from BM25 keyword search
  * @param semanticResults - Results from semantic/embedding search
  * @param limit - Maximum results to return
@@ -46,36 +47,42 @@ export interface HybridSearchResult {
 export const mergeWithRRF = (
   bm25Results: BM25SearchResult[],
   semanticResults: SemanticSearchResult[],
-  limit: number = 10
+  limit: number = 10,
 ): HybridSearchResult[] => {
   const merged = new Map<string, HybridSearchResult>();
-  
+
+  // Guard against undefined/null inputs (#1489) — when FTS is unavailable
+  // in the MCP process, bm25Results can arrive as undefined and the
+  // for-loop would throw "bm25Results is not iterable".
+  const safeBm25 = bm25Results ?? [];
+  const safeSemantic = semanticResults ?? [];
+
   // Process BM25 results
-  for (let i = 0; i < bm25Results.length; i++) {
-    const r = bm25Results[i];
-    const rrfScore = 1 / (RRF_K + i + 1);  // i+1 because rank starts at 1
-    
+  for (let i = 0; i < safeBm25.length; i++) {
+    const r = safeBm25[i];
+    const rrfScore = 1 / (RRF_K + i + 1); // i+1 because rank starts at 1
+
     merged.set(r.filePath, {
       filePath: r.filePath,
       score: rrfScore,
-      rank: 0,  // Will be set after sorting
+      rank: 0, // Will be set after sorting
       sources: ['bm25'],
       bm25Score: r.score,
     });
   }
-  
+
   // Process semantic results and merge
-  for (let i = 0; i < semanticResults.length; i++) {
-    const r = semanticResults[i];
+  for (let i = 0; i < safeSemantic.length; i++) {
+    const r = safeSemantic[i];
     const rrfScore = 1 / (RRF_K + i + 1);
-    
+
     const existing = merged.get(r.filePath);
     if (existing) {
       // Found by both methods - add scores
       existing.score += rrfScore;
       existing.sources.push('semantic');
       existing.semanticScore = 1 - r.distance;
-      
+
       // Add semantic metadata
       existing.nodeId = r.nodeId;
       existing.name = r.name;
@@ -98,27 +105,28 @@ export const mergeWithRRF = (
       });
     }
   }
-  
+
   // Sort by RRF score descending
   const sorted = Array.from(merged.values())
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
-  
+
   // Assign final ranks
   sorted.forEach((r, i) => {
     r.rank = i + 1;
   });
-  
+
   return sorted;
 };
 
 /**
- * Check if hybrid search is available
- * LadybugDB FTS is always available once the database is initialized.
- * Semantic search is optional - hybrid works with just FTS if embeddings aren't ready.
+ * Check if hybrid search is available.
+ * FTS indexes may be missing on read-only MCP connections (see #1403);
+ * callers should inspect `ftsAvailable` from searchFTSFromLbug for
+ * per-query availability. This helper is a coarse gate only.
  */
 export const isHybridSearchReady = (): boolean => {
-  return true; // FTS is always available via LadybugDB when DB is open
+  return true; // FTS is attempted on every query; ftsAvailable signals actual availability
 };
 
 /**
@@ -128,35 +136,54 @@ export const formatHybridResults = (results: HybridSearchResult[]): string => {
   if (results.length === 0) {
     return 'No results found.';
   }
-  
+
   const formatted = results.map((r, i) => {
     const sources = r.sources.join(' + ');
     const location = r.startLine ? ` (lines ${r.startLine}-${r.endLine})` : '';
     const label = r.label ? `${r.label}: ` : 'File: ';
     const name = r.name || r.filePath.split('/').pop() || r.filePath;
-    
+
     return `[${i + 1}] ${label}${name}
     File: ${r.filePath}${location}
     Found by: ${sources}
     Relevance: ${r.score.toFixed(4)}`;
   });
-  
+
   return `Found ${results.length} results:\n\n${formatted.join('\n\n')}`;
 };
 
 /**
  * Execute BM25 + semantic search and merge with RRF.
- * Uses LadybugDB FTS for always-fresh BM25 results (no cached data).
+ * Uses LadybugDB FTS for fresh BM25 results (no cached data).
  * The semanticSearch function is injected to keep this module environment-agnostic.
+ *
+ * When FTS is unavailable (e.g. read-only MCP connection, missing indexes) or
+ * explicitly disabled for this index (`disabledReason`, #3091), falls back to
+ * semantic-only results instead of crashing (#1489). In the disabled case no
+ * BM25 query is issued at all.
  */
 export const hybridSearch = async (
   query: string,
   limit: number,
   executeQuery: (cypher: string) => Promise<any[]>,
-  semanticSearch: (executeQuery: (cypher: string) => Promise<any[]>, query: string, k?: number) => Promise<SemanticSearchResult[]>
+  semanticSearch: (
+    executeQuery: (cypher: string) => Promise<any[]>,
+    query: string,
+    k?: number,
+  ) => Promise<SemanticSearchResult[]>,
+  disabledReason?: FtsDisabledReason,
 ): Promise<HybridSearchResult[]> => {
-  // Use LadybugDB FTS for always-fresh BM25 results
-  const bm25Results = await searchFTSFromLbug(query, limit);
+  // Use LadybugDB FTS for fresh BM25 results — skipped entirely when this
+  // index recorded an explicit FTS opt-out (`disabledReason`, #3091).
+  // If FTS fails (e.g. extension not loaded in MCP process), fall back to
+  // semantic-only search instead of crashing with "bm25Results is not iterable".
+  let bm25Results: BM25SearchResult[] = [];
+  try {
+    const ftsResponse = await searchFTSFromLbug(query, limit, undefined, disabledReason);
+    bm25Results = ftsResponse?.results ?? [];
+  } catch {
+    // FTS unavailable — continue with semantic-only search
+  }
   const semanticResults = await semanticSearch(executeQuery, query, limit);
   return mergeWithRRF(bm25Results, semanticResults, limit);
 };

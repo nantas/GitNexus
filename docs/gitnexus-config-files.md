@@ -7,25 +7,19 @@ This document defines the current configuration and state file rules used by Git
 | File | Owner | Purpose | Write Path | Read Path |
 |------|-------|---------|------------|-----------|
 | `lbug` | `analyze` / MCP runtime | LadybugDB graph index data | `gitnexus analyze` rebuilds it | Query tools and MCP backend |
-| `meta.json` | `analyze` | Index metadata and defaults | Saved at end of `analyze` | `status`, hooks, CLI default repo resolution |
+| `gitnexus.json` | `analyze` | Primary index metadata and storage ownership | Saved at end of `analyze` | `status`, hooks, MCP/CLI storage resolution |
+| `meta.json` | `analyze` | Legacy metadata mirror | Dual-written with `gitnexus.json` | Older clients |
 | `unity-parity-seed.json` | `analyze` | Unity parity seed cache payload | Saved during `analyze` finalize | Unity lazy/parity loaders |
 
-### `meta.json` schema (current)
+### Index metadata (representative fields)
 
 ```json
 {
   "repoPath": "/abs/path/to/repo",
   "repoId": "resolved-repo-name-or-alias",
+  "storagePath": "/abs/path/to/repo/.gitnexus",
   "lastCommit": "git-head-sha",
   "indexedAt": "ISO-8601 timestamp",
-  "analyzeOptions": {
-    "includeExtensions": [".ts", ".cs"],
-    "scopeRules": ["Assets/**"],
-    "repoAlias": "optional-alias",
-    "embeddings": true,
-    "csharpDefineCsproj": "optional-path-to.csproj",
-    "aiContext": true
-  },
   "stats": {
     "files": 0,
     "nodes": 0,
@@ -38,9 +32,19 @@ This document defines the current configuration and state file rules used by Git
 ```
 
 Notes:
-- `repoId` is persisted after registration and is used as the CLI default `repo` when `--repo` is omitted.
-- For backward compatibility, when `repoId` is missing, CLI falls back to matching the current path in global registry.
-- `analyzeOptions.aiContext=false` means `analyze` should skip AGENTS/CLAUDE generation and repo-local GitNexus skill installation until a later run explicitly re-enables AI context or bypasses stored options.
+- `gitnexus.json` and its legacy `meta.json` mirror store index state, not analyze option defaults. Ownership and schema fields are managed by `analyze`; do not hand-edit or copy metadata between repositories. Analyze configuration comes from `.gitnexusrc`.
+- Commit `.gitnexusrc` in the repository root for recurring analyze defaults. CLI arguments override configured values.
+
+```json
+{
+  "name": "my-unity-project",
+  "includeExtensions": [".cs", ".meta"],
+  "scopeRules": ["Assets/", "Packages/com.veewo.*"],
+  "csharpDefineCsproj": "Assembly-CSharp.csproj"
+}
+```
+
+`csharpDefineCsproj` resolves relative to the target repository. Define symbols are loaded once and passed into workerData; changing the define profile changes C# parse-cache keys. Scope rules remain path prefixes, with a trailing `*` accepted as a wildcard prefix.
 
 ## Repo-local optional inputs
 
@@ -63,13 +67,12 @@ Notes:
 
 ## Precedence rules
 
-1. For analyze option resolution (`extensions`, `repoAlias`, `embeddings`, `scope rules`, `aiContext`):
+1. For analyze option resolution:
    1. CLI explicit flags
-   2. `<repo>/.gitnexus/meta.json.analyzeOptions` when `reuseOptions !== false`
+   2. `<repo>/.gitnexusrc` (flat keys or nested `analyze` object)
    3. built-in defaults
-2. For direct tool commands, when `--repo` is missing:
-   1. use `<repo>/.gitnexus/meta.json.repoId`
-   2. fallback to `~/.gitnexus/registry.json` path match
+2. For MCP repo-scoped tools, an explicit repo wins. Otherwise a sole registered repo or configured MCP default is used; read-only tools may resolve the registered path containing the process cwd without crossing an unindexed nested Git checkout. Mutating tools require an explicit repo when no sole/default repo exists.
+   - The fork `unity-ui-trace` CLI additionally resolves local metadata `repoId`, then a registry path match.
 3. Query-time runtime claim closure input precedence:
    1. explicit structured anchors on request (`symbolName`, `resourceSeedPath`, `mappedSeedTargets`, `resourceBindings`)
    2. derived seed path (`resource_path_prefix`, then `filePath`, then resource path extraction from `queryText`)
@@ -86,7 +89,7 @@ Notes:
 
 ## Ownership rules
 
-- `analyze` owns `.gitnexus/meta.json`, `.gitnexus/lbug`, `.gitnexus/unity-parity-seed.json`.
+- `analyze` owns `.gitnexus/gitnexus.json`, its legacy `.gitnexus/meta.json` mirror, `.gitnexus/lbug`, `.gitnexus/unity-parity-seed.json`.
 - `setup` owns global `~/.gitnexus/config.json` and agent MCP wiring.
 
 - `gitnexus-unity-rule-gen` now points to direct public flow guidance: `approved -> compile -> analyze -> CLI validation`.

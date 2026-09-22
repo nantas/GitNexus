@@ -1,0 +1,1256 @@
+/**
+ * `emitScopeCaptures` for PHP (RFC #909 Ring 3 LANG-php).
+ *
+ * Drives the PHP scope query against tree-sitter-php and groups raw
+ * matches into `CaptureMatch[]` for the central extractor. Layers two
+ * synthesized streams on top:
+ *
+ *   1. **Decomposed use declarations** — each `namespace_use_declaration`
+ *      is re-emitted with `@import.kind/source/name/alias` markers so
+ *      `interpretPhpImport` can recover the ParsedImport shape without
+ *      re-parsing raw text. Grouped uses fan out to one match per clause.
+ *
+ *   2. **Receiver-binding synthesis** — `$this` and `parent` type-bindings
+ *      are synthesized on every non-static method entry. PHP's grammar
+ *      does not express "implicit receiver of a non-static class method"
+ *      via a clean `.scm` pattern, so we walk up the AST in code.
+ *
+ *   3. **Arity metadata synthesis** — `@declaration.parameter-count` /
+ *      `@declaration.required-parameter-count` / `@declaration.parameter-types`
+ *      are synthesized on function-like declarations so the registry can
+ *      narrow overloads.
+ *
+ *   4. **PHPDoc synthesis** — @param and @return annotations in comment
+ *      nodes preceding method/function declarations are extracted and emitted
+ *      as `@type-binding.parameter` and `@type-binding.return` matches.
+ *
+ *   5. **Foreach loop synthesis** — `foreach ($users as $user)` emits
+ *      a `@type-binding.alias` match binding the loop variable to the
+ *      element type of the iterable (resolved from PHPDoc or scopeEnv).
+ *
+ *   6. **PHPDoc `@var` property synthesis** — a docblock on an UNTYPED
+ *      property emits the `@type-binding.annotation` + `@declaration.property`
+ *      pair the native typed-property rules emit, which is the only way PHP
+ *      can declare a generic field type (#2833).
+ *
+ * Pure given the input source text. No I/O, no globals consulted.
+ */
+
+import type { Capture, CaptureMatch } from 'gitnexus-shared';
+import {
+  nodeIfType,
+  nodeToCapture,
+  syntheticCapture,
+  walkNamedTree,
+} from '../../utils/ast-helpers.js';
+import { splitNamespaceUseDeclaration } from './import-decomposer.js';
+import { computePhpArityMetadata } from './arity-metadata.js';
+import { synthesizePhpReceiverBinding } from './receiver-binding.js';
+import { getPhpParser, getPhpScopeQuery } from './query.js';
+import { recordCacheHit, recordCacheMiss } from './cache-stats.js';
+import { getTreeSitterBufferSize } from '../../constants.js';
+import { parseSourceSafe } from '../../../tree-sitter/safe-parse.js';
+import { synthesizeCallableFlowCaptures } from '../../utils/callable-flow-captures.js';
+import { synthesizeReceiverChainCapture } from '../../utils/receiver-chain-captures.js';
+
+type SyntaxNode = ReturnType<ReturnType<typeof getPhpParser>['parse']>['rootNode'];
+
+const PHP_CALLABLE_CAPTURE_OPTIONS = {
+  functionNodeTypes: new Set([
+    'function_definition',
+    'method_declaration',
+    'anonymous_function',
+    'arrow_function',
+  ]),
+  callNodeTypes: new Set(['function_call_expression']),
+  parameterListNodeTypes: new Set(['formal_parameters', 'arguments']),
+  // tree-sitter-php has no 'optional_parameter' node (defaults ride on
+  // simple_parameter); property promotion is constructor-only and carries no
+  // callable-flow value (#2522 review).
+  parameterNodeTypes: new Set(['simple_parameter', 'variadic_parameter']),
+  bindingNodeTypes: new Set(['assignment_expression']),
+  assignmentNodeTypes: new Set(['assignment_expression']),
+  identifierNodeTypes: new Set(['name', 'qualified_name', 'namespace_name']),
+  functionScopedValueBindings: true,
+  emitCanonicalInvokeReference: true,
+  extractCallableReference: (node: SyntaxNode) => {
+    if (node.type !== 'function_call_expression') return undefined;
+    const args = node.childForFieldName('arguments');
+    const isFirstClass =
+      args?.namedChildren.some(
+        (child) => child !== null && child.type === 'variadic_placeholder',
+      ) === true;
+    const target = node.childForFieldName('function');
+    if (!isFirstClass || target === null || target.type === 'variable_name') return undefined;
+    return { name: target.text.replace(/^\\+/, ''), anchor: target };
+  },
+} as const;
+
+/** Declaration anchors that carry function-like arity metadata. */
+const FUNCTION_DECL_TAGS = ['@declaration.method', '@declaration.function'] as const;
+
+/** tree-sitter-php node types that the method extractor accepts. */
+const FUNCTION_NODE_TYPES = [
+  'method_declaration',
+  'function_definition',
+  'anonymous_function',
+  'arrow_function',
+] as const;
+
+export function emitPhpScopeCaptures(
+  sourceText: string,
+  _filePath: string,
+  cachedTree?: unknown,
+): readonly CaptureMatch[] {
+  // Skip the parse when the caller already produced a Tree for this source.
+  // The cachedTree parameter is typed as `unknown` at the LanguageProvider
+  // contract layer; cast here at the use site.
+  let tree = cachedTree as ReturnType<ReturnType<typeof getPhpParser>['parse']> | undefined;
+  if (tree === undefined) {
+    tree = parseSourceSafe(getPhpParser(), sourceText, undefined, {
+      bufferSize: getTreeSitterBufferSize(sourceText),
+    });
+    recordCacheMiss();
+  } else {
+    recordCacheHit();
+  }
+
+  const rawMatches = getPhpScopeQuery().matches(tree.rootNode);
+  const out: CaptureMatch[] = [];
+
+  // Pre-scan: collect anchor node IDs of property_declaration nodes already
+  // matched by the typed @declaration.property pattern (query.ts ~lines 95–98).
+  // The untyped @declaration.variable catch-all (query.ts ~lines 101–103) is
+  // intentionally loose — it has no `type:` constraint, so tree-sitter also
+  // matches it against typed property declarations and emits a second capture
+  // for the same property_declaration anchor. Graph-level def-id collision
+  // currently masks the duplicate at the node-emit layer, but the catch-all
+  // capture still flows through scope-binding / name-keyed registries with a
+  // `$`-prefixed name that the typed branch's `$`-strip never normalizes —
+  // a known vector for receiver-binding lookup pollution. The two patterns
+  // produce separate rawMatches entries with separate `grouped` maps, so the
+  // dedup has to be cross-match: build the set here, then skip
+  // @declaration.variable matches whose anchor is in it (loop below).
+  const typedPropertyAnchorIds = new Set<number>();
+  for (const m of rawMatches) {
+    for (const c of m.captures) {
+      if (c.name === 'declaration.property') {
+        typedPropertyAnchorIds.add(c.node.id);
+        break;
+      }
+    }
+  }
+
+  // The one full-tree walk: class/trait heritage, and PHPDoc `@var` on an
+  // untyped property. Run BEFORE the match loop rather than appended after it,
+  // because the property declarations the `@var` half claims must join
+  // `typedPropertyAnchorIds`: it emits the same `@declaration.property` the
+  // typed rule does, so without this the loose `@declaration.variable`
+  // catch-all would declare the very same node a second time under its
+  // `$`-sigilled name — exactly the duplicate the set above exists to suppress.
+  // Its matches are still appended in the original order after the loop.
+  const walked = synthesizePhpTreeWalkCaptures(tree.rootNode);
+  for (const id of walked.docPropertyAnchorIds) typedPropertyAnchorIds.add(id);
+
+  for (const m of rawMatches) {
+    // Group captures by their tag name. Tree-sitter strips the leading
+    // `@`; we put it back so the central extractor's prefix lookups work.
+    const grouped: Record<string, Capture> = {};
+    // Parallel tag -> captured SyntaxNode map: the query hands us each matched
+    // node as c.node, so anchors resolve via a type-guarded lookup (nodeIfType)
+    // instead of re-deriving them with findNodeAtRange(tree.rootNode, ...) per
+    // match — the O(matches x rootChildren) root-walk fixed for go #1915 /
+    // python #1918, mirrored here.
+    const nodeMap: Record<string, SyntaxNode> = {};
+    for (const c of m.captures) {
+      const tag = '@' + c.name;
+      grouped[tag] = nodeToCapture(tag, c.node);
+      nodeMap[tag] = c.node;
+    }
+    if (Object.keys(grouped).length === 0) continue;
+
+    // Cross-match dedup for the typed-property double-match described above:
+    // skip @declaration.variable matches whose anchor was already captured as
+    // @declaration.property in an earlier match.
+    if (grouped['@declaration.variable'] !== undefined) {
+      const varCap = m.captures.find((c) => c.name === 'declaration.variable');
+      if (varCap !== undefined && typedPropertyAnchorIds.has(varCap.node.id)) continue;
+    }
+
+    // Normalize PHP property declarations: strip leading `$` from
+    // `@declaration.name` for @declaration.property matches. PHP stores
+    // field names WITHOUT the `$` sigil in the graph so that member access
+    // lookups like `$user->address` can find the property named `address`
+    // (not `$address`). `@type-binding.annotation` already strips `$` in
+    // `interpretPhpTypeBinding`; this mirrors that for the declaration side.
+    //
+    // Only applies to `@declaration.property` — typed class properties and
+    // constructor-promoted parameters. Untyped `@declaration.variable` keeps
+    // its `$` prefix (those defs are Variable type and not in the field
+    // registry, so their name doesn't affect member lookup).
+    if (
+      grouped['@declaration.property'] !== undefined &&
+      grouped['@declaration.name'] !== undefined
+    ) {
+      const nameCap = grouped['@declaration.name'];
+      if (nameCap.text.startsWith('$')) {
+        grouped['@declaration.name'] = { ...nameCap, text: nameCap.text.slice(1) };
+      }
+    }
+
+    // Normalize PHP receiver expressions so the compound-receiver resolver
+    // can walk chains expressed with `->` (PHP) as if they used `.` (the
+    // resolver's canonical separator). Without this, `$user->address->save()`
+    // has receiver text `$user->address` — the resolver sees no `.` separator,
+    // treats it as a bare identifier, and cannot walk field types.
+    //
+    // Transformation applied to `@reference.receiver` captures:
+    //   1. Replace `->` with `.`           ($user->address → $user.address)
+    //   2. Strip leading `$` from each segment ($user.address → user.address)
+    //   3. Strip trailing `?` on null-safe receivers ($user? → user)
+    //
+    // This is a PHP-local normalization — no shared pipeline code is changed.
+    if (grouped['@reference.receiver'] !== undefined) {
+      const recvCap = grouped['@reference.receiver']!;
+      const normalized = normalizePhpReceiver(recvCap.text);
+      if (normalized !== recvCap.text) {
+        grouped['@reference.receiver'] = { ...recvCap, text: normalized };
+      }
+    }
+
+    // Normalize static property write: strip leading `$` from `@reference.name`
+    // so `User::$count` resolves to property `count` (stored without `$` in graph).
+    if (grouped['@reference.write.static'] !== undefined) {
+      const nameCap = grouped['@reference.name'];
+      if (nameCap !== undefined && nameCap.text.startsWith('$')) {
+        grouped['@reference.name'] = {
+          ...nameCap,
+          text: nameCap.text.slice(1),
+        };
+      }
+      // Re-tag as @reference.write.member so downstream passes see a uniform write kind.
+      grouped['@reference.write.member'] = grouped['@reference.write.static']!;
+      delete grouped['@reference.write.static'];
+    }
+
+    // Decompose each `namespace_use_declaration` so `interpretPhpImport`
+    // sees the kind/source/name/alias markers it consumes.
+    if (grouped['@import.statement'] !== undefined) {
+      const stmtNode = nodeIfType(nodeMap['@import.statement'], 'namespace_use_declaration');
+      if (stmtNode !== null) {
+        const decomposed = splitNamespaceUseDeclaration(stmtNode);
+        if (decomposed.length > 0) {
+          for (const d of decomposed) out.push(d);
+          continue;
+        }
+      }
+      // Defensive fallback: emit the raw match.
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
+      out.push(grouped);
+      continue;
+    }
+
+    // Synthesize `$this` / `parent` receiver type-bindings on every
+    // non-static method-like. Mirrors C#'s `this` / `base` synthesis.
+    if (grouped['@scope.function'] !== undefined) {
+      // Structural receiver chain for a call whose receiver is itself an
+      // expression, so resolution can type it by folding over structure
+      // instead of re-parsing the receiver's source text. Self-gating: a
+      // non-call match, an absent receiver, or a chain with no nameable base
+      // all leave `grouped` untouched.
+      synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
+      out.push(grouped);
+      const fnNode = nodeIfType(nodeMap['@scope.function'], ...FUNCTION_NODE_TYPES);
+      if (fnNode !== null) {
+        for (const synth of synthesizePhpReceiverBinding(fnNode)) {
+          out.push(synth);
+        }
+        // Synthesize PHPDoc @param and @return type bindings for this fn.
+        for (const synth of synthesizePhpDocBindings(fnNode)) {
+          out.push(synth);
+        }
+        // Synthesize foreach loop variable bindings inside this fn body.
+        for (const synth of synthesizeForeachBindings(fnNode)) {
+          out.push(synth);
+        }
+      }
+      continue;
+    }
+
+    // Synthesize arity metadata on function-like declarations so the
+    // registry can narrow overloads.
+    const declTag = FUNCTION_DECL_TAGS.find((t) => grouped[t] !== undefined);
+    if (declTag !== undefined) {
+      const fnNode = nodeIfType(nodeMap[declTag], ...FUNCTION_NODE_TYPES);
+      if (fnNode !== null) {
+        const arity = computePhpArityMetadata(fnNode);
+        if (arity.parameterCount !== undefined) {
+          grouped['@declaration.parameter-count'] = syntheticCapture(
+            '@declaration.parameter-count',
+            fnNode,
+            String(arity.parameterCount),
+          );
+        }
+        if (arity.requiredParameterCount !== undefined) {
+          grouped['@declaration.required-parameter-count'] = syntheticCapture(
+            '@declaration.required-parameter-count',
+            fnNode,
+            String(arity.requiredParameterCount),
+          );
+        }
+        if (arity.parameterTypes !== undefined) {
+          grouped['@declaration.parameter-types'] = syntheticCapture(
+            '@declaration.parameter-types',
+            fnNode,
+            JSON.stringify(arity.parameterTypes),
+          );
+        }
+      }
+    }
+
+    // Synthesize `@reference.arity` on every call site so the registry's
+    // arity filter can narrow overloads. Count the `argument` children of
+    // the backing `arguments` node. Mirrors C#'s pattern (csharp/captures.ts
+    // lines 149-186). PHP needs this for arity-based dispatch (Cluster H).
+    const callTag = (
+      ['@reference.call.free', '@reference.call.member', '@reference.call.constructor'] as const
+    ).find((t) => grouped[t] !== undefined);
+    if (callTag !== undefined) {
+      const possibleFirstClass = nodeIfType(nodeMap[callTag], 'function_call_expression');
+      const argumentsNode = possibleFirstClass?.childForFieldName('arguments');
+      if (
+        argumentsNode?.namedChildren.some(
+          (child) => child !== null && child.type === 'variadic_placeholder',
+        ) === true
+      ) {
+        // PHP 8.1 `target(...)` creates a Closure; it does not invoke target.
+        // Callable-flow synthesis below owns this site as a seed.
+        continue;
+      }
+    }
+    if (callTag !== undefined && grouped['@reference.arity'] === undefined) {
+      const callNode = nodeIfType(
+        nodeMap[callTag],
+        'function_call_expression',
+        'member_call_expression',
+        'nullsafe_member_call_expression',
+        'scoped_call_expression',
+        'object_creation_expression',
+      );
+      if (callNode !== null) {
+        const argList = callNode.childForFieldName('arguments');
+        const args: SyntaxNode[] = [];
+        if (argList !== null) {
+          for (let i = 0; i < argList.namedChildCount; i++) {
+            const child = argList.namedChild(i);
+            if (child !== null && child.type === 'argument') args.push(child);
+          }
+        }
+        grouped['@reference.arity'] = syntheticCapture(
+          '@reference.arity',
+          callNode,
+          String(args.length),
+        );
+        // Infer argument types from literal nodes for type-based narrowing.
+        // Non-literal arguments emit empty string ("unknown" = any-match).
+        const argTypes = args.map((arg) => inferPhpArgType(arg));
+        grouped['@reference.parameter-types'] = syntheticCapture(
+          '@reference.parameter-types',
+          callNode,
+          JSON.stringify(argTypes),
+        );
+      }
+    }
+
+    // Structural receiver chain for a call whose receiver is itself an
+    // expression, so resolution can type it by folding over structure
+    // instead of re-parsing the receiver's source text. Self-gating: a
+    // non-call match, an absent receiver, or a chain with no nameable base
+    // all leave `grouped` untouched.
+    synthesizeReceiverChainCapture(grouped, nodeMap['@reference.receiver']);
+    out.push(grouped);
+  }
+
+  out.push(...walked.inheritance);
+  out.push(...walked.docProperties);
+  out.push(...synthesizeCallableFlowCaptures(tree.rootNode, PHP_CALLABLE_CAPTURE_OPTIONS));
+
+  return out;
+}
+
+// ─── PHP whole-tree synthesis ────────────────────────────────────────────────
+
+/**
+ * The single `walkNamedTree` pass of `emitPhpScopeCaptures`, dispatching every
+ * synthesis that needs to see the whole tree.
+ *
+ * ONE walk, not one per synthesis. A tree-sitter node walk is not cheap next to
+ * the work it feeds: measured on a 1.2k-line PHP source (9.6k nodes), a single
+ * `walkNamedTree` pass costs 7.4 ms against 2.1 ms to PARSE the file, because
+ * every step materializes node wrappers across the N-API boundary. So a new
+ * node kind is a branch here rather than a pass of its own — the two below emit
+ * into separate arrays, and `emitPhpScopeCaptures` appends them in the order
+ * they were appended when they were two passes.
+ *
+ * The `@reference.inherits` half exists so the registry-primary
+ * scope-resolution path emits EXTENDS / IMPLEMENTS edges (mirrors C#
+ * `synthesizeCsharpInheritanceReferences` / C++ `emitCppInheritanceCaptures`).
+ * Without it, PHP inheritance edges came only from the legacy heritage-capture
+ * leg (removed in #942), which the worker pipeline drops for registry-primary
+ * languages (issue #1951). See {@link emitPhpDocPropertyBinding} for the other.
+ */
+function synthesizePhpTreeWalkCaptures(root: SyntaxNode): {
+  readonly inheritance: readonly CaptureMatch[];
+  readonly docProperties: readonly CaptureMatch[];
+  readonly docPropertyAnchorIds: ReadonlySet<number>;
+} {
+  const inheritance: CaptureMatch[] = [];
+  const docProperties: CaptureMatch[] = [];
+  const docPropertyAnchorIds = new Set<number>();
+  walkNamedTree(root, (node) => {
+    if (node.type === 'class_declaration' || node.type === 'trait_declaration') {
+      emitPhpHeritageReferences(node, inheritance);
+    } else if (node.type === 'property_declaration') {
+      emitPhpDocPropertyBinding(node, docProperties, docPropertyAnchorIds);
+    }
+  });
+  return { inheritance, docProperties, docPropertyAnchorIds };
+}
+
+/**
+ * Emit `@reference.inherits` for the heritage of one `class_declaration` or
+ * `trait_declaration`.
+ *
+ * Scope matches the legacy PHP heritage query (tree-sitter-queries.ts
+ * PHP_QUERIES extends / implements / trait-use captures):
+ *
+ *   1. `class_declaration` > `base_clause` > [(name) (qualified_name)] — extends
+ *   2. `class_declaration` > `class_interface_clause` > [(name) (qualified_name)] — implements
+ *   3. `class_declaration` body `use_declaration` > [(name) (qualified_name)] — trait use
+ *   4. `trait_declaration` body `use_declaration` > [(name) (qualified_name)] — trait use
+ *
+ * The EXTENDS-vs-IMPLEMENTS split is decided downstream from the resolved
+ * target's symbol kind (`preEmitInheritanceEdges`: `Interface` → IMPLEMENTS,
+ * else EXTENDS), so all bases emit the same `inherits` kind here. The base
+ * lookup name is normalized to its bare simple identifier (`Foo\Bar\Base` →
+ * `Base`) to match the V1 simple-name `findClassBindingInScope` contract.
+ *
+ * NOTE (#1951 trait-use parity): a PHP `use Trait;` is emitted as an IMPLEMENTS
+ * edge — `preEmitInheritanceEdges` (run.ts) maps a
+ * resolved `Interface` OR `Trait` target to IMPLEMENTS (`type === 'Interface'
+ * || type === 'Trait' ? 'IMPLEMENTS' : 'EXTENDS'`), so `use Trait` resolves to
+ * IMPLEMENTS on both the legacy and registry-primary paths.
+ */
+function emitPhpHeritageReferences(node: SyntaxNode, out: CaptureMatch[]): void {
+  if (node.type === 'class_declaration') {
+    // extends: single base_clause child carrying one base name.
+    const baseClause = findNamedChild(node, 'base_clause');
+    if (baseClause !== null) emitPhpBaseNames(baseClause, out);
+    // implements: class_interface_clause may list several interfaces.
+    const ifaceClause = findNamedChild(node, 'class_interface_clause');
+    if (ifaceClause !== null) emitPhpBaseNames(ifaceClause, out);
+  }
+  // trait use: `use TraitName;` inside the class body, and trait-uses-trait:
+  // `use OtherTrait;` inside a trait body.
+  emitPhpTraitUses(node, out);
+}
+
+/**
+ * Emit `@reference.inherits` for every `use_declaration` (trait use) in the
+ * declaration body of `node` (a class_declaration or trait_declaration).
+ * Class-body `use_declaration` is the trait-use node (distinct from the
+ * top-level `namespace_use_declaration` import node).
+ */
+function emitPhpTraitUses(node: SyntaxNode, out: CaptureMatch[]): void {
+  const body = node.childForFieldName('body');
+  if (body === null || body.type !== 'declaration_list') return;
+  for (let i = 0; i < body.namedChildCount; i++) {
+    const child = body.namedChild(i);
+    if (child !== null && child.type === 'use_declaration') {
+      emitPhpBaseNames(child, out);
+    }
+  }
+}
+
+/**
+ * Walk the named children of a heritage clause (`base_clause`,
+ * `class_interface_clause`, or `use_declaration`) and emit one
+ * `@reference.inherits` match per `name` / `qualified_name` base. The lookup
+ * name is the bare tail identifier so `findClassBindingInScope` resolves it.
+ */
+function emitPhpBaseNames(clause: SyntaxNode, out: CaptureMatch[]): void {
+  for (let i = 0; i < clause.namedChildCount; i++) {
+    const base = clause.namedChild(i);
+    if (base === null) continue;
+    if (base.type !== 'name' && base.type !== 'qualified_name') continue;
+    const bareName = phpBareBaseName(base);
+    if (bareName === '') continue;
+    out.push({
+      '@reference.inherits': nodeToCapture('@reference.inherits', base),
+      '@reference.name': syntheticCapture('@reference.name', base, bareName),
+    });
+  }
+}
+
+/**
+ * Normalize a PHP base node to its bare simple identifier:
+ *   `Base`            (name)          → `Base`
+ *   `Foo\Bar\Base`    (qualified_name)→ `Base`  (last `name` child)
+ *   `\Foo\Base`       (qualified_name)→ `Base`
+ * Mirrors C#'s `terminalTypeNameNode`: strip the qualifier tail so the V1
+ * simple-name scope-chain lookup resolves the target def.
+ */
+function phpBareBaseName(base: SyntaxNode): string {
+  if (base.type === 'name') return base.text;
+  if (base.type === 'qualified_name') {
+    // qualified_name holds one or more `name` children (plus `\` separators);
+    // the bare class is the last `name` child.
+    for (let i = base.namedChildCount - 1; i >= 0; i--) {
+      const child = base.namedChild(i);
+      if (child !== null && child.type === 'name') return child.text;
+    }
+    // Fallback: split the raw text on the namespace separator.
+    const segs = base.text.split('\\').filter((s) => s.length > 0);
+    return segs.length > 0 ? segs[segs.length - 1]! : '';
+  }
+  return '';
+}
+
+/** Find the first named child of `node` with the given type. */
+function findNamedChild(node: SyntaxNode, type: string): SyntaxNode | null {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child !== null && child.type === type) return child;
+  }
+  return null;
+}
+
+/** Pre-order walk over named children, invoking `cb` on each node. */
+// ─── PHP receiver normalization ──────────────────────────────────────────────
+
+/**
+ * Normalize a PHP receiver expression so the language-agnostic
+ * compound-receiver resolver (which splits on `.`) can walk field-type chains.
+ *
+ * The compound-receiver resolver:
+ *   - splits on `.` to get chain segments
+ *   - looks up the first segment in `typeBindings` (keyed with `$` for variables)
+ *   - walks subsequent segments as field names (stored without `$` in the graph)
+ *
+ * Transformation:
+ *   1. Replace `->` and `?->` with `.` so the resolver's splitter works
+ *   2. Strip any bare `?` fragment left by null-safe chain ends
+ *   3. Strip `$` from all segments EXCEPT the first (which is a variable
+ *      and must keep `$` for typeBindings lookup — e.g. `$user → User`)
+ *
+ * Examples:
+ *   `$user`                 → `$user`         (bare variable — unchanged)
+ *   `$user->address`        → `$user.address`
+ *   `$user->address->city`  → `$user.address.city`
+ *   `$user?`                → `$user`         (null-safe trailing `?` stripped)
+ *   `$this`                 → `$this`         (receiverBinding uses `$this`)
+ *   `parent`                → `parent`        (super-receiver check)
+ */
+function normalizePhpReceiver(raw: string): string {
+  // Keep `$this`, `parent`, and `self` as-is.
+  if (raw === '$this' || raw === 'parent' || raw === 'self') return raw;
+
+  // Replace `?->` (null-safe) and plain `->` with `.`.
+  let text = raw.replace(/\?->/g, '.').replace(/->/g, '.');
+  // Strip a trailing `?` (null-safe fragment on the last object node).
+  text = text.replace(/\?$/, '');
+  // Collapse any doubled dots from `?->` where `?` was on its own.
+  text = text.replace(/\.{2,}/g, '.');
+  // Strip trailing dot.
+  text = text.replace(/\.$/, '');
+
+  // Split on `.` and strip `$` from all segments EXCEPT the first.
+  // The first segment is a PHP variable (typeBinding key includes `$`).
+  // Subsequent segments are property/method names (stored without `$`).
+  const segments = text.split('.');
+  for (let i = 1; i < segments.length; i++) {
+    const s = segments[i];
+    if (s !== undefined && s.startsWith('$')) segments[i] = s.slice(1);
+  }
+  return segments.join('.');
+}
+
+// ─── PHP argument type inference ─────────────────────────────────────────────
+
+/**
+ * Infer the PHP type of a call argument from its literal shape.
+ * Returns an empty string for non-literals (treated as "unknown" = any-match).
+ * Mirrors C#'s `inferArgType` helper.
+ */
+function inferPhpArgType(argNode: SyntaxNode): string {
+  // argument node wraps the actual expression
+  const expr = argNode.firstNamedChild ?? argNode;
+  switch (expr.type) {
+    case 'integer':
+      return 'int';
+    case 'float':
+      return 'float';
+    case 'string':
+    case 'encapsed_string':
+    case 'heredoc':
+    case 'nowdoc':
+      return 'string';
+    case 'boolean':
+    case 'true':
+    case 'false':
+      return 'bool';
+    case 'null':
+      return 'null';
+    default:
+      return '';
+  }
+}
+
+// ─── PHPDoc synthesis ─────────────────────────────────────────────────────────
+
+/** PHP 8+ attribute_list nodes that appear between PHPDoc and method. */
+const SKIP_SIBLING_TYPES = new Set(['attribute_list', 'attribute', 'comment']);
+
+/** Regex for PHPDoc @param: standard `@param Type $name` */
+const PHPDOC_PARAM_RE = /@param\s+(\S+)\s+\$(\w+)/g;
+/** Regex for PHPDoc @param: alternate `@param $name Type` */
+const PHPDOC_PARAM_ALT_RE = /@param\s+\$(\w+)\s+(\S+)/g;
+/** Regex for PHPDoc @return: `@return Type` */
+const PHPDOC_RETURN_RE = /@return\s+(\S+)/;
+
+/**
+ * Normalize a PHP type string to a simple class name for binding purposes.
+ * Returns null for primitives or uninformative types.
+ * Mirrors `normalizePhpType` in `interpret.ts` but operates on raw PHPDoc strings.
+ */
+function normalizePhpDocType(raw: string): string | null {
+  let type = raw.trim();
+  // Strip nullable prefix
+  if (type.startsWith('?')) type = type.slice(1).trim();
+  // Strip array suffix: User[] → User
+  if (type.endsWith('[]')) type = type.slice(0, -2).trim();
+  // Strip union with null/false/void
+  if (type.includes('|')) {
+    const parts = type
+      .split('|')
+      .map((p) => p.trim())
+      .filter((p) => p !== 'null' && p !== 'false' && p !== 'void' && p !== 'mixed' && p !== '');
+    if (parts.length !== 1) return null;
+    type = parts[0];
+  }
+  // Strip intersection: take first part
+  if (type.includes('&')) {
+    const first = type.split('&')[0].trim();
+    if (first === '') return null;
+    type = first;
+  }
+  // Strip generic wrapper: Collection<User> → User
+  const genericMatch = type.match(/^\w[\w\\]*\s*<([^,<>]+)>$/);
+  if (genericMatch) {
+    type = genericMatch[1].trim();
+    // Strip array suffix again inside generic
+    if (type.endsWith('[]')) type = type.slice(0, -2).trim();
+  }
+  // Strip namespace qualifier: \App\Models\User → User
+  if (type.includes('\\')) {
+    const segs = type.split('\\').filter(Boolean);
+    type = segs[segs.length - 1] ?? type;
+  }
+  // Reject primitives
+  if (PHP_PRIMITIVES.has(type.toLowerCase())) return null;
+  // Must be a simple identifier
+  if (!/^\w+$/.test(type)) return null;
+  return type;
+}
+
+const PHP_PRIMITIVES = new Set([
+  'int',
+  'integer',
+  'float',
+  'double',
+  'string',
+  'bool',
+  'boolean',
+  'array',
+  'object',
+  'callable',
+  'iterable',
+  'null',
+  'void',
+  'never',
+  'mixed',
+  'false',
+  'true',
+  'self',
+  'static',
+  'parent',
+]);
+
+/**
+ * The comment siblings immediately preceding `node`, in SOURCE order (the
+ * nearest comment last), stopping at the first named sibling that is not a
+ * comment or a PHP 8+ attribute.
+ *
+ * The single implementation of that chain walk. Every PHPDoc reader in this
+ * file wants the same siblings under the same stop rule — `@param`/`@return` on
+ * a method, `@var` for a foreach element type, `@var` for a field type — and
+ * three hand-copied walks meant a fix to the stop rule (attributes between the
+ * docblock and the declaration, say) could land on one reader and not the
+ * others, which shows up as a field typed differently from its own foreach
+ * element type.
+ */
+function precedingCommentSiblings(node: SyntaxNode): SyntaxNode[] {
+  const comments: SyntaxNode[] = [];
+  let sibling = node.previousSibling;
+  while (sibling !== null) {
+    if (sibling.type === 'comment') {
+      comments.unshift(sibling);
+    } else if (sibling.isNamed && !SKIP_SIBLING_TYPES.has(sibling.type)) {
+      break;
+    }
+    sibling = sibling.previousSibling;
+  }
+  return comments;
+}
+
+/**
+ * First match of `re` over {@link precedingCommentSiblings}, searched from the
+ * NEAREST comment outward — a docblock written directly above the declaration
+ * wins over one further up, and an earlier comment is still reached when the
+ * nearest one carries no such tag.
+ */
+function nearestPrecedingCommentMatch(node: SyntaxNode, re: RegExp): RegExpExecArray | null {
+  const comments = precedingCommentSiblings(node);
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const m = re.exec(comments[i].text);
+    if (m !== null) return m;
+  }
+  return null;
+}
+
+/**
+ * Collect comment text from siblings immediately before `fnNode`.
+ * Skips PHP 8+ attribute_list nodes.
+ */
+function collectPrecedingComments(fnNode: SyntaxNode): string {
+  return precedingCommentSiblings(fnNode)
+    .map((comment) => comment.text)
+    .join('\n');
+}
+
+/**
+ * Synthesize PHPDoc @param and @return type-binding captures for a
+ * method_declaration or function_definition node.
+ *
+ * PHPDoc @param Type $name → `@type-binding.parameter` match (anchored at fn body/return_type).
+ * PHPDoc @return Type → `@type-binding.return` match (anchored at fn name).
+ */
+function synthesizePhpDocBindings(fnNode: SyntaxNode): CaptureMatch[] {
+  if (fnNode.type !== 'method_declaration' && fnNode.type !== 'function_definition') return [];
+
+  const commentBlock = collectPrecedingComments(fnNode);
+  if (commentBlock === '') return [];
+
+  const out: CaptureMatch[] = [];
+
+  // Anchor for parameter type-bindings: the function body (or return_type as fallback).
+  // The binding must be inside the function scope so it's visible to body statements.
+  const bodyNode = fnNode.childForFieldName('body');
+  const anchorNode = bodyNode ?? fnNode;
+
+  // ── @param annotations ────────────────────────────────────────────────────
+  PHPDOC_PARAM_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  const seenParams = new Set<string>();
+
+  while ((m = PHPDOC_PARAM_RE.exec(commentBlock)) !== null) {
+    const rawType = m[1];
+    const paramName = '$' + m[2];
+    const typeName = normalizePhpDocType(rawType);
+    if (typeName === null) continue;
+    seenParams.add(paramName);
+    out.push({
+      '@type-binding.parameter': nodeToCapture('@type-binding.parameter', anchorNode),
+      '@type-binding.name': syntheticCapture('@type-binding.name', anchorNode, paramName),
+      '@type-binding.type': syntheticCapture('@type-binding.type', anchorNode, typeName),
+    });
+  }
+
+  // Also check alternate PHPDoc order: @param $name Type
+  PHPDOC_PARAM_ALT_RE.lastIndex = 0;
+  while ((m = PHPDOC_PARAM_ALT_RE.exec(commentBlock)) !== null) {
+    const paramName = '$' + m[1];
+    if (seenParams.has(paramName)) continue; // standard format takes priority
+    const rawType = m[2];
+    const typeName = normalizePhpDocType(rawType);
+    if (typeName === null) continue;
+    out.push({
+      '@type-binding.parameter': nodeToCapture('@type-binding.parameter', anchorNode),
+      '@type-binding.name': syntheticCapture('@type-binding.name', anchorNode, paramName),
+      '@type-binding.type': syntheticCapture('@type-binding.type', anchorNode, typeName),
+    });
+  }
+
+  // ── @return annotation ────────────────────────────────────────────────────
+  const returnMatch = PHPDOC_RETURN_RE.exec(commentBlock);
+  if (returnMatch !== null) {
+    const rawType = returnMatch[1];
+    const typeName = normalizePhpDocType(rawType);
+    if (typeName !== null) {
+      // @return bindings must be anchored at the method name and hoisted to Module scope
+      // by phpBindingScopeFor (which checks for @type-binding.return presence).
+      // Use the function_definition/method_declaration node itself as the anchor — it
+      // coincides with the innermost scope's range, so auto-hoist kicks in.
+      const nameNode = fnNode.childForFieldName('name') ?? fnNode;
+      out.push({
+        '@type-binding.return': nodeToCapture('@type-binding.return', fnNode),
+        '@type-binding.name': syntheticCapture('@type-binding.name', nameNode, nameNode.text),
+        '@type-binding.type': syntheticCapture('@type-binding.type', nameNode, typeName),
+      });
+    }
+  }
+
+  return out;
+}
+
+// ─── Foreach synthesis ───────────────────────────────────────────────────────
+
+/**
+ * Walk all `foreach_statement` nodes inside `fnNode` and synthesize
+ * `@type-binding.alias` captures binding the loop variable to the
+ * element type of the iterable.
+ *
+ * Supports:
+ *   - `foreach ($users as $user)` — simple iterable variable
+ *   - `foreach ($users as $k => $user)` — key→value pair
+ *   - `foreach ($this->users as $user)` — member access iterable
+ *   - `foreach (getUsers() as $user)` — NOT yet supported (needs return type)
+ *
+ * The element type is resolved by:
+ *   1. Looking up the iterable name in PHPDoc @param bindings already
+ *      collected for this function (passed via typeBindingsByName).
+ *   2. Direct resolution when iterable's env type IS the element type
+ *      (because PHPDoc normalizes `User[]` → `User` already).
+ */
+function synthesizeForeachBindings(fnNode: SyntaxNode): CaptureMatch[] {
+  if (
+    fnNode.type !== 'method_declaration' &&
+    fnNode.type !== 'function_definition' &&
+    fnNode.type !== 'anonymous_function' &&
+    fnNode.type !== 'arrow_function'
+  ) {
+    return [];
+  }
+
+  const out: CaptureMatch[] = [];
+
+  // Build a mini type map from the function's PHPDoc @param annotations.
+  // This is re-parsed here (not cached from synthesizePhpDocBindings) for simplicity;
+  // the cost is negligible given the small comment sizes.
+  const commentBlock = collectPrecedingComments(fnNode);
+  const paramTypeMap = buildParamTypeMap(commentBlock);
+
+  // Walk the function body for foreach_statement nodes.
+  const bodyNode = fnNode.childForFieldName('body');
+  if (bodyNode === null) return [];
+  collectForeachBindings(bodyNode, fnNode, paramTypeMap, out);
+
+  return out;
+}
+
+/** Build a map of `$paramName → elementTypeName` from PHPDoc @param in a comment block. */
+function buildParamTypeMap(commentBlock: string): Map<string, string> {
+  const map = new Map<string, string>();
+  if (commentBlock === '') return map;
+
+  PHPDOC_PARAM_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = PHPDOC_PARAM_RE.exec(commentBlock)) !== null) {
+    const rawType = m[1];
+    const paramName = '$' + m[2];
+    const typeName = normalizePhpDocType(rawType);
+    if (typeName !== null) map.set(paramName, typeName);
+  }
+  PHPDOC_PARAM_ALT_RE.lastIndex = 0;
+  while ((m = PHPDOC_PARAM_ALT_RE.exec(commentBlock)) !== null) {
+    const paramName = '$' + m[1];
+    if (map.has(paramName)) continue;
+    const rawType = m[2];
+    const typeName = normalizePhpDocType(rawType);
+    if (typeName !== null) map.set(paramName, typeName);
+  }
+  return map;
+}
+
+/**
+ * Walk a subtree and collect foreach_statement bindings.
+ * Recursively descends into all child nodes.
+ */
+function collectForeachBindings(
+  node: SyntaxNode,
+  fnNode: SyntaxNode,
+  paramTypeMap: Map<string, string>,
+  out: CaptureMatch[],
+): void {
+  if (node.type === 'foreach_statement') {
+    const synth = synthesizeSingleForeach(node, fnNode, paramTypeMap);
+    if (synth !== null) out.push(synth);
+  }
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child !== null) {
+      collectForeachBindings(child, fnNode, paramTypeMap, out);
+    }
+  }
+}
+
+/**
+ * Synthesize a single `@type-binding.alias` match for a `foreach_statement`.
+ *
+ * AST structure for foreach_statement (tree-sitter-php):
+ *   foreach ( <iterable> as <value_or_pair> ) <body>
+ * Named children (excluding body): first = iterable, second = value or pair.
+ */
+function synthesizeSingleForeach(
+  foreachNode: SyntaxNode,
+  fnNode: SyntaxNode,
+  paramTypeMap: Map<string, string>,
+): CaptureMatch | null {
+  // Collect non-body named children: [iterable, value_or_pair]
+  const bodyNode = foreachNode.childForFieldName('body');
+  const children: SyntaxNode[] = [];
+  for (let i = 0; i < foreachNode.namedChildCount; i++) {
+    const child = foreachNode.namedChild(i);
+    if (child !== null && child !== bodyNode) children.push(child);
+  }
+  if (children.length < 2) return null;
+
+  const iterableNode = children[0];
+  const valueOrPair = children[1];
+
+  // Determine the loop variable node
+  let loopVarNode: SyntaxNode;
+  if (valueOrPair.type === 'pair') {
+    // $key => $value — use the last named child of the pair
+    const lastChild = valueOrPair.namedChild(valueOrPair.namedChildCount - 1);
+    if (lastChild === null) return null;
+    loopVarNode =
+      lastChild.type === 'by_ref' ? (lastChild.firstNamedChild ?? lastChild) : lastChild;
+  } else {
+    loopVarNode =
+      valueOrPair.type === 'by_ref' ? (valueOrPair.firstNamedChild ?? valueOrPair) : valueOrPair;
+  }
+
+  // Loop variable must be a variable_name
+  if (loopVarNode.type !== 'variable_name') return null;
+  const loopVarName = loopVarNode.text; // e.g. '$user'
+
+  // Resolve the element type from the iterable
+  let elementType: string | null = null;
+
+  if (iterableNode.type === 'variable_name') {
+    // foreach ($users as $user) — look up $users in param map
+    const iterableName = iterableNode.text; // e.g. '$users'
+    elementType = paramTypeMap.get(iterableName) ?? null;
+  } else if (iterableNode.type === 'member_access_expression') {
+    // foreach ($this->users as $user) — property name is the field
+    const propNameNode = iterableNode.childForFieldName('name');
+    if (propNameNode !== null) {
+      // Property stored with $ prefix in paramTypeMap (rare for $this->prop patterns)
+      // Try both with and without $ prefix
+      const propKey = '$' + propNameNode.text;
+      elementType = paramTypeMap.get(propKey) ?? null;
+      if (elementType === null) {
+        // Try to find the property type from the enclosing class
+        elementType = findClassPropertyElementType(iterableNode, fnNode);
+      }
+    }
+  } else if (iterableNode.type === 'function_call_expression') {
+    // foreach (getUsers() as $user) — use the function name as a type alias.
+    // The function's @return annotation produces a @type-binding.return binding
+    // in the Module scope (e.g. getUsers → User). The scope-extractor's
+    // followChainedRef will resolve $user → getUsers → User.
+    const funcNode = iterableNode.childForFieldName('function');
+    if (funcNode !== null && funcNode.type === 'name') {
+      elementType = funcNode.text; // e.g. 'getUsers' — chain will be resolved later
+    }
+  } else if (iterableNode.type === 'member_call_expression') {
+    // foreach ($this->getUsers() as $user) — use the method name as a type alias.
+    const methodNameNode = iterableNode.childForFieldName('name');
+    if (methodNameNode !== null) {
+      elementType = methodNameNode.text; // e.g. 'getUsers'
+    }
+  }
+
+  if (elementType === null) return null;
+
+  // Anchor the binding inside the foreach body so it's scoped to the loop.
+  const anchorNode = bodyNode ?? foreachNode;
+
+  return {
+    '@type-binding.alias': nodeToCapture('@type-binding.alias', anchorNode),
+    '@type-binding.name': syntheticCapture('@type-binding.name', anchorNode, loopVarName),
+    '@type-binding.type': syntheticCapture('@type-binding.type', anchorNode, elementType),
+  };
+}
+
+/**
+ * Try to find the element type for `$this->property` member access by walking
+ * up from the foreach to the enclosing class and scanning the property declaration.
+ */
+function findClassPropertyElementType(
+  memberAccessNode: SyntaxNode,
+  fnNode: SyntaxNode,
+): string | null {
+  const propNameNode = memberAccessNode.childForFieldName('name');
+  if (propNameNode === null) return null;
+  const propName = propNameNode.text;
+
+  // Walk up from fnNode to find the enclosing class declaration
+  let cur: SyntaxNode | null = fnNode.parent;
+  while (cur !== null) {
+    if (cur.type === 'class_declaration' || cur.type === 'trait_declaration') {
+      break;
+    }
+    cur = cur.parent;
+  }
+  if (cur === null) return null;
+
+  // Find the property_declaration with matching variable_name '$propName'
+  const declList = cur.childForFieldName('body');
+  if (declList === null) return null;
+
+  for (let i = 0; i < declList.namedChildCount; i++) {
+    const child = declList.namedChild(i);
+    if (child === null || child.type !== 'property_declaration') continue;
+    for (let j = 0; j < child.namedChildCount; j++) {
+      const elem = child.namedChild(j);
+      if (elem === null || elem.type !== 'property_element') continue;
+      const varNameNode = elem.firstNamedChild;
+      if (varNameNode === null || varNameNode.text !== '$' + propName) continue;
+      // Found the property — get its element type from @var PHPDoc or native type
+      return extractPropertyElementType(child);
+    }
+  }
+  return null;
+}
+
+/**
+ * PHPDoc `@var`, with the optional variable name PHPStan/Psalm allow
+ * (`@var Repo<User> $repo`). `\S+` for the type deliberately: a docblock type is
+ * untyped text and everything past the first space is prose.
+ *
+ * ONE regex for both readings of the tag. The FIELD type
+ * ({@link synthesizePhpDocPropertyBindings}) needs group 2 to tell `@var Repo
+ * $other` from `@var Repo`; the foreach ELEMENT type
+ * ({@link extractPropertyElementType}) ignores it — and since the trailing group
+ * is optional it can never change what group 1 captures, so a second, narrower
+ * copy bought nothing but the chance of the two readings of one annotation
+ * drifting apart.
+ */
+const PHPDOC_VAR_RE = /@var\s+(\S+)(?:\s+\$(\w+))?/;
+
+/**
+ * Extract element type from a property_declaration node:
+ * 1. PHPDoc @var annotation on a preceding comment sibling
+ * 2. PHP 7.4+ native type field (non-array)
+ */
+function extractPropertyElementType(propDecl: SyntaxNode): string | null {
+  // Strategy 1: PHPDoc @var on a preceding comment sibling. The `$name` group
+  // is not consulted: an element type is asked for by the ONE foreach that
+  // already named this property, so a mismatched name cannot mis-attribute it.
+  const varTag = nearestPrecedingCommentMatch(propDecl, PHPDOC_VAR_RE);
+  if (varTag !== null) return normalizePhpDocType(varTag[1]);
+  // Strategy 2: native type field — skip generic 'array'
+  const typeNode = propDecl.childForFieldName('type');
+  if (typeNode === null) return null;
+  const typeName = typeNode.text.trim();
+  if (typeName === 'array' || typeName === '') return null;
+  return normalizePhpDocType(typeName);
+}
+
+// ─── PHPDoc @var property synthesis ──────────────────────────────────────────
+
+/**
+ * Container spellings that base-name erasure would turn into a PHANTOM class.
+ *
+ * Erasing `list<User>` to `list` names nothing — PHP has no `list` type — so the
+ * binding could only ever bind a user class that happens to be called `list`,
+ * i.e. exactly the wrong-edge direction. Every OTHER PHPDoc container erases to
+ * a name `normalizePhpType` already rejects as a primitive (`array<int,User>` →
+ * `array`, `iterable<User>` → `iterable`) or to a real class whose methods are
+ * what the field's receiver actually calls (`Collection<User>` → `Collection`,
+ * `Generator<User>` → `Generator`), so this set holds one entry, not a
+ * catalogue.
+ *
+ * Compared CASE-FOLDED, not by listing spellings: a deny-set that must be kept
+ * in sync by vigilance drifts (#2833, the same lesson python/interpret.ts
+ * records for its own reduction).
+ */
+const PHPDOC_PHANTOM_CONTAINER_BASES: ReadonlySet<string> = new Set(['list']);
+
+/**
+ * Erase type ARGUMENTS from a docblock type, leaving the base name:
+ * `Repo<User>` → `Repo`, `Repo<Repo<User>>` → `Repo`, `Repo<User>|null` →
+ * `Repo|null`. Bracket-counting rather than a regex so a nested or
+ * multi-argument spelling reduces in one pass; an unbalanced `<` simply
+ * swallows the tail, which is the declining direction.
+ *
+ * NOT the shared `stripTemplateArguments`, and the difference is the UNION:
+ * that one truncates at the first `<`, so `Repo<User>|null` becomes `Repo` and
+ * the nullability is lost with the arguments. A docblock type is the one place
+ * a union survives to the binding — `interpretPhpTypeBinding` runs
+ * `normalizePhpType` over what this returns, and that is what strips `|null`
+ * exactly as it does for a native `Repo|null` property. So a PHP docblock needs
+ * the arguments gone and the rest of the spelling intact, which is a different
+ * operation and not a candidate for a seventh caller of the shared one.
+ */
+function erasePhpDocTypeArguments(text: string): string {
+  let out = '';
+  let depth = 0;
+  for (const ch of text) {
+    if (ch === '<') depth++;
+    else if (ch === '>') {
+      if (depth > 0) depth--;
+    } else if (depth === 0) out += ch;
+  }
+  return out;
+}
+
+/**
+ * The type name a property's PHPDoc `@var` should bind the FIELD to, or `null`
+ * to decline.
+ *
+ * Two normalizations happen here and nowhere else, and each is forced:
+ *
+ *   1. TYPE-ARGUMENT ERASURE (`Repo<User>` → `Repo`). Every sibling language in
+ *      #2833 lets the as-written spelling reach `TypeRef.rawName` and leaves the
+ *      erasure to `resolveClassBindingForName`. PHP cannot: `normalizePhpType`
+ *      reduces `X<Y>` to `Y` — the CONTAINER-ELEMENT convention, pinned by
+ *      `test/integration/resolvers/php.test.ts` ("normalizePhpType
+ *      ('Collection<User>') must yield 'User', not 'Collection'") because the
+ *      foreach path depends on it. Measured: passing `Repo<User>` through binds
+ *      the field to `User` and `$this->repo->save()` emits `User::save` — a
+ *      WRONG edge, not a missing one. So a field's type arguments are erased
+ *      HERE, before that rule can read them, and the element convention is left
+ *      exactly as it was for `@param` / `@return` / foreach.
+ *
+ *   2. ARRAY DECLINE (`Repo[]` → nothing). A field annotated `Repo[]` holds an
+ *      ARRAY; typing it `Repo` is a wrong field type, and the collision is real
+ *      rather than theoretical — a repository class with a `find` / `filter` /
+ *      `map` method would claim `$this->repos->find(…)`. The element type is
+ *      already extracted separately for the one construct that wants it:
+ *      `extractPropertyElementType` reads the same `@var` for `foreach
+ *      ($this->repos as $r)`. Declining here keeps the two readings of one
+ *      annotation from colliding.
+ *
+ * Everything else is delegated: `interpretPhpTypeBinding` applies the SAME
+ * `normalizePhpType` the native typed property (`private Repo $repo;`) goes
+ * through, so nullable (`?Repo`), null-union (`Repo|null`), intersection,
+ * fully-qualified (`\App\Models\Repo`, kept qualified on purpose — see that
+ * function) and every primitive / `mixed` / `self` / `static` rejection behave
+ * identically for the two spellings by construction, not by duplication.
+ */
+function phpDocPropertyFieldType(rawType: string): string | null {
+  const erased = erasePhpDocTypeArguments(rawType).trim();
+  if (erased === '') return null;
+  // Array-of: declined (see 2 above). Checked AFTER erasure so `Repo<User>[]`
+  // is recognised as an array too.
+  if (erased.endsWith('[]')) return null;
+  if (PHPDOC_PHANTOM_CONTAINER_BASES.has(erased.toLowerCase())) return null;
+  return erased;
+}
+
+/**
+ * Emit the field type-binding a PHPDoc `@var` block declares on one UNTYPED
+ * property declaration (`/** @var Repo *​/ private $repo;`), and record its
+ * anchor id in `anchorIds`.
+ *
+ * PHP's own type story leans on docblocks for everything its native syntax
+ * cannot spell — and generics are exactly that, since `private Repo<User>
+ * $repo;` is a parse error. The native TYPED property already binds via the
+ * `@type-binding.annotation` rule in `query.ts`; measured before this pass, the
+ * docblock form bound NOTHING, so `$this->repo->save()` lost its edge for both
+ * the generic spelling and its non-generic control (#2833).
+ *
+ * The emitted match is byte-identical in SHAPE to what that query rule emits —
+ * `@type-binding.annotation` anchored on the `property_declaration`, with
+ * `@type-binding.name` carrying the `$`-sigilled variable name. That is the
+ * whole design: `interpretPhpTypeBinding` strips the sigil for source
+ * `'annotation'`, `phpBindingScopeFor` places it on the same scope, and the
+ * compound-receiver resolver finds it in `typeBindings` the way it always has.
+ * No resolution-side code changes.
+ *
+ * Declines, each because the annotation cannot be ATTRIBUTED rather than
+ * because the type is unusable:
+ *   - a property that already has a native `type:` — the query rule owns it,
+ *     and a docblock repeating it must not emit a second, competing binding;
+ *   - `private $a, $b;` — one `@var` cannot say which element it types;
+ *   - `@var Repo $other` naming a DIFFERENT property than the one it precedes.
+ */
+function emitPhpDocPropertyBinding(
+  node: SyntaxNode,
+  matches: CaptureMatch[],
+  anchorIds: Set<number>,
+): void {
+  // A native type hint already produces the binding via query.ts.
+  if (node.childForFieldName('type') !== null) return;
+
+  const elements = node.namedChildren.filter(
+    (c): c is SyntaxNode => c !== null && c.type === 'property_element',
+  );
+  if (elements.length !== 1) return;
+  const varNameNode = elements[0].childForFieldName('name') ?? elements[0].firstNamedChild;
+  if (varNameNode === null || varNameNode.type !== 'variable_name') return;
+
+  const raw = findPhpDocVarTag(node);
+  if (raw === null) return;
+  // `@var Repo $other` on `private $repo;` types neither — decline.
+  if (raw.varName !== undefined && '$' + raw.varName !== varNameNode.text) return;
+
+  const typeName = phpDocPropertyFieldType(raw.type);
+  if (typeName === null) return;
+
+  anchorIds.add(node.id);
+  matches.push({
+    '@type-binding.annotation': nodeToCapture('@type-binding.annotation', node),
+    '@type-binding.name': syntheticCapture('@type-binding.name', varNameNode, varNameNode.text),
+    '@type-binding.type': syntheticCapture('@type-binding.type', varNameNode, typeName),
+  });
+  // …and the FIELD declaration, which the native rule emits as its own
+  // separate match. Without it the property stays a `@declaration.variable`
+  // named `$repo` — a Variable, not a class-owned member — and the type
+  // binding alone is not enough: measured, `$this->repo->save()` resolved
+  // while `save` was unique to one class and went UNRESOLVED as soon as a
+  // second class declared a `save`, because narrowing a same-named method
+  // needs the receiver's member to be owned. The native typed property
+  // resolved the identical file. The `$` is stripped for the same reason it
+  // is on the native path: PHP stores field names unsigilled so `$obj->repo`
+  // looks up `repo`.
+  matches.push({
+    '@declaration.property': nodeToCapture('@declaration.property', node),
+    '@declaration.name': syntheticCapture(
+      '@declaration.name',
+      varNameNode,
+      varNameNode.text.replace(/^\$/, ''),
+    ),
+  });
+}
+
+/**
+ * The `@var` tag on the comment siblings immediately preceding `propDecl` —
+ * the same chain, the same regex and the same nearest-first order
+ * `extractPropertyElementType` reads the tag through, so the two readings of
+ * one annotation cannot disagree about WHICH annotation they read.
+ */
+function findPhpDocVarTag(
+  propDecl: SyntaxNode,
+): { readonly type: string; readonly varName?: string } | null {
+  const m = nearestPrecedingCommentMatch(propDecl, PHPDOC_VAR_RE);
+  return m === null ? null : { type: m[1], varName: m[2] };
+}

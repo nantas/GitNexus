@@ -1,0 +1,763 @@
+/**
+ * Tree-sitter query for JavaScript scope captures (RFC §5.1, Ring 3).
+ *
+ * Subset of the TypeScript scope query (`languages/typescript/query.ts`)
+ * compiled against `tree-sitter-javascript`. TypeScript-only node types
+ * (`interface_declaration`, `type_alias_declaration`, `enum_declaration`,
+ * `internal_module`, `abstract_class_declaration`, `function_signature`,
+ * `method_signature`, `abstract_method_signature`, `type_annotation`,
+ * `public_field_definition`) are dropped because:
+ *
+ *   1. The JS grammar doesn't define them — the query compiler would
+ *      throw `InvalidNodeType` if they were included.
+ *   2. JavaScript has no static type annotations, so the `@type-binding.*`
+ *      patterns derived from TS annotation nodes don't apply.
+ *
+ * What IS shared with the TypeScript query:
+ *
+ *   - Scope patterns: `program`, `class_declaration`, `(class)` (the JS
+ *     grammar node for class expressions — NOT `class_expression`, which
+ *     does not exist in `tree-sitter-javascript`), `function_declaration`,
+ *     `generator_function_declaration`, `function_expression`,
+ *     `arrow_function`, `method_definition`.
+ *   - Declaration patterns for functions, classes, const/let/var,
+ *     object-property arrows (Zustand, TanStack, etc.), and HOC-wrapped
+ *     variable declarations (forwardRef / memo / useCallback / useMemo).
+ *   - Import patterns: `import_statement`, `export_statement` re-exports,
+ *     and dynamic `import()` (represented as `call_expression(import)` in
+ *     both grammars — the `import` leaf node exists in tree-sitter-javascript
+ *     as well as tree-sitter-typescript).
+ *   - Type-binding patterns that work without static annotations:
+ *     constructor inference (`new User()`), call-result alias
+ *     (`const u = getUser()`), member-access alias (`const a = u.addr`),
+ *     identifier alias, assignment rebind, and for-of element bindings.
+ *     JSDoc-derived type bindings (`@param {User} u`, `@returns {User}`)
+ *     are handled separately in `captures.ts` via comment-node scanning.
+ *   - Reference patterns: free calls, member calls, constructor calls,
+ *     write-access, read-access, and dynamic import.
+ *
+ * CJS `require()` is NOT captured here; it is handled in `captures.ts`
+ * by scanning parent context (destructured vs. namespace) of `call_expression`
+ * nodes whose callee is the identifier `require`.
+ *
+ * Grammar version: `tree-sitter-javascript` pinned in gitnexus/package.json.
+ *
+ * Exposes lazy `Parser` and `Query` singletons so callers don't pay
+ * tree-sitter init cost per file.
+ */
+
+import Parser from 'tree-sitter';
+import JS from 'tree-sitter-javascript';
+import {
+  ARRAY_METHOD_NOT_ANY_OF_PREDICATE,
+  DEFAULT_EXPORT_IDENTIFIER_NOT_ANY_OF_PREDICATE,
+} from '../../ts-js-hoc-utils.js';
+
+const JS_GRAMMAR = JS as Parameters<Parser['setLanguage']>[0];
+
+/** True when the file should be parsed with the JSX-extended query. */
+function isJsxFile(filePath: string): boolean {
+  return filePath.endsWith('.jsx');
+}
+
+export const JAVASCRIPT_SCOPE_QUERY = `
+;; Scopes — module / class-likes / function-likes
+(program) @scope.module
+
+(class_declaration) @scope.class
+(class) @scope.class
+
+;; \`@receiver-owner.this\` — see the matching block in typescript/query.ts
+;; (#2701). Every function form except \`arrow_function\` binds its own \`this\`.
+(function_declaration) @scope.function @receiver-owner.this
+(generator_function_declaration) @scope.function @receiver-owner.this
+(function_expression) @scope.function @receiver-owner.this
+;; \`function*(){}\` as an EXPRESSION. Absent from this list before #2701, so it
+;; was not a scope at all and \`this\` inside one read as the enclosing method's.
+(generator_function) @scope.function @receiver-owner.this
+(arrow_function) @scope.function
+(method_definition) @scope.function @receiver-owner.this
+
+;; Object literals get their own scope boundary -- see the matching
+;; comment in typescript/query.ts (#2545/#2551). Prevents a
+;; method_definition/property-arrow's auto-hoist from leaking its name
+;; past the literal into the enclosing scope, and (unlike Block) keeps
+;; sibling properties from seeing each other as bare identifiers.
+(object) @scope.object
+
+;; Statement blocks are BINDING scopes (#2699). ECMAScript gives every block its
+;; own environment record, so \`let\`/\`const\`/\`class\`/\`function\` declared in
+;; sibling blocks of one function are DIFFERENT bindings — without this the
+;; resolver sees both as function-level and a call in one branch resolves to
+;; both. \`tsBindingScopeFor\` already implements the other half of the rule:
+;; \`var\` hoists past blocks to the enclosing Function/Module, \`let\`/\`const\`
+;; take the innermost scope, which is now the block.
+(statement_block) @scope.block
+
+
+;; Declarations — classes
+(class_declaration
+  name: (identifier) @declaration.name) @declaration.class
+
+;; Declarations — methods (inside class bodies)
+(method_definition
+  name: (property_identifier) @declaration.name) @declaration.method
+
+;; Declarations — class fields (JS uses field_definition, not public_field_definition)
+(field_definition
+  property: (property_identifier) @declaration.name) @declaration.property
+
+;; Object-literal keys of a NAMED object (A1/A5) — the scope-resolution half of
+;; the same rule in TYPESCRIPT/JAVASCRIPT_QUERIES. The parse query mints the
+;; Property NODE; this mints the DEF the resolver can point a read/write at.
+(variable_declarator
+  name: (identifier)
+  value: (object
+    (pair
+      key: (property_identifier) @declaration.name) @declaration.property))
+
+;; Declarations — free functions
+(function_declaration
+  name: (identifier) @declaration.name) @declaration.function
+
+(generator_function_declaration
+  name: (identifier) @declaration.name) @declaration.function
+
+;; Arrow / function-expression assigned to a const/let/var.
+;; Anchor discipline: @declaration.function sits on the INNER arrow or
+;; function_expression, NOT on the lexical_declaration wrapper. This
+;; aligns anchor.range with the @scope.function range so
+;; pass2AttachDeclarations resolves the innermost scope correctly and
+;; resolveCallerGraphId walks up to the right caller anchor.
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name
+    value: (arrow_function) @declaration.function))
+
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name
+    value: (function_expression) @declaration.function))
+
+(export_statement
+  declaration: (lexical_declaration
+    (variable_declarator
+      name: (identifier) @declaration.name
+      value: (arrow_function) @declaration.function)))
+
+(export_statement
+  declaration: (lexical_declaration
+    (variable_declarator
+      name: (identifier) @declaration.name
+      value: (function_expression) @declaration.function)))
+
+(variable_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name
+    value: (arrow_function) @declaration.function))
+
+(variable_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name
+    value: (function_expression) @declaration.function))
+
+;; CJS property-assignment exports (#2723): \`exports.foo = function () {}\`,
+;; \`module.exports.foo = (a) => a\`. The graph node for these comes from
+;; TYPESCRIPT/JAVASCRIPT_QUERIES; this block is the other half — without a
+;; scope-resolution declaration the node exists but nothing resolves TO it,
+;; so \`impact\` answered "found, zero callers" on a whole CommonJS API.
+;;
+;; The declaration binds the BARE property name into the enclosing (module)
+;; scope, which is what importers see: \`const { foo } = require('./m')\`
+;; matches by name, and a namespace \`m.foo()\` walks the module's defs.
+;;
+;; Same anchor discipline as the blocks above — \`@declaration.function\` sits
+;; on the INNER arrow / function_expression so its range matches the
+;; \`@scope.function\` range.
+;; The three right-hand-side forms share one pattern via an inner LEAF
+;; alternation. tree-sitter 0.21.1 has a known hazard where a top-level
+;; \`[...]\` alternation makes sibling branches share one predicate bucket and
+;; silently drops matches; an inner leaf alternation whose predicates all sit
+;; on captures OUTSIDE it (here \`@_cjs.exports\` / \`@_cjs.module\`, both on the
+;; left-hand side and bound in every branch) is the safe form. Verified by
+;; probing all six receiver × RHS combinations, not by reading.
+;;
+;; \`(generator_function) @scope.function\` is declared near the top of this
+;; query, so the anchor aligns for that branch too.
+(assignment_expression
+  left: (member_expression
+    object: (identifier) @_cjs.receiver
+    property: (property_identifier) @declaration.name)
+  right: [
+    (arrow_function)
+    (function_expression)
+    (generator_function)
+  ] @declaration.function)
+
+;; \`this.X = fn\` at MODULE level of a CommonJS file — there \`this\` IS
+;; \`module.exports\`, so this declares an export. Pruned emit-side for ESM
+;; files (where top-level \`this\` is undefined) and for a \`this\` inside a
+;; function, which is an instance member rather than an export.
+(assignment_expression
+  left: (member_expression
+    object: (this)
+    property: (property_identifier) @declaration.name)
+  right: [
+    (arrow_function)
+    (function_expression)
+    (generator_function)
+  ] @declaration.function)
+
+(assignment_expression
+  left: (member_expression
+    object: (member_expression
+      object: (identifier) @_cjs.module
+      property: (property_identifier) @_cjs.exports)
+    property: (property_identifier) @declaration.name)
+  right: [
+    (arrow_function)
+    (function_expression)
+    (generator_function)
+  ] @declaration.function
+  (#eq? @_cjs.module "module")
+  (#eq? @_cjs.exports "exports"))
+
+;; Object-property arrows / function expressions named by their pair key.
+;; Same anchor discipline as the lexical_declaration block above: the
+;; @declaration.function capture must sit on the INNER arrow/fn-expression.
+(pair
+  key: (property_identifier) @declaration.name
+  value: (arrow_function) @declaration.function)
+
+(pair
+  key: (property_identifier) @declaration.name
+  value: (function_expression) @declaration.function)
+
+(pair
+  key: (string (string_fragment) @declaration.name)
+  value: (arrow_function) @declaration.function)
+
+(pair
+  key: (string (string_fragment) @declaration.name)
+  value: (function_expression) @declaration.function)
+
+;; HOC-wrapped variable declarations: const X = HOC((args) => { ... }).
+;; Covers React.forwardRef, memo, useCallback, useMemo, observer,
+;; debounce, and any user-defined HOC factory.
+;;
+;; #1876: this shape also matches array higher-order-method callbacks
+;; (const x = arr.map(a => ...)), where x is a value, not a function.
+;; Those are filtered out emit-side in captures.ts via
+;; isArrayMethodCallbackArrow (member-expression callee whose property
+;; is a known Array method), so only the @declaration.const survives.
+;; Excludes common array methods (map, filter, reduce, etc.) to avoid
+;; false positives like \`const x = arr.map(a => ...)\`.
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name
+    value: (call_expression
+      function: (identifier)
+      arguments: (arguments
+        (arrow_function) @declaration.function))))
+
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name
+    value: (call_expression
+      function: (identifier)
+      arguments: (arguments
+        (function_expression) @declaration.function))))
+
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name
+    value: (call_expression
+      function: (member_expression
+        property: (property_identifier) @callee)
+      arguments: (arguments
+        (arrow_function) @declaration.function)))
+  ${ARRAY_METHOD_NOT_ANY_OF_PREDICATE})
+
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name
+    value: (call_expression
+      function: (member_expression
+        property: (property_identifier) @callee)
+      arguments: (arguments
+        (function_expression) @declaration.function)))
+  ${ARRAY_METHOD_NOT_ANY_OF_PREDICATE})
+
+(export_statement
+  declaration: (lexical_declaration
+    (variable_declarator
+      name: (identifier) @declaration.name
+      value: (call_expression
+        function: (identifier)
+        arguments: (arguments
+          (arrow_function) @declaration.function)))))
+
+(export_statement
+  declaration: (lexical_declaration
+    (variable_declarator
+      name: (identifier) @declaration.name
+      value: (call_expression
+        function: (identifier)
+        arguments: (arguments
+          (function_expression) @declaration.function)))))
+
+(export_statement
+  declaration: (lexical_declaration
+    (variable_declarator
+      name: (identifier) @declaration.name
+      value: (call_expression
+        function: (member_expression
+          property: (property_identifier) @callee)
+        arguments: (arguments
+          (arrow_function) @declaration.function))))
+  ${ARRAY_METHOD_NOT_ANY_OF_PREDICATE})
+
+(export_statement
+  declaration: (lexical_declaration
+    (variable_declarator
+      name: (identifier) @declaration.name
+      value: (call_expression
+        function: (member_expression
+          property: (property_identifier) @callee)
+        arguments: (arguments
+          (function_expression) @declaration.function))))
+  ${ARRAY_METHOD_NOT_ANY_OF_PREDICATE})
+
+(variable_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name
+    value: (call_expression
+      function: (identifier)
+      arguments: (arguments
+        (arrow_function) @declaration.function))))
+
+(variable_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name
+    value: (call_expression
+      function: (identifier)
+      arguments: (arguments
+        (function_expression) @declaration.function))))
+
+(variable_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name
+    value: (call_expression
+      function: (member_expression
+        property: (property_identifier) @callee)
+      arguments: (arguments
+        (arrow_function) @declaration.function)))
+  ${ARRAY_METHOD_NOT_ANY_OF_PREDICATE})
+
+(variable_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name
+    value: (call_expression
+      function: (member_expression
+        property: (property_identifier) @callee)
+      arguments: (arguments
+        (function_expression) @declaration.function)))
+  ${ARRAY_METHOD_NOT_ANY_OF_PREDICATE})
+
+;; HOC-wrapped default exports (JS parity with TS patterns in
+;; languages/typescript/query.ts). The emit phase rewrites
+;; @declaration.name to a file-derived name so wrapper helpers do not
+;; become the graph-visible symbol name.
+((export_statement
+  value: (call_expression
+    function: (identifier) @hoc
+    arguments: (arguments
+      (arrow_function) @declaration.function)))
+  ${DEFAULT_EXPORT_IDENTIFIER_NOT_ANY_OF_PREDICATE})
+
+((export_statement
+  value: (call_expression
+    function: (identifier) @hoc
+    arguments: (arguments
+      (function_expression) @declaration.function)))
+  ${DEFAULT_EXPORT_IDENTIFIER_NOT_ANY_OF_PREDICATE})
+
+((export_statement
+  value: (call_expression
+    function: (member_expression
+      property: (property_identifier) @callee)
+    arguments: (arguments
+      (arrow_function) @declaration.function)))
+  ${ARRAY_METHOD_NOT_ANY_OF_PREDICATE})
+
+((export_statement
+  value: (call_expression
+    function: (member_expression
+      property: (property_identifier) @callee)
+    arguments: (arguments
+      (function_expression) @declaration.function)))
+  ${ARRAY_METHOD_NOT_ANY_OF_PREDICATE})
+
+;; Variable / constant declarations (non-function values).
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name)) @declaration.const
+
+(export_statement
+  declaration: (lexical_declaration
+    (variable_declarator
+      name: (identifier) @declaration.name))) @declaration.const
+
+(variable_declaration
+  (variable_declarator
+    name: (identifier) @declaration.name)) @declaration.variable
+
+;; Imports (ESM) — single anchor per statement; decomposer emits per-specifier markers.
+(import_statement) @import.statement
+
+;; Re-exports with a source clause.
+(export_statement
+  source: (string)) @import.statement
+
+;; Dynamic imports: import('./m') — tree-sitter-javascript represents this
+;; as call_expression with a named import leaf as the function field,
+;; identical to tree-sitter-typescript.
+(call_expression
+  function: (import)) @import.dynamic
+
+;; ── Type bindings (no static annotations in JS; inferred from AST shape) ──
+
+;; Constructor-inferred: const u = new User()
+(variable_declarator
+  name: (identifier) @type-binding.name
+  value: (new_expression
+    constructor: (identifier) @type-binding.type)) @type-binding.constructor
+
+;; Qualified constructor: const u = new models.User()
+(variable_declarator
+  name: (identifier) @type-binding.name
+  value: (new_expression
+    constructor: (member_expression) @type-binding.type)) @type-binding.constructor
+
+;; Class field initializer: \`class C { p = new Outer(); }\` (#2807).
+;; JavaScript has no field annotations at all, so a class field's type can only
+;; ever come from its initializer — without this pattern \`this.p.inner()\` had
+;; nothing to type the receiver with and the receiver fold declined the whole
+;; chain. \`synthesizeConstructorFieldBindings\` in captures.ts already covers the
+;; sibling shape (\`this.p = new Outer()\`), but only inside a \`constructor\`
+;; body, so a field initialized at its declaration matched nothing.
+;;
+;; Anchored on \`field_definition\` so the binding lands in the class body scope,
+;; where \`typeOfMemberOnClass\` reads it — the same anchoring TypeScript uses for
+;; \`public_field_definition\`. Note the JS grammar names the field \`property:\`,
+;; not \`name:\`.
+(field_definition
+  property: (property_identifier) @type-binding.name
+  value: (new_expression
+    constructor: (identifier) @type-binding.type)) @type-binding.constructor
+
+(field_definition
+  property: (property_identifier) @type-binding.name
+  value: (new_expression
+    constructor: (member_expression) @type-binding.type)) @type-binding.constructor
+
+;; Private-name field: \`#p = new Outer()\`.
+(field_definition
+  property: (private_property_identifier) @type-binding.name
+  value: (new_expression
+    constructor: (identifier) @type-binding.type)) @type-binding.constructor
+
+;; Call-result alias: const u = getUser()
+(variable_declarator
+  name: (identifier) @type-binding.name
+  value: (call_expression
+    function: (identifier) @type-binding.type)) @type-binding.alias
+
+;; Member-call alias: const u = svc.getUser()
+(variable_declarator
+  name: (identifier) @type-binding.name
+  value: (call_expression
+    function: (member_expression) @type-binding.type)) @type-binding.alias
+
+;; Await chain: const u = await getUser() / await svc.getUser()
+(variable_declarator
+  name: (identifier) @type-binding.name
+  value: (await_expression
+    (call_expression
+      function: (identifier) @type-binding.type))) @type-binding.alias
+
+(variable_declarator
+  name: (identifier) @type-binding.name
+  value: (await_expression
+    (call_expression
+      function: (member_expression) @type-binding.type))) @type-binding.alias
+
+;; Member-access alias: const addr = user.address
+(variable_declarator
+  name: (identifier) @type-binding.name
+  value: (member_expression) @type-binding.type) @type-binding.member-alias
+
+;; Identifier alias: const alias = user
+(variable_declarator
+  name: (identifier) @type-binding.name
+  value: (identifier) @type-binding.type) @type-binding.alias
+
+;; Assignment rebind: u = new User() / u = getUser()
+(assignment_expression
+  left: (identifier) @type-binding.name
+  right: (new_expression
+    constructor: (identifier) @type-binding.type)) @type-binding.constructor
+
+(assignment_expression
+  left: (identifier) @type-binding.name
+  right: (call_expression
+    function: (identifier) @type-binding.type)) @type-binding.alias
+
+(assignment_expression
+  left: (identifier) @type-binding.name
+  right: (identifier) @type-binding.type) @type-binding.alias
+
+;; For-of element: for (const u of users) / for (const u of getUsers())
+(for_in_statement
+  left: (identifier) @type-binding.name
+  right: (identifier) @type-binding.type) @type-binding.alias
+
+(for_in_statement
+  left: (identifier) @type-binding.name
+  right: (call_expression
+    function: (identifier) @type-binding.type)) @type-binding.alias
+
+(for_in_statement
+  left: (identifier) @type-binding.name
+  right: (call_expression
+    function: (member_expression) @type-binding.type)) @type-binding.alias
+
+(for_in_statement
+  left: (identifier) @type-binding.name
+  right: (member_expression
+    property: (property_identifier) @type-binding.type)) @type-binding.alias
+
+;; ── References ────────────────────────────────────────────────────────────
+
+;; Free calls: fn(args). The dynamic-import filter runs in captures.ts.
+(call_expression
+  function: (identifier) @reference.name) @reference.call.free
+
+;; Awaited free call: await fn<T>(...) re-associated by tree-sitter.
+(call_expression
+  function: (await_expression
+    (identifier) @reference.name)) @reference.call.free
+
+;; Member calls: obj.method() (includes optional chain).
+(call_expression
+  function: (member_expression
+    object: (_) @reference.receiver
+    property: (property_identifier) @reference.name)) @reference.call.member
+
+;; Awaited member call: await svc.m<T>(...)
+(call_expression
+  function: (await_expression
+    (member_expression
+      object: (_) @reference.receiver
+      property: (property_identifier) @reference.name))) @reference.call.member
+
+;; Constructor calls: new User() / new ns.User()
+(new_expression
+  constructor: (identifier) @reference.name) @reference.call.constructor
+
+(new_expression
+  constructor: (member_expression
+    property: (property_identifier) @reference.name) @reference.call.constructor.qualified) @reference.call.constructor
+
+;; Write access: obj.field = value
+(assignment_expression
+  left: (member_expression
+    object: (_) @reference.receiver
+    property: (property_identifier) @reference.name)) @reference.write.member
+
+(augmented_assignment_expression
+  left: (member_expression
+    object: (_) @reference.receiver
+    property: (property_identifier) @reference.name)) @reference.write.member
+
+;; Read access: obj.field (in read context; captures.ts filters non-reads).
+(member_expression
+  object: (_) @reference.receiver
+  property: (property_identifier) @reference.name) @reference.read.member
+
+;; Value position (#2437): function identifier as object-literal property
+;; value ({ emitScopeCaptures: emitHook }) or shorthand ({ emitHook }).
+;; Resolution is callable-gated (MethodRegistry) and emits a USES reference;
+;; @reference.property-key feeds the property-dispatch pass, which
+;; synthesizes CALLS at x.<key>() sites. Two separate patterns (tree-sitter
+;; 0.21 alternation hazard); destructuring shorthand is
+;; shorthand_property_identifier_pattern and cannot match.
+(pair
+  key: (property_identifier) @reference.property-key
+  value: (identifier) @reference.name @reference.value-ref)
+
+(object
+  (shorthand_property_identifier) @reference.name @reference.property-key @reference.value-ref)
+
+;; Bare-identifier reads (A2). VALUE POSITIONS ONLY — a blanket
+;; \`(identifier)\` rule would mint a site for every token in the file.
+(arguments
+  (identifier) @reference.name @reference.read.identifier)
+
+(assignment_pattern
+  right: (identifier) @reference.name @reference.read.identifier)
+
+(return_statement
+  (identifier) @reference.name @reference.read.identifier)
+
+;; \`const next = LIMIT\` and \`n > LIMIT\` — both plainly value reads, and both
+;; named in review as gaps between what A2 claimed and what it matched.
+(variable_declarator
+  value: (identifier) @reference.name @reference.read.identifier)
+
+(binary_expression
+  left: (identifier) @reference.name @reference.read.identifier)
+
+(binary_expression
+  right: (identifier) @reference.name @reference.read.identifier)
+
+;; Destructured PARAMETER keys (R2-1c). \`function exit({ exitMinAtrMult = 0 })\`
+;; reads that property off whatever the caller passes, exactly as
+;; \`cfg.exitMinAtrMult\` would — the field just never appears in a
+;; member_expression, so the read had no site at all and the function that
+;; implements the behaviour was missing from "who reads this setting?".
+;;
+;; A distinct anchor rather than @reference.read.member: that tag is filtered
+;; emit-side to matches with a member_expression ancestor (calls and writes
+;; share its shape), and a destructuring pattern has none, so it would be
+;; dropped. The \`read.\` head is what maps this to a read kind, so the new tag
+;; needs no mapping change.
+;;
+;; The object_pattern is the receiver. It is anonymous — there is no name to
+;; type — which is precisely the untyped-receiver case the name-narrowing pass
+;; exists to serve.
+;;
+;; Scoped to formal_parameters deliberately. A destructuring binding elsewhere
+;; (\`const { x } = require('m')\`) is often an import rather than a field read,
+;; and minting a property read for it would attribute module bindings to
+;; unrelated same-named keys.
+(formal_parameters
+  (object_pattern
+    (shorthand_property_identifier_pattern) @reference.name
+      @reference.read.destructured) @reference.receiver)
+
+(formal_parameters
+  (object_pattern
+    (object_assignment_pattern
+      left: (shorthand_property_identifier_pattern) @reference.name
+        @reference.read.destructured)) @reference.receiver)
+
+(formal_parameters
+  (object_pattern
+    (pair_pattern
+      key: (property_identifier) @reference.name
+        @reference.read.destructured)) @reference.receiver)
+
+;; Object-literal keys in RECORD CONSTRUCTION position (R2-1b). Building
+;; \`{ exitContract: { exitMinAtrMult: settings.x } }\` SETS that field, so this
+;; is the write counterpart to the destructured read above — without it
+;; "who reads this setting?" answers well and "who SETS it?" misses the code
+;; that stamps the value.
+;;
+;; A WRITE REFERENCE, deliberately not a definition. The round-1 rule already
+;; mints Property nodes for literals bound to a variable; minting more for
+;; anonymous records would add same-named competitors to the very name-narrowing
+;; that makes these reads resolvable — measured at 26 competing definitions for
+;; one field on the reporting repo. A construction site is a USE of a field, not
+;; another declaration of it.
+;;
+;; Two positions only: nested under a key, and returned. Both are records with a
+;; name attached (the key, or the function). An inline call argument
+;; (\`doThing({ id: 1 })\`) stays excluded for the same reason round 1 excluded
+;; it from definitions — it is call-site data, not a named surface.
+;;
+;; The enclosing literal is the receiver, and it is anonymous, which routes
+;; these through the same narrowing and the same refusal-to-guess as every other
+;; untyped receiver.
+(pair
+  value: (object
+    (pair
+      key: (property_identifier) @reference.name
+        @reference.write.property-key) @_r2b.nested) @reference.receiver)
+
+(return_statement
+  (object
+    (pair
+      key: (property_identifier) @reference.name
+        @reference.write.property-key) @_r2b.returned) @reference.receiver)
+
+`;
+
+/** JSX-only suffix — appended when compiling against the JSX grammar for .jsx files. */
+const JSX_QUERY_SUFFIX = `
+;; <Foo />
+((jsx_self_closing_element
+  name: (identifier) @reference.name) @reference.call.free
+  (#match? @reference.name "^[A-Z]"))
+
+;; <Foo> ... </Foo>
+((jsx_opening_element
+  name: (identifier) @reference.name) @reference.call.free
+  (#match? @reference.name "^[A-Z]"))
+
+;; <Foo.Bar />
+(jsx_self_closing_element
+  name: (member_expression
+    object: (_) @reference.receiver
+    property: (property_identifier) @reference.name)) @reference.call.member
+
+(jsx_opening_element
+  name: (member_expression
+    object: (_) @reference.receiver
+    property: (property_identifier) @reference.name)) @reference.call.member
+`;
+
+let _jsParser: Parser | null = null;
+let _jsQuery: Parser.Query | null = null;
+let _jsxParser: Parser | null = null;
+let _jsxQuery: Parser.Query | null = null;
+
+export function getJsParser(filePath?: string): Parser {
+  // JSX files use the same JavaScript grammar in tree-sitter-javascript;
+  // both .js and .jsx parse with the same grammar object. We keep separate
+  // singletons only to mirror the TypeScript pattern and in case a future
+  // version of the grammar diverges.
+  if (filePath !== undefined && isJsxFile(filePath)) {
+    if (_jsxParser === null) {
+      _jsxParser = new Parser();
+      _jsxParser.setLanguage(JS_GRAMMAR);
+    }
+    return _jsxParser;
+  }
+  if (_jsParser === null) {
+    _jsParser = new Parser();
+    _jsParser.setLanguage(JS_GRAMMAR);
+  }
+  return _jsParser;
+}
+
+export function getJsScopeQuery(filePath?: string): Parser.Query {
+  if (filePath !== undefined && isJsxFile(filePath)) {
+    if (_jsxQuery === null) {
+      _jsxQuery = new Parser.Query(JS_GRAMMAR, JAVASCRIPT_SCOPE_QUERY + JSX_QUERY_SUFFIX);
+    }
+    return _jsxQuery;
+  }
+  if (_jsQuery === null) {
+    _jsQuery = new Parser.Query(JS_GRAMMAR, JAVASCRIPT_SCOPE_QUERY);
+  }
+  return _jsQuery;
+}
+
+/** Validate that a cached Tree was produced by the JS grammar. */
+export function jsCachedTreeMatchesGrammar(tree: unknown): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lang = (tree as any)?.getLanguage?.();
+  if (lang === undefined || lang === null) return true;
+  return lang === JS_GRAMMAR;
+}

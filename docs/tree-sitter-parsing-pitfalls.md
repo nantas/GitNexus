@@ -97,53 +97,25 @@ RETURN f.filePath, c.name, c.filePath
 
 ## 2. 调用层陷阱：大文件解析与 UTF-8 multi-byte 崩溃 ✅ 已修复
 
-> **状态：已通过自适应 buffer + 字符串输入路径修复。**
-> 原分块回调方案在 UTF-8 multi-byte 内容上有 byte-offset vs JS-string-index 不一致问题，
-> 已替换为 `parser.parse(content, null, { bufferSize })` 配合 `Buffer.byteLength()` 计算。
+当前统一通过 `safeParse` 解析：小文件使用字符串输入，大文件使用固定大小的回调块，避免 native binding 的长字符串转换问题。不要重新引入 fork 的 `parseContent` 或原始 `parser.parse` 兜底。
 
-### 现象（历史）
+### 当前调用方式
 
-直接将完整文件字符串传入 `parser.parse(fullText)` 时，对于较大的文件（实测约 36KB 以上），tree-sitter native binding 会抛出 `Error: Invalid argument`，而不是返回带错误节点的语法树。
-
-```javascript
-// ❌ 错误用法：大文件会崩溃
-const source = fs.readFileSync(filePath, 'utf8');
-const tree = parser.parse(source); // Invalid argument on large files
+```typescript
+import { parseSourceSafe } from '../tree-sitter/safe-parse.js';
+const tree = parseSourceSafe(parser, source, undefined, undefined, filePath);
 ```
 
-### 原因
+当前 Node binding 回调使用 UTF-16 code-unit 索引，与 JavaScript `source.slice(index, index + chunkSize)` 一致。历史文档把该索引描述成 UTF-8 byte offset，并据此禁用回调，这个结论不适用于当前 binding。
 
-tree-sitter Node.js native binding 对单次输入块有长度限制（< 32768 字节）。文件含大量多字节 UTF-8 字符（如中文注释）时更容易触发。
-
-同时，**分块回调 API 传入的 `index` 是 byte offset**，而 `content.slice(index, index + MAX_CHUNK)` 按 JS string index（UTF-16 code unit）截取，对 multi-byte 字符会产生错位，导致 native 崩溃。
-
-### 正确用法（当前：自适应 buffer + 字符串路径）
-
-```javascript
-// ✅ 当前用法：字符串输入 + 自适应 buffer（按 UTF-8 bytes 计算）
-function parseFile(filePath, oldTree = null) {
-  const code = fs.readFileSync(filePath, 'utf8');
-  const parser = new Parser();
-  parser.setLanguage(Language);
-
-  // bufferSize 按 UTF-8 byte 长度计算，2× 放大，512KB～32MB 区间
-  const byteLen = Buffer.byteLength(code, 'utf8');
-  const bufferSize = Math.min(Math.max(byteLen * 2, 512 * 1024), 32 * 1024 * 1024);
-
-  return parser.parse(code, oldTree, { bufferSize });
-}
-```
-
-> **为什么弃用分块回调？** 回调的 `index` 参数是 byte offset，而返回的 `code.slice(index, index+N)` 是 JS string index。
-> 对于含中文注释等 multi-byte UTF-8 字符的大文件，byte offset ≠ JS string index，导致 native 层收到错位数据并崩溃。
-> 见 `parser-loader.ts` 中 `parseContent()` 的注释和 `gitnexus/test/unit/tree-sitter-chunked-parse.test.ts` 的回归测试。
+`safeParse` 统一管理解析超时和 parser reset。C# 条件编译归一化必须等长遮蔽不活跃内容，保留 UTF-16 偏移和原始换行；单线程与 worker 都通过 provider 的 `preprocessSource` 执行。
 
 ### 其他常见调用层问题
 
 | 问题 | 症状 | 解决方式 |
 |------|------|----------|
-| 仍有某处走了分块回调 | multi-byte 大文件 native 崩溃 | 全局改为字符串 + `{ bufferSize }` |
-| 文件长度用 `content.length`（JS UTF-16） | buffer 不足，multi-byte 文件跳过或崩溃 | 改用 `Buffer.byteLength(content, 'utf8')` |
+| 绕过 safeParse 直接解析大文件 | native 长字符串转换失败 | 统一调用 safeParse |
+| 把回调索引当 UTF-8 字节偏移 | 非 ASCII 内容切片错位 | 按 UTF-16 code unit 对原始字符串切片 |
 | `hasError` 当方法调用 | `node.hasError()` TypeError | 改为属性访问 `node.hasError` |
 | `oldTree` 与当前文件内容不匹配 | 增量解析结果错误 | 文件变更时先调用 `tree.edit()` |
 | 错误来自 `Parser.Query` 而非 `parse` | Query 抛出异常 | 独立捕获 Query 错误 |
@@ -171,4 +143,4 @@ grep -rl $'[\u4e00-\u9fff]' --include="*.cs" /path/to/repo | wc -l
 - 受影响文件示例：`neonspark/Assets/NEON/Code/Game/PowerUps/ColdWeapon/FirearmsPowerUp.cs`
 - 修复验证结果：升级 0.23.1 后 Unicode 标识符可正常解析，`hasError=false`，`class_declaration` 节点正常
 - 自适应 buffer 迁移 PR：`chanyuenpang/fix/tree-sitter-utf8-parse` (#11)
-- 相关文件：`gitnexus/src/core/tree-sitter/parser-loader.ts`（`parseContent`）、`gitnexus/src/core/ingestion/constants.ts`（`getTreeSitterBufferSize`）
+- 当前入口：`gitnexus/src/core/tree-sitter/safe-parse.ts`；预处理：`gitnexus/src/core/tree-sitter/csharp-preproc-normalizer.ts`

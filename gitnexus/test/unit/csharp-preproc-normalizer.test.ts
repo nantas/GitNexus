@@ -44,13 +44,9 @@ describe('normalizeCSharpPreprocessorBranches', () => {
   });
 
   it('treats undefined symbols as false and falls back to #else branch', () => {
-    const source = [
-      '#if UNITY_EDITOR',
-      'int mode = 1;',
-      '#else',
-      'int mode = 0;',
-      '#endif',
-    ].join('\n');
+    const source = ['#if UNITY_EDITOR', 'int mode = 1;', '#else', 'int mode = 0;', '#endif'].join(
+      '\n',
+    );
 
     const out = normalizeCSharpPreprocessorBranches(source, new Set());
     expect(out.normalizedText).toContain('int mode = 0;');
@@ -59,19 +55,39 @@ describe('normalizeCSharpPreprocessorBranches', () => {
   });
 
   it('preserves source line count for stable diagnostics mapping', () => {
-    const source = [
-      'line-1',
-      '#if FLAG',
-      'line-3',
-      '#else',
-      'line-5',
-      '#endif',
-      'line-7',
-    ].join('\n');
+    const source = ['line-1', '#if FLAG', 'line-3', '#else', 'line-5', '#endif', 'line-7'].join(
+      '\n',
+    );
 
     const out = normalizeCSharpPreprocessorBranches(source, new Set(['FLAG']));
     expect(out.normalizedText.split('\n').length).toBe(source.split('\n').length);
     expect(out.normalizedText.split('\n')[2]).toBe('line-3');
-    expect(out.normalizedText.split('\n')[4]).toBe('');
+    expect(out.normalizedText.split('\n')[4]).toBe(' '.repeat('line-5'.length));
+  });
+});
+
+describe('preprocessSource offset contract', () => {
+  it('preserves every offset and mixed newline while masking Unicode branches', () => {
+    const source = '#if OFF\r\n中文字段😀;\n#else\ractive();\r\n#endif\n';
+    const { normalizedText } = normalizeCSharpPreprocessorBranches(source, new Set());
+    expect(normalizedText.length).toBe(source.length);
+    expect(normalizedText.indexOf('active();')).toBe(source.indexOf('active();'));
+    for (let i = 0; i < source.length; i++) {
+      if (source[i] === '\r' || source[i] === '\n') expect(normalizedText[i]).toBe(source[i]);
+    }
+    expect(normalizeCSharpPreprocessorBranches(normalizedText, new Set()).normalizedText).toBe(
+      normalizedText,
+    );
+  });
+
+  it('consumes both operands even when boolean evaluation short-circuits', () => {
+    for (const expression of ['true || false', 'false && true']) {
+      const result = normalizeCSharpPreprocessorBranches(
+        `#if ${expression}\nyes\n#else\nno\n#endif`,
+        new Set(),
+      );
+      expect(result.diagnostics.expressionErrors).toBe(0);
+      expect(result.normalizedText.includes('yes')).toBe(expression.startsWith('true'));
+    }
   });
 });

@@ -1,12 +1,12 @@
+import { isVerboseIngestionEnabled } from './utils/verbose.js';
+import { DEFAULT_MAX_FILE_SIZE_BYTES, getMaxFileSizeBytes } from './utils/max-file-size.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { glob } from 'glob';
-import { createIgnoreFilter, shouldIgnorePath } from '../../config/ignore-service.js';
+import { createIgnoreFilter } from '../../config/ignore-service.js';
+import { mapConcurrent } from '../../lib/utils.js';
 
-export interface FileEntry {
-  path: string;
-  content: string;
-}
+import { logger } from '../logger.js';
 
 /** Lightweight entry — path + size from stat, no content in memory */
 export interface ScannedFile {
@@ -19,21 +19,87 @@ export interface FilePath {
   path: string;
 }
 
-const READ_CONCURRENCY = 32;
+export const READ_CONCURRENCY = 32;
+const ANALYZE_PROGRESS_ACTIVE_ENV = 'GITNEXUS_ANALYZE_PROGRESS_ACTIVE';
 
-/** Skip files larger than 512KB — they're usually generated/vendored and crash tree-sitter */
-const MAX_FILE_SIZE = 512 * 1024;
-const UNITY_RESOURCE_GLOBS = ['**/*.prefab', '**/*.unity', '**/*.asset'];
+const DECLARATION_COMPANION_SUFFIXES = [
+  { declaration: '.d.ts', implementations: ['.ts', '.tsx'] },
+  { declaration: '.d.mts', implementations: ['.mts'] },
+  { declaration: '.d.cts', implementations: ['.cts'] },
+] as const;
+
+const hasImplementationSibling = (
+  declarationPath: string,
+  scannedPaths: ReadonlySet<string>,
+): boolean => {
+  const companion = DECLARATION_COMPANION_SUFFIXES.find(({ declaration }) =>
+    declarationPath.endsWith(declaration),
+  );
+  if (!companion) return false;
+
+  // Keep standalone declarations. Only suppress declaration output that sits
+  // beside an implementation with the corresponding module suffix.
+  const stem = declarationPath.slice(0, -companion.declaration.length);
+  return companion.implementations.some((suffix) => scannedPaths.has(`${stem}${suffix}`));
+};
+
+const warnLargeFileSkip = (message: string): void => {
+  if (process.env[ANALYZE_PROGRESS_ACTIVE_ENV] === '1') {
+    // analyze.ts routes console.warn through the progress bar logger while
+    // the bar is active. Emitting the operator-facing large-file notice there
+    // avoids raw pino NDJSON corrupting the one-line progress display in the
+    // heap-respawn child, whose stderr is intentionally piped for crash
+    // classification.
+    // eslint-disable-next-line no-console -- intentionally routed by analyze progress UI
+    console.warn(message);
+    return;
+  }
+  logger.warn(message);
+};
+
+export interface WalkRepositoryOptions {
+  /**
+   * Suppress the operator-facing large-file notice. Set by read-only callers
+   * such as `status`, which reuse this scan purely to learn which files the
+   * index covers and must not emit analyze's progress commentary.
+   */
+  quiet?: boolean;
+  /**
+   * Override the large-file cap. `status` replays the bytes recorded at
+   * analyze time so `--max-file-size` / `GITNEXUS_MAX_FILE_SIZE` cannot
+   * silently drop a file that the index actually covers.
+   */
+  maxFileSizeBytes?: number;
+}
 
 /**
  * Phase 1: Scan repository — stat files to get paths + sizes, no content loaded.
  * Memory: ~10MB for 100K files vs ~1GB+ with content.
  */
+const assertWalkRootIsDirectory = async (repoPath: string): Promise<void> => {
+  let st;
+  try {
+    st = await fs.stat(repoPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      throw new Error(`walkRepositoryPaths: path does not exist: ${repoPath}`);
+    }
+    throw err;
+  }
+  if (!st.isDirectory()) {
+    throw new Error(`walkRepositoryPaths: not a directory: ${repoPath}`);
+  }
+};
+
 export const walkRepositoryPaths = async (
   repoPath: string,
-  onProgress?: (current: number, total: number, filePath: string) => void
+  onProgress?: (current: number, total: number, filePath: string) => void,
+  options: WalkRepositoryOptions = {},
 ): Promise<ScannedFile[]> => {
+  await assertWalkRootIsDirectory(repoPath);
   const ignoreFilter = await createIgnoreFilter(repoPath);
+  const maxFileSizeBytes = options.maxFileSizeBytes ?? getMaxFileSizeBytes();
 
   const filtered = await glob('**/*', {
     cwd: repoPath,
@@ -44,19 +110,21 @@ export const walkRepositoryPaths = async (
   const entries: ScannedFile[] = [];
   let processed = 0;
   let skippedLarge = 0;
+  const skippedLargePaths: string[] = [];
 
   for (let start = 0; start < filtered.length; start += READ_CONCURRENCY) {
     const batch = filtered.slice(start, start + READ_CONCURRENCY);
     const results = await Promise.allSettled(
-      batch.map(async relativePath => {
+      batch.map(async (relativePath) => {
         const fullPath = path.join(repoPath, relativePath);
         const stat = await fs.stat(fullPath);
-        if (stat.size > MAX_FILE_SIZE) {
+        if (stat.size > maxFileSizeBytes) {
           skippedLarge++;
+          skippedLargePaths.push(relativePath.replace(/\\/g, '/'));
           return null;
         }
         return { path: relativePath.replace(/\\/g, '/'), size: stat.size };
-      })
+      }),
     );
 
     for (const result of results) {
@@ -70,29 +138,53 @@ export const walkRepositoryPaths = async (
     }
   }
 
-  if (skippedLarge > 0) {
-    console.warn(`  Skipped ${skippedLarge} large files (>${MAX_FILE_SIZE / 1024}KB, likely generated/vendored)`);
+  const scannedPaths = new Set(entries.map((entry) => entry.path));
+  const deduplicatedEntries = entries.filter(
+    (entry) => !hasImplementationSibling(entry.path, scannedPaths),
+  );
+
+  // Filesystem/glob traversal order is not stable across filesystems or repeated
+  // scans. Canonicalize once at the scan boundary so every downstream phase sees
+  // the same repository order.
+  deduplicatedEntries.sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+  );
+
+  if (skippedLarge > 0 && !options.quiet) {
+    const isDefault = maxFileSizeBytes === DEFAULT_MAX_FILE_SIZE_BYTES;
+    const isOverrideUnset = !process.env.GITNEXUS_MAX_FILE_SIZE;
+    const suffix = isDefault ? ', likely generated/vendored' : '';
+    warnLargeFileSkip(
+      `  Skipped ${skippedLarge} large files (>${maxFileSizeBytes / 1024}KB${suffix})`,
+    );
+
+    // Always show at least the first few paths so users can diagnose why
+    // edges are missing from a specific file (issue #1659). The full list is
+    // gated behind GITNEXUS_VERBOSE=1 to avoid flooding output on repos with
+    // many generated/vendored blobs. Sort before slicing so the preview is
+    // stable across runs (fs.stat callbacks race within each batch).
+    skippedLargePaths.sort();
+    const SKIPPED_PREVIEW_CAP = 5;
+    const showAll = isVerboseIngestionEnabled() || skippedLargePaths.length <= SKIPPED_PREVIEW_CAP;
+    const preview = showAll ? skippedLargePaths : skippedLargePaths.slice(0, SKIPPED_PREVIEW_CAP);
+    for (const p of preview) {
+      warnLargeFileSkip(`  - ${p}`);
+    }
+    if (!showAll) {
+      const remaining = skippedLargePaths.length - SKIPPED_PREVIEW_CAP;
+      warnLargeFileSkip(`  ...and ${remaining} more (set GITNEXUS_VERBOSE=1 to list them all)`);
+    }
+    // Only hint about the env var when the user has not set it at all. An
+    // explicit GITNEXUS_MAX_FILE_SIZE=512 happens to resolve to the same
+    // bytes as the default but the operator clearly already knows the knob.
+    if (isDefault && isOverrideUnset) {
+      warnLargeFileSkip(
+        `  Set GITNEXUS_MAX_FILE_SIZE=<KB> to include files above the default cap.`,
+      );
+    }
   }
 
-  return entries;
-};
-
-/**
- * Scan Unity resource files used by binding enrichment.
- * This path scan intentionally does not apply the 512KB source-size cap,
- * because bindings often live in large serialized assets.
- */
-export const walkUnityResourcePaths = async (repoPath: string): Promise<string[]> => {
-  const files = await glob(UNITY_RESOURCE_GLOBS, {
-    cwd: repoPath,
-    nodir: true,
-    dot: false,
-  });
-
-  return files
-    .filter(file => !shouldIgnorePath(file))
-    .map(file => file.replace(/\\/g, '/'))
-    .sort((left, right) => left.localeCompare(right));
+  return deduplicatedEntries;
 };
 
 /**
@@ -105,37 +197,22 @@ export const readFileContents = async (
 ): Promise<Map<string, string>> => {
   const contents = new Map<string, string>();
 
-  for (let start = 0; start < relativePaths.length; start += READ_CONCURRENCY) {
-    const batch = relativePaths.slice(start, start + READ_CONCURRENCY);
-    const results = await Promise.allSettled(
-      batch.map(async relativePath => {
-        const fullPath = path.join(repoPath, relativePath);
-        const content = await fs.readFile(fullPath, 'utf-8');
-        return { path: relativePath, content };
-      })
-    );
+  const results = await mapConcurrent(
+    relativePaths,
+    async (relativePath) => {
+      const fullPath = path.join(repoPath, relativePath);
+      const content = await fs.readFile(fullPath, 'utf-8');
+      return { path: relativePath, content };
+    },
+    { concurrency: READ_CONCURRENCY },
+  );
 
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        contents.set(result.value.path, result.value.content);
-      }
-    }
+  // An unreadable file yields `undefined` (mapConcurrent's per-item degrade) and
+  // is skipped, exactly as the previous allSettled/`status === 'fulfilled'` shape
+  // did — no `onError`, so the skip stays silent per this function's contract.
+  for (const result of results) {
+    if (result) contents.set(result.path, result.content);
   }
 
   return contents;
-};
-
-/**
- * Legacy API — scans and reads everything into memory.
- * Used by sequential fallback path only.
- */
-export const walkRepository = async (
-  repoPath: string,
-  onProgress?: (current: number, total: number, filePath: string) => void
-): Promise<FileEntry[]> => {
-  const scanned = await walkRepositoryPaths(repoPath, onProgress);
-  const contents = await readFileContents(repoPath, scanned.map(f => f.path));
-  return scanned
-    .filter(f => contents.has(f.path))
-    .map(f => ({ path: f.path, content: contents.get(f.path)! }));
 };

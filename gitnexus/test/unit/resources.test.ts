@@ -8,28 +8,52 @@
  * - Error handling for invalid URIs
  * - Resource handlers with mocked backend
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   getResourceDefinitions,
   getResourceTemplates,
+  parseResourceUri,
   readResource,
 } from '../../src/mcp/resources.js';
+import type { RepoMeta } from '../../src/storage/repo-manager.js';
+
+// Mock loadMeta so getContextResource doesn't hit the filesystem (#2438 fix).
+// Default: returns null (simulates no on-disk meta — falls back to cached handle).
+const { loadMetaMock } = vi.hoisted(() => ({ loadMetaMock: vi.fn().mockResolvedValue(null) }));
+vi.mock('../../src/storage/repo-manager.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/storage/repo-manager.js')>();
+  return { ...actual, loadMeta: loadMetaMock };
+});
 
 // ─── Minimal mock backend ──────────────────────────────────────────
 
 function createMockBackend(overrides: Partial<Record<string, any>> = {}): any {
   return {
     listRepos: vi.fn().mockResolvedValue(overrides.repos ?? []),
-    resolveRepo: vi.fn().mockResolvedValue(overrides.resolvedRepo ?? {
-      name: 'test-repo',
-      repoPath: '/tmp/test-repo',
-      lastCommit: 'abc1234',
-    }),
+    resolveRepo: vi.fn().mockResolvedValue(
+      overrides.resolvedRepo ?? {
+        name: 'test-repo',
+        repoPath: '/tmp/test-repo',
+        storagePath: '/tmp/test-repo/.gitnexus',
+        lbugPath: '/tmp/test-repo/.gitnexus/lbug',
+        lastCommit: 'abc1234',
+      },
+    ),
     getContext: vi.fn().mockReturnValue(overrides.context ?? null),
     queryClusters: vi.fn().mockResolvedValue(overrides.clusters ?? { clusters: [] }),
     queryProcesses: vi.fn().mockResolvedValue(overrides.processes ?? { processes: [] }),
-    queryClusterDetail: vi.fn().mockResolvedValue(overrides.clusterDetail ?? { error: 'Not found' }),
-    queryProcessDetail: vi.fn().mockResolvedValue(overrides.processDetail ?? { error: 'Not found' }),
+    queryClusterDetail: vi
+      .fn()
+      .mockResolvedValue(overrides.clusterDetail ?? { error: 'Not found' }),
+    queryProcessDetail: vi
+      .fn()
+      .mockResolvedValue(overrides.processDetail ?? { error: 'Not found' }),
+    readGroupContractsResource: vi
+      .fn()
+      .mockResolvedValue(overrides.groupContractsBody ?? 'contracts: []\n'),
+    readGroupStatusResource: vi
+      .fn()
+      .mockResolvedValue(overrides.groupStatusBody ?? 'group: mock\n'),
     ...overrides,
   };
 }
@@ -44,14 +68,14 @@ describe('getResourceDefinitions', () => {
 
   it('includes repos resource', () => {
     const defs = getResourceDefinitions();
-    const repos = defs.find(d => d.uri === 'gitnexus://repos');
+    const repos = defs.find((d) => d.uri === 'gitnexus://repos');
     expect(repos).toBeDefined();
     expect(repos!.mimeType).toBe('text/yaml');
   });
 
   it('includes setup resource', () => {
     const defs = getResourceDefinitions();
-    const setup = defs.find(d => d.uri === 'gitnexus://setup');
+    const setup = defs.find((d) => d.uri === 'gitnexus://setup');
     expect(setup).toBeDefined();
     expect(setup!.mimeType).toBe('text/markdown');
   });
@@ -67,21 +91,22 @@ describe('getResourceDefinitions', () => {
 });
 
 describe('getResourceTemplates', () => {
-  it('returns 7 dynamic templates', () => {
+  it('returns 8 dynamic templates', () => {
     const templates = getResourceTemplates();
-    expect(templates).toHaveLength(7);
+    expect(templates).toHaveLength(9);
   });
 
-  it('includes context, clusters, processes, schema, cluster detail, process detail, derived-process detail', () => {
+  it('includes context, clusters, processes, schema, cluster detail, process detail, group contracts/status', () => {
     const templates = getResourceTemplates();
-    const uris = templates.map(t => t.uriTemplate);
+    const uris = templates.map((t) => t.uriTemplate);
     expect(uris).toContain('gitnexus://repo/{name}/context');
     expect(uris).toContain('gitnexus://repo/{name}/clusters');
     expect(uris).toContain('gitnexus://repo/{name}/processes');
     expect(uris).toContain('gitnexus://repo/{name}/schema');
     expect(uris).toContain('gitnexus://repo/{name}/cluster/{clusterName}');
     expect(uris).toContain('gitnexus://repo/{name}/process/{processName}');
-    expect(uris).toContain('gitnexus://repo/{name}/derived-process/{id}');
+    expect(uris).toContain('gitnexus://group/{name}/contracts');
+    expect(uris).toContain('gitnexus://group/{name}/status');
   });
 
   it('each template has uriTemplate, name, description, mimeType', () => {
@@ -94,13 +119,74 @@ describe('getResourceTemplates', () => {
   });
 });
 
+describe('parseResourceUri', () => {
+  it('parses group contracts without query', () => {
+    const p = parseResourceUri('gitnexus://group/acme/contracts');
+    expect(p).toEqual({
+      kind: 'group',
+      groupName: 'acme',
+      resourceType: 'contracts',
+      contractsFilter: {},
+    });
+  });
+
+  it('parses nested group name and contracts query params', () => {
+    const p = parseResourceUri(
+      'gitnexus://group/acme/billing/contracts?type=http&repo=app%2Fapi&unmatchedOnly=true',
+    );
+    expect(p.kind).toBe('group');
+    if (p.kind !== 'group' || p.resourceType !== 'contracts') throw new Error('unexpected');
+    expect(p.groupName).toBe('acme/billing');
+    expect(p.contractsFilter).toEqual({
+      type: 'http',
+      repo: 'app/api',
+      unmatchedOnly: true,
+    });
+  });
+
+  it('coerces unmatchedOnly false from string', () => {
+    const p = parseResourceUri('gitnexus://group/g1/contracts?unmatchedOnly=false');
+    expect(p.kind).toBe('group');
+    if (p.kind !== 'group' || p.resourceType !== 'contracts') throw new Error('unexpected');
+    expect(p.contractsFilter.unmatchedOnly).toBe(false);
+  });
+
+  it('parses group status', () => {
+    const p = parseResourceUri('gitnexus://group/my/product/status');
+    expect(p).toEqual({
+      kind: 'group',
+      groupName: 'my/product',
+      resourceType: 'status',
+    });
+  });
+
+  it('round-trips repo URI like legacy regex', () => {
+    const p = parseResourceUri('gitnexus://repo/my%20project/schema');
+    expect(p).toEqual({
+      kind: 'repo',
+      repoName: 'my project',
+      resourceType: 'schema',
+    });
+  });
+
+  it('rejects unknown group resource tail', () => {
+    expect(() => parseResourceUri('gitnexus://group/foo/bar')).toThrow('Unknown group resource');
+  });
+});
+
 // ─── readResource URI parsing ────────────────────────────────────────
 
 describe('readResource', () => {
   it('routes gitnexus://repos to listRepos', async () => {
     const backend = createMockBackend({
       repos: [
-        { name: 'my-project', path: '/home/me/my-project', indexedAt: '2024-01-01', lastCommit: 'abc1234', stats: { files: 10, nodes: 50, processes: 5 } },
+        {
+          name: 'my-project',
+          path: '/home/me/my-project',
+          indexedAt: '2024-01-01',
+          lastCommit: 'abc1234',
+          stats: { files: 10, nodes: 50, processes: 5 },
+        },
       ],
     });
 
@@ -118,7 +204,13 @@ describe('readResource', () => {
   it('routes gitnexus://setup to setup resource', async () => {
     const backend = createMockBackend({
       repos: [
-        { name: 'proj', path: '/tmp/proj', indexedAt: '2024-01-01', lastCommit: 'abc', stats: { nodes: 10, edges: 20, processes: 3 } },
+        {
+          name: 'proj',
+          path: '/tmp/proj',
+          indexedAt: '2024-01-01',
+          lastCommit: 'abc',
+          stats: { nodes: 10, edges: 20, processes: 3 },
+        },
       ],
     });
     const result = await readResource('gitnexus://setup', backend);
@@ -130,6 +222,22 @@ describe('readResource', () => {
     const backend = createMockBackend({ repos: [] });
     const result = await readResource('gitnexus://setup', backend);
     expect(result).toContain('No repositories indexed');
+  });
+
+  it('routes group contracts resource through backend', async () => {
+    const backend = createMockBackend();
+    const uri = 'gitnexus://group/g1/contracts?type=http&unmatchedOnly=true';
+    await readResource(uri, backend);
+    expect(backend.readGroupContractsResource).toHaveBeenCalledWith('g1', {
+      type: 'http',
+      unmatchedOnly: true,
+    });
+  });
+
+  it('routes group status resource through backend', async () => {
+    const backend = createMockBackend();
+    await readResource('gitnexus://group/acme/status', backend);
+    expect(backend.readGroupStatusResource).toHaveBeenCalledWith('acme');
   });
 
   it('routes gitnexus://repo/{name}/context correctly', async () => {
@@ -163,9 +271,7 @@ describe('readResource', () => {
   it('routes gitnexus://repo/{name}/clusters correctly', async () => {
     const backend = createMockBackend({
       clusters: {
-        clusters: [
-          { heuristicLabel: 'Auth', symbolCount: 10, cohesion: 0.9 },
-        ],
+        clusters: [{ heuristicLabel: 'Auth', symbolCount: 10, cohesion: 0.9 }],
       },
     });
     const result = await readResource('gitnexus://repo/test/clusters', backend);
@@ -189,36 +295,12 @@ describe('readResource', () => {
   it('routes gitnexus://repo/{name}/processes correctly', async () => {
     const backend = createMockBackend({
       processes: {
-        processes: [
-          { heuristicLabel: 'LoginFlow', processType: 'intra_community', stepCount: 3 },
-        ],
+        processes: [{ heuristicLabel: 'LoginFlow', processType: 'intra_community', stepCount: 3 }],
       },
     });
     const result = await readResource('gitnexus://repo/test/processes', backend);
     expect(backend.queryProcesses).toHaveBeenCalledWith('test', 50);
     expect(result).toContain('LoginFlow');
-  });
-
-  it('processes resource includes lifecycle subtype and runtime chain confidence', async () => {
-    const backend = createMockBackend({
-      processes: {
-        processes: [
-          {
-            heuristicLabel: 'Unity Runtime Root -> ReloadRoutine',
-            processType: 'cross_community',
-            processSubtype: 'unity_lifecycle',
-            runtimeChainConfidence: 'medium',
-            stepCount: 5,
-          },
-        ],
-      },
-    });
-    const result = await readResource('gitnexus://repo/test/processes', backend);
-    expect(result).toContain('Unity Runtime Root -> ReloadRoutine');
-    expect(result).toContain('type: cross_community');
-    expect(result).toContain('steps: 5');
-    expect(result).toContain('subtype: unity_lifecycle');
-    expect(result).toContain('runtime_chain_confidence: medium');
   });
 
   it('handles process query error gracefully', async () => {
@@ -232,9 +314,7 @@ describe('readResource', () => {
     const backend = createMockBackend({
       clusterDetail: {
         cluster: { heuristicLabel: 'Auth', symbolCount: 5, cohesion: 0.85 },
-        members: [
-          { name: 'login', type: 'Function', filePath: 'src/auth.ts' },
-        ],
+        members: [{ name: 'login', type: 'Function', filePath: 'src/auth.ts' }],
       },
     });
     const result = await readResource('gitnexus://repo/test/cluster/Auth', backend);
@@ -268,16 +348,6 @@ describe('readResource', () => {
     expect(result).toContain('validate');
   });
 
-  it('derived-process resource', async () => {
-    const backend = createMockBackend();
-    const templates = getResourceTemplates();
-    expect(templates.map(t => t.uriTemplate)).toContain('gitnexus://repo/{name}/derived-process/{id}');
-
-    const out = await readResource('gitnexus://repo/test/derived-process/derived%3Aabcd', backend);
-    expect(out).toContain('id: "derived:abcd"');
-    expect(out).toContain('origin:');
-  });
-
   it('handles process detail error', async () => {
     const backend = createMockBackend({
       processDetail: { error: 'Process not found' },
@@ -288,14 +358,16 @@ describe('readResource', () => {
 
   it('throws for unknown resource URI', async () => {
     const backend = createMockBackend();
-    await expect(readResource('gitnexus://unknown', backend))
-      .rejects.toThrow('Unknown resource URI');
+    await expect(readResource('gitnexus://unknown', backend)).rejects.toThrow(
+      'Unknown resource URI',
+    );
   });
 
   it('throws for unknown repo-scoped resource type', async () => {
     const backend = createMockBackend();
-    await expect(readResource('gitnexus://repo/test/nonexistent', backend))
-      .rejects.toThrow('Unknown resource');
+    await expect(readResource('gitnexus://repo/test/nonexistent', backend)).rejects.toThrow(
+      'Unknown resource',
+    );
   });
 
   it('decodes URI-encoded repo names', async () => {
@@ -324,6 +396,247 @@ describe('readResource', () => {
     });
     const result = await readResource('gitnexus://repos', backend);
     expect(result).toContain('Multiple repos indexed');
-    expect(result).toContain('repo parameter');
+    expect(result).toContain('process.cwd()');
+    expect(result).toContain('unindexed nested Git checkout');
+    expect(result).toContain('mutating tools without an MCP default');
+    expect(result).toContain('pass repo explicitly');
+    // The example must use a registered tool name, not the unregistered
+    // `gitnexus_search` / `gitnexus_*` prefix (#2059).
+    // #2175: advertise the renamed param, not the legacy "query" key.
+    expect(result).toContain('query({search_query: "auth"');
+    expect(result).not.toContain('query({query:');
+    expect(result).not.toMatch(/gitnexus_/);
+  });
+});
+
+// ─── Context resource freshness (#2438) ─────────────────────────────────────
+//
+// After an out-of-process `analyze --index-only` refresh, the RepoHandle cached
+// by LocalBackend is stale (lastCommit and stats come from the registry snapshot
+// taken at init time). getContextResource must read from disk on every call so
+// the staleness banner and stats always reflect the actual on-disk state.
+
+describe('context resource freshness after out-of-process analyze (#2438)', () => {
+  beforeEach(() => {
+    loadMetaMock.mockReset();
+    loadMetaMock.mockResolvedValue(null); // default: no fresh meta
+  });
+
+  const CONTEXT = {
+    projectName: 'test-project',
+    stats: { fileCount: 100, functionCount: 500, communityCount: 3, processCount: 10 },
+  };
+
+  it('uses fresh lastCommit from disk meta for staleness check', async () => {
+    // Simulate: the cached handle has an old commit, but the on-disk meta has
+    // been updated to the current HEAD by an out-of-process analyze.
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: 'fresh-head-commit',
+      indexedAt: new Date().toISOString(),
+      stats: { files: 200, nodes: 1000, processes: 20 },
+    });
+
+    const backend = createMockBackend({
+      resolvedRepo: {
+        name: 'test-project',
+        repoPath: '/tmp/test-repo',
+        storagePath: '/tmp/test-repo/.gitnexus',
+        lbugPath: '/tmp/test-repo/.gitnexus/lbug',
+        lastCommit: 'old-stale-commit', // stale cached value
+      },
+      context: CONTEXT,
+    });
+
+    // loadMeta is called with storagePath, not lbugPath
+    await readResource('gitnexus://repo/test-project/context', backend);
+    expect(loadMetaMock).toHaveBeenCalledWith('/tmp/test-repo/.gitnexus');
+  });
+
+  it('shows fresh stats from disk meta after out-of-process analyze', async () => {
+    // Cached stats are stale (100 files, 500 symbols); disk meta has refreshed stats
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: 'current-head',
+      indexedAt: new Date().toISOString(),
+      stats: { files: 250, nodes: 1500, processes: 25 },
+    });
+
+    const backend = createMockBackend({
+      context: CONTEXT, // stale: fileCount:100, functionCount:500
+    });
+
+    const result = await readResource('gitnexus://repo/test-project/context', backend);
+    // Fresh stats from disk override the cached context stats
+    expect(result).toContain('files: 250');
+    expect(result).toContain('symbols: 1500');
+    expect(result).toContain('processes: 25');
+    // Stale cached values should NOT appear
+    expect(result).not.toContain('files: 100');
+    expect(result).not.toContain('symbols: 500');
+  });
+
+  it('exposes the full indexed commit and typed runner receipt from fresh metadata', async () => {
+    const runnerIdentity = {
+      schemaVersion: 4 as const,
+      runtime: {
+        executablePath: '/usr/bin/node',
+        version: 'v22.0.0',
+        platform: 'linux',
+        architecture: 'x64',
+        modulesAbi: '127',
+        libc: 'glibc:2.39',
+      },
+      cliVersion: '1.6.9',
+      invokedArtifact: { path: '/opt/gitnexus/dist/cli/index.js', digest: 'sha256:entry' },
+      build: {
+        kind: 'distribution' as const,
+        rootPath: '/opt/gitnexus/dist',
+        canonicalization: 'gitnexus-analyzer-build-v2' as const,
+        digest: 'sha256:build',
+      },
+      dependencyRuntime: {
+        manifestPath: '/opt/gitnexus/package.json',
+        lockfilePath: '/opt/package-lock.json',
+        canonicalization: 'gitnexus-analyzer-dependency-runtime-v4' as const,
+        packageCount: 42,
+        artifactCount: 12,
+        digest: 'sha256:dependencies',
+      },
+    };
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: '0123456789abcdef0123456789abcdef01234567',
+      indexedAt: '2026-07-18T12:00:00.000Z',
+      runnerIdentity,
+    });
+
+    const result = await readResource(
+      'gitnexus://repo/test-project/context',
+      createMockBackend({ context: CONTEXT }),
+    );
+    expect(result).toContain('index:');
+    expect(result).toContain('commit: "0123456789abcdef0123456789abcdef01234567"');
+    expect(result).toContain('storage_path: "/tmp/test-repo/.gitnexus"');
+    expect(result).toContain('content_retention: "full"');
+    expect(result).toMatch(/source_available: (true|false)/);
+    expect(result).toContain(`runner_identity: ${JSON.stringify(runnerIdentity)}`);
+    expect(result).toContain('runner_identity_schema_status: "current"');
+  });
+
+  it('marks an older indexed runner receipt schema as legacy', async () => {
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: '0123456789abcdef0123456789abcdef01234567',
+      indexedAt: '2026-07-18T12:00:00.000Z',
+      runnerIdentity: { schemaVersion: 1 },
+    } as unknown as RepoMeta);
+
+    const result = await readResource(
+      'gitnexus://repo/test-project/context',
+      createMockBackend({ context: CONTEXT }),
+    );
+    expect(result).toContain('runner_identity_schema_status: "legacy-or-unknown"');
+  });
+
+  it('exposes the same machine-readable incomplete reasons as status', async () => {
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: 'current-head',
+      indexedAt: '2026-07-18T12:00:00.000Z',
+      incrementalInProgress: { startedAt: 1, toWriteCount: 2 },
+      scopeExtractionReceipt: 1,
+      embeddingCheckpoint: {
+        at: '2026-07-18T12:00:00.000Z',
+        nodesProcessed: 1,
+        totalNodes: 2,
+        chunksProcessed: 1,
+        model: 'fixture',
+        dimensions: 3,
+        provider: 'local',
+      },
+    });
+
+    const result = await readResource(
+      'gitnexus://repo/test-project/context',
+      createMockBackend({ context: CONTEXT }),
+    );
+    expect(result).toContain(
+      'incomplete_reasons: ["incremental-in-progress","embedding-checkpoint-pending"]',
+    );
+  });
+
+  it('exposes Spring Actuator index metadata to agents', async () => {
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: 'current-head',
+      indexedAt: '2026-08-31T20:00:00.000Z',
+      springActuator: {
+        enabled: true,
+        repoRelativeInputs: ['runtime-actuator'],
+      },
+    });
+
+    const result = await readResource(
+      'gitnexus://repo/test-project/context',
+      createMockBackend({ context: CONTEXT }),
+    );
+
+    expect(result).toContain(
+      'spring_actuator: {"enabled":true,"repoRelativeInputs":["runtime-actuator"]}',
+    );
+  });
+
+  it('falls back to cached stats when loadMeta returns null', async () => {
+    // loadMeta returns null (e.g. pre-analyze state or missing gitnexus.json)
+    loadMetaMock.mockResolvedValue(null);
+
+    const backend = createMockBackend({ context: CONTEXT });
+    const result = await readResource('gitnexus://repo/test-project/context', backend);
+    // Must still show the cached stats (no crash, no blank output)
+    expect(result).toContain('files: 100');
+    expect(result).toContain('symbols: 500');
+    expect(result).toContain('processes: 10');
+  });
+
+  it('falls back to cached lastCommit when loadMeta throws', async () => {
+    // loadMeta throws (e.g. permissions error)
+    loadMetaMock.mockRejectedValue(new Error('EACCES: permission denied'));
+
+    const backend = createMockBackend({ context: CONTEXT });
+    // Should not throw — falls back gracefully
+    const result = await readResource('gitnexus://repo/test-project/context', backend);
+    expect(result).toContain('test-project');
+    expect(result).toContain('stats:');
+  });
+
+  it('does not show staleness banner when fresh lastCommit matches HEAD', async () => {
+    // After analyze completes, lastCommit in meta equals HEAD → no stale banner.
+    // We simulate this by returning a fresh meta; checkStaleness will be called
+    // with the fresh commit but the /tmp path has no git repo so it returns safe.
+    loadMetaMock.mockResolvedValue({
+      repoPath: '/tmp/test-repo',
+      lastCommit: 'head-after-analyze',
+      indexedAt: new Date().toISOString(),
+      stats: { files: 200, nodes: 1000, processes: 20 },
+    });
+
+    const backend = createMockBackend({
+      resolvedRepo: {
+        name: 'test-project',
+        repoPath: '/tmp/test-repo',
+        storagePath: '/tmp/test-repo/.gitnexus',
+        lbugPath: '/tmp/test-repo/.gitnexus/lbug',
+        lastCommit: 'old-stale-commit', // stale, would show banner if used
+      },
+      context: CONTEXT,
+    });
+
+    const result = await readResource('gitnexus://repo/test-project/context', backend);
+    // With a non-git path checkStaleness errors → no banner even with stale commit.
+    // What matters: the fresh commit was passed to checkStaleness, not the old one.
+    // (The staleness banner itself requires a live git repo, tested in integration.)
+    expect(result).toContain('test-project');
+    expect(result).not.toContain('error:');
   });
 });

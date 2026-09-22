@@ -1,3 +1,4 @@
+import { requireVendoredGrammar } from '../../src/core/tree-sitter/vendored-grammars.js';
 import { describe, expect, it } from 'vitest';
 import Parser from 'tree-sitter';
 import { createRequire } from 'node:module';
@@ -10,7 +11,7 @@ const itIfGDScriptAvailable = isLanguageAvailable(SupportedLanguages.GDScript) ?
 
 describe('GDSCRIPT_QUERIES', () => {
   itIfGDScriptAvailable('can compile against tree-sitter-gdscript and capture core symbols', () => {
-    const GDScript = require('tree-sitter-gdscript');
+    const GDScript = requireVendoredGrammar('tree-sitter-gdscript');
     const parser = new Parser();
     parser.setLanguage(GDScript);
 

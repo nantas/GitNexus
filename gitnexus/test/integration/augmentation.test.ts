@@ -7,6 +7,7 @@
  *   - Pattern shorter than 3 chars returns empty string
  */
 import { describe, it, expect, vi } from 'vitest';
+import path from 'path';
 import { withTestLbugDB } from '../helpers/test-indexed-db.js';
 
 // ─── Seed data & FTS indexes for augmentation ────────
@@ -56,74 +57,309 @@ vi.mock('../../src/storage/repo-manager.js', () => ({
   listRegisteredRepos: vi.fn(),
 }));
 
-let augment: (pattern: string, cwd?: string) => Promise<string>;
-
-withTestLbugDB('augment', (handle) => {
-  describe('augment()', () => {
-    it('returns non-empty string with relationship info for a matching pattern', async () => {
-      const result = await augment('login', handle.dbPath);
-
-      expect(result.length).toBeGreaterThan(0);
-      expect(result).toContain('[GitNexus]');
-      expect(result).toContain('login');
-    });
-
-    it('returns empty string for a non-matching pattern', async () => {
-      const result = await augment('nonexistent_xyz', handle.dbPath);
-      expect(result).toBe('');
-    });
-
-    it('returns empty string for patterns shorter than 3 characters', async () => {
-      const result = await augment('ab', handle.dbPath);
-      expect(result).toBe('');
-    });
-
-    it('returns empty string for empty pattern', async () => {
-      const result = await augment('', handle.dbPath);
-      expect(result).toBe('');
-    });
-
-    // ─── Unhappy paths ────────────────────────────────────────────────
-
-    it('returns empty string for whitespace-only pattern', async () => {
-      const result = await augment('   ', handle.dbPath);
-      expect(result).toBe('');
-    });
-
-    it('handles special regex characters in pattern without throwing', async () => {
-      const result = await augment('func()', handle.dbPath);
-      expect(typeof result).toBe('string');
-    });
-
-    it('handles very long pattern without throwing', async () => {
-      const result = await augment('a'.repeat(500), handle.dbPath);
-      expect(typeof result).toBe('string');
-    });
-
-    it('handles unicode pattern without throwing', async () => {
-      const result = await augment('日本語テスト', handle.dbPath);
-      expect(typeof result).toBe('string');
-    });
-  });
-}, {
-  seed: AUGMENT_SEED_DATA,
-  ftsIndexes: AUGMENT_FTS_INDEXES,
-  poolAdapter: true,
-  afterSetup: async (handle) => {
-    // Configure mock to return our test DB so augment() can find it
-    const { listRegisteredRepos } = await import('../../src/storage/repo-manager.js');
-    (listRegisteredRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        name: handle.repoId,
-        path: handle.dbPath,
-        storagePath: handle.tmpHandle.dbPath,
-        indexedAt: new Date().toISOString(),
-        lastCommit: 'abc123',
-      },
-    ]);
-
-    // Dynamically import augment after mocks are in place
-    const engine = await import('../../src/core/augmentation/engine.js');
-    augment = engine.augment;
-  },
+vi.mock('../../src/storage/storage-resolver.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/storage/storage-resolver.js')>();
+  return {
+    ...actual,
+    requireRegisteredStoragePath: vi.fn(
+      async (entry: { storagePath: string }) => entry.storagePath,
+    ),
+  };
 });
+
+let augment: (pattern: string, cwd?: string) => Promise<string>;
+let augmentNoFts: (pattern: string, cwd?: string) => Promise<string>;
+
+withTestLbugDB(
+  'augment',
+  (handle) => {
+    describe('augment()', () => {
+      it('returns non-empty string with relationship info for a matching pattern', async () => {
+        const result = await augment('login', handle.dbPath);
+
+        expect(result.length).toBeGreaterThan(0);
+        expect(result).toContain('[GitNexus]');
+        expect(result).toContain('login');
+      });
+
+      it('returns empty string for a non-matching pattern', async () => {
+        const result = await augment('nonexistent_xyz', handle.dbPath);
+        expect(result).toBe('');
+      });
+
+      it('returns empty string for patterns shorter than 3 characters', async () => {
+        const result = await augment('ab', handle.dbPath);
+        expect(result).toBe('');
+      });
+
+      it('returns empty string for empty pattern', async () => {
+        const result = await augment('', handle.dbPath);
+        expect(result).toBe('');
+      });
+
+      // ─── Unhappy paths ────────────────────────────────────────────────
+
+      it('returns empty string for whitespace-only pattern', async () => {
+        const result = await augment('   ', handle.dbPath);
+        expect(result).toBe('');
+      });
+
+      it('handles special regex characters in pattern without throwing', async () => {
+        const result = await augment('func()', handle.dbPath);
+        expect(typeof result).toBe('string');
+      });
+
+      it('handles very long pattern without throwing', async () => {
+        const result = await augment('a'.repeat(500), handle.dbPath);
+        expect(typeof result).toBe('string');
+      });
+
+      it('handles unicode pattern without throwing', async () => {
+        const result = await augment('日本語テスト', handle.dbPath);
+        expect(typeof result).toBe('string');
+      });
+
+      it('silently degrades when the registered storage path fails validation', async () => {
+        const { requireRegisteredStoragePath } =
+          await import('../../src/storage/storage-resolver.js');
+        const resolverMock = vi.mocked(requireRegisteredStoragePath);
+        resolverMock.mockRejectedValueOnce(new Error('foreign storage'));
+
+        const result = await augment('login', handle.dbPath);
+
+        expect(result).toBe('');
+      });
+
+      // ─── Negative-safety: fallback must stay gated on !ftsAvailable ───
+      //
+      // When FTS is available but happens to return zero BM25 hits, the
+      // CONTAINS fallback must NOT fire — preserving the original early-return
+      // semantics. If anyone later loosens the gate to `symbolMatches.length
+      // === 0` alone, this test fails.
+
+      it('does NOT fire CONTAINS fallback when FTS is available but BM25 returns empty', async () => {
+        const bm25 = await import('../../src/core/search/bm25-index.js');
+        const spy = vi
+          .spyOn(bm25, 'searchFTSFromLbug')
+          .mockResolvedValue({ results: [], ftsAvailable: true });
+        try {
+          // 'login' WOULD match a graph node via CONTAINS, but FTS is available
+          // and empty → fallback gate must hold → result must be ''.
+          const result = await augment('login', handle.dbPath);
+          expect(result).toBe('');
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      describe('root path matching', () => {
+        it('matches repo at root level and CWD in sub-directory (repo at /, CWD at /src)', async () => {
+          const { listRegisteredRepos } = await import('../../src/storage/repo-manager.js');
+          const rootPath = path.resolve('/');
+
+          (listRegisteredRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
+            {
+              name: handle.repoId,
+              path: rootPath,
+              storagePath: handle.tmpHandle.dbPath,
+              indexedAt: new Date().toISOString(),
+              lastCommit: 'abc123',
+            },
+          ]);
+
+          try {
+            const subDir = path.join(rootPath, 'src');
+            const result = await augment('login', subDir);
+            expect(result.length).toBeGreaterThan(0);
+            expect(result).toContain('[GitNexus]');
+          } finally {
+            (listRegisteredRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
+              {
+                name: handle.repoId,
+                path: handle.dbPath,
+                storagePath: handle.tmpHandle.dbPath,
+                indexedAt: new Date().toISOString(),
+                lastCommit: 'abc123',
+              },
+            ]);
+          }
+        });
+
+        it('does not attach a nested registered checkout from a parent cwd (repo at /src, CWD at /)', async () => {
+          const { listRegisteredRepos } = await import('../../src/storage/repo-manager.js');
+          const rootPath = path.resolve('/');
+          const subDir = path.join(rootPath, 'src');
+
+          (listRegisteredRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
+            {
+              name: handle.repoId,
+              path: subDir,
+              storagePath: handle.tmpHandle.dbPath,
+              indexedAt: new Date().toISOString(),
+              lastCommit: 'abc123',
+            },
+          ]);
+
+          try {
+            const result = await augment('login', rootPath);
+            expect(result).toBe('');
+          } finally {
+            (listRegisteredRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
+              {
+                name: handle.repoId,
+                path: handle.dbPath,
+                storagePath: handle.tmpHandle.dbPath,
+                indexedAt: new Date().toISOString(),
+                lastCommit: 'abc123',
+              },
+            ]);
+          }
+        });
+
+        if (process.platform === 'win32') {
+          it('matches Windows drive-root repo and sub-directory CWD (repo at C:\\, CWD at C:\\src)', async () => {
+            const { listRegisteredRepos } = await import('../../src/storage/repo-manager.js');
+
+            (listRegisteredRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
+              {
+                name: handle.repoId,
+                path: 'C:\\',
+                storagePath: handle.tmpHandle.dbPath,
+                indexedAt: new Date().toISOString(),
+                lastCommit: 'abc123',
+              },
+            ]);
+
+            try {
+              const result = await augment('login', 'C:\\src');
+              expect(result.length).toBeGreaterThan(0);
+            } finally {
+              (listRegisteredRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
+                {
+                  name: handle.repoId,
+                  path: handle.dbPath,
+                  storagePath: handle.tmpHandle.dbPath,
+                  indexedAt: new Date().toISOString(),
+                  lastCommit: 'abc123',
+                },
+              ]);
+            }
+          });
+
+          it('does not attach a nested Windows checkout from a drive-root cwd (repo at C:\\src, CWD at C:\\)', async () => {
+            const { listRegisteredRepos } = await import('../../src/storage/repo-manager.js');
+
+            (listRegisteredRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
+              {
+                name: handle.repoId,
+                path: 'C:\\src',
+                storagePath: handle.tmpHandle.dbPath,
+                indexedAt: new Date().toISOString(),
+                lastCommit: 'abc123',
+              },
+            ]);
+
+            try {
+              const result = await augment('login', 'C:\\');
+              expect(result).toBe('');
+            } finally {
+              (listRegisteredRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
+                {
+                  name: handle.repoId,
+                  path: handle.dbPath,
+                  storagePath: handle.tmpHandle.dbPath,
+                  indexedAt: new Date().toISOString(),
+                  lastCommit: 'abc123',
+                },
+              ]);
+            }
+          });
+        }
+      });
+    });
+  },
+  {
+    seed: AUGMENT_SEED_DATA,
+    ftsIndexes: AUGMENT_FTS_INDEXES,
+    poolAdapter: true,
+    afterSetup: async (handle) => {
+      // Configure mock to return our test DB so augment() can find it
+      const { listRegisteredRepos } = await import('../../src/storage/repo-manager.js');
+      (listRegisteredRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          name: handle.repoId,
+          path: handle.dbPath,
+          storagePath: handle.tmpHandle.dbPath,
+          indexedAt: new Date().toISOString(),
+          lastCommit: 'abc123',
+        },
+      ]);
+
+      // Dynamically import augment after mocks are in place
+      const engine = await import('../../src/core/augmentation/engine.js');
+      augment = engine.augment;
+    },
+  },
+);
+
+// ─── FTS-unavailable suite: exercises the CONTAINS fallback branch ────────────
+//
+// No ftsIndexes → searchFTSFromLbug returns ftsAvailable: false → fallback fires.
+// Same seed data so 'login' still exists as a graph node.
+
+withTestLbugDB(
+  'augment-no-fts',
+  (handle) => {
+    describe('augment() — FTS indexes unavailable (CONTAINS fallback)', () => {
+      it('falls back to CONTAINS query and returns enrichment when FTS is unavailable', async () => {
+        const result = await augmentNoFts('login', handle.dbPath);
+
+        expect(result.length).toBeGreaterThan(0);
+        expect(result).toContain('[GitNexus]');
+      });
+
+      it("returns empty string for whitespace-only pattern (CONTAINS '' guard)", async () => {
+        const result = await augmentNoFts('    ', handle.dbPath);
+        expect(result).toBe('');
+      });
+
+      it('returns empty string when no nodes match the CONTAINS query', async () => {
+        const result = await augmentNoFts('nxyz_notfound', handle.dbPath);
+        expect(result).toBe('');
+      });
+
+      it('returns empty string when fallback CONTAINS query throws', async () => {
+        const poolAdapter = await import('../../src/core/lbug/pool-adapter.js');
+        const spy = vi
+          .spyOn(poolAdapter, 'executeQuery')
+          .mockRejectedValue(new Error('simulated DB error'));
+        try {
+          const result = await augmentNoFts('login', handle.dbPath);
+          expect(result).toBe('');
+        } finally {
+          spy.mockRestore();
+        }
+      });
+    });
+  },
+  {
+    seed: AUGMENT_SEED_DATA,
+    // Intentionally no ftsIndexes — forces searchFTSFromLbug to return ftsAvailable: false
+    poolAdapter: true,
+    afterSetup: async (handle) => {
+      const { listRegisteredRepos } = await import('../../src/storage/repo-manager.js');
+      (listRegisteredRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          name: handle.repoId,
+          path: handle.dbPath,
+          storagePath: handle.tmpHandle.dbPath,
+          indexedAt: new Date().toISOString(),
+          lastCommit: 'abc123',
+        },
+      ]);
+
+      const engine = await import('../../src/core/augmentation/engine.js');
+      augmentNoFts = engine.augment;
+    },
+  },
+);

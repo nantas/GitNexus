@@ -73,11 +73,21 @@ test('setup rejects using --cli-spec and --cli-version together', async () => {
 
   try {
     try {
-      await runSetup(['--agent', 'opencode', '--cli-spec', '@veewo/gitnexus@1.4.7-rc', '--cli-version', '1.4.7-rc'], {
-        ...process.env,
-        HOME: fakeHome,
-        USERPROFILE: fakeHome,
-      });
+      await runSetup(
+        [
+          '--agent',
+          'opencode',
+          '--cli-spec',
+          '@veewo/gitnexus@1.4.7-rc',
+          '--cli-version',
+          '1.4.7-rc',
+        ],
+        {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+        },
+      );
       assert.fail('expected setup with conflicting CLI options to fail');
     } catch (err: any) {
       assert.equal(typeof err?.stdout, 'string');
@@ -230,8 +240,13 @@ test('setup --cli-version pins MCP package spec and persists it in config', asyn
       cliVersion?: string;
     };
 
-    assert.deepEqual(opencodeConfig.mcp?.gitnexus?.command, ['gitnexus', 'mcp']);
-    // Version is persisted to config, not MCP entry:
+    assert.deepEqual(opencodeConfig.mcp?.gitnexus?.command, [
+      'npx',
+      '-y',
+      '@veewo/gitnexus@1.4.7-rc',
+      'mcp',
+    ]);
+    // An explicit version pins both MCP and config:
     assert.equal(savedConfig.cliPackageSpec, '@veewo/gitnexus@1.4.7-rc');
     assert.equal(savedConfig.cliVersion, '1.4.7-rc');
   } finally {
@@ -301,18 +316,24 @@ test('setup --scope project --agent claude writes only .mcp.json', async () => {
   try {
     await execFileAsync('git', ['init'], { cwd: fakeRepo });
 
-    await runSetup(['--scope', 'project', '--agent', 'claude'], {
-      ...process.env,
-      HOME: fakeHome,
-      USERPROFILE: fakeHome,
-    }, fakeRepo);
+    await runSetup(
+      ['--scope', 'project', '--agent', 'claude'],
+      {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+      },
+      fakeRepo,
+    );
 
     const projectMcpPath = path.join(fakeRepo, '.mcp.json');
     const codexConfigPath = path.join(fakeRepo, '.codex', 'config.toml');
     const opencodeConfigPath = path.join(fakeRepo, 'opencode.json');
 
     const projectMcpRaw = await fs.readFile(projectMcpPath, 'utf-8');
-    const projectMcp = JSON.parse(projectMcpRaw) as { mcpServers?: Record<string, { command?: string; args?: string[] }> };
+    const projectMcp = JSON.parse(projectMcpRaw) as {
+      mcpServers?: Record<string, { command?: string; args?: string[] }>;
+    };
 
     assert.equal(projectMcp.mcpServers?.gitnexus?.command, 'gitnexus');
     assert.deepEqual(projectMcp.mcpServers?.gitnexus?.args, ['mcp']);
@@ -331,11 +352,15 @@ test('setup --scope project --agent codex writes only .codex/config.toml', async
   try {
     await execFileAsync('git', ['init'], { cwd: fakeRepo });
 
-    await runSetup(['--scope', 'project', '--agent', 'codex'], {
-      ...process.env,
-      HOME: fakeHome,
-      USERPROFILE: fakeHome,
-    }, fakeRepo);
+    await runSetup(
+      ['--scope', 'project', '--agent', 'codex'],
+      {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+      },
+      fakeRepo,
+    );
 
     const projectMcpPath = path.join(fakeRepo, '.mcp.json');
     const codexConfigPath = path.join(fakeRepo, '.codex', 'config.toml');
@@ -377,11 +402,15 @@ test('setup --scope project --agent codex replaces existing gitnexus table witho
       'utf-8',
     );
 
-    await runSetup(['--scope', 'project', '--agent', 'codex'], {
-      ...process.env,
-      HOME: fakeHome,
-      USERPROFILE: fakeHome,
-    }, fakeRepo);
+    await runSetup(
+      ['--scope', 'project', '--agent', 'codex'],
+      {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+      },
+      fakeRepo,
+    );
 
     const codexConfigRaw = await fs.readFile(codexConfigPath, 'utf-8');
     const tableMatches = codexConfigRaw.match(/^\[mcp_servers\.gitnexus\]$/gm) || [];
@@ -447,11 +476,15 @@ test('setup --scope project --agent opencode writes only opencode.json', async (
   try {
     await execFileAsync('git', ['init'], { cwd: fakeRepo });
 
-    await runSetup(['--scope', 'project', '--agent', 'opencode'], {
-      ...process.env,
-      HOME: fakeHome,
-      USERPROFILE: fakeHome,
-    }, fakeRepo);
+    await runSetup(
+      ['--scope', 'project', '--agent', 'opencode'],
+      {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+      },
+      fakeRepo,
+    );
 
     const projectMcpPath = path.join(fakeRepo, '.mcp.json');
     const codexConfigPath = path.join(fakeRepo, '.codex', 'config.toml');

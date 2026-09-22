@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import Parser from 'tree-sitter';
+import JavaScript from 'tree-sitter-javascript';
+import TypeScript from 'tree-sitter-typescript';
 import {
   TYPESCRIPT_QUERIES,
   JAVASCRIPT_QUERIES,
@@ -10,36 +13,34 @@ import {
   CSHARP_QUERIES,
   RUST_QUERIES,
   PHP_QUERIES,
+  RUBY_QUERIES,
   SWIFT_QUERIES,
-  LANGUAGE_QUERIES,
+  DART_QUERIES,
 } from '../../src/core/ingestion/tree-sitter-queries.js';
-import { SupportedLanguages } from '../../src/config/supported-languages.js';
+
+function capturedDefinitionFunctionNames(
+  language: Parameters<Parser['setLanguage']>[0],
+  querySource: string,
+  src: string,
+): string[] {
+  const parser = new Parser();
+  parser.setLanguage(language);
+  const query = new Parser.Query(language, querySource);
+  const tree = parser.parse(src);
+  const names: string[] = [];
+  for (const match of query.matches(tree.rootNode)) {
+    let isFunction = false;
+    let name: string | undefined;
+    for (const capture of match.captures) {
+      if (capture.name === 'definition.function') isFunction = true;
+      if (capture.name === 'name') name = capture.node.text;
+    }
+    if (isFunction && name !== undefined) names.push(name);
+  }
+  return names;
+}
 
 describe('tree-sitter queries', () => {
-  describe('LANGUAGE_QUERIES map', () => {
-    it('has entries for all supported languages', () => {
-      const allLanguages = Object.values(SupportedLanguages);
-      for (const lang of allLanguages) {
-        expect(LANGUAGE_QUERIES[lang]).toBeDefined();
-        expect(LANGUAGE_QUERIES[lang].length).toBeGreaterThan(0);
-      }
-    });
-
-    it('maps to the correct query constants', () => {
-      expect(LANGUAGE_QUERIES[SupportedLanguages.TypeScript]).toBe(TYPESCRIPT_QUERIES);
-      expect(LANGUAGE_QUERIES[SupportedLanguages.JavaScript]).toBe(JAVASCRIPT_QUERIES);
-      expect(LANGUAGE_QUERIES[SupportedLanguages.Python]).toBe(PYTHON_QUERIES);
-      expect(LANGUAGE_QUERIES[SupportedLanguages.Java]).toBe(JAVA_QUERIES);
-      expect(LANGUAGE_QUERIES[SupportedLanguages.C]).toBe(C_QUERIES);
-      expect(LANGUAGE_QUERIES[SupportedLanguages.Go]).toBe(GO_QUERIES);
-      expect(LANGUAGE_QUERIES[SupportedLanguages.CPlusPlus]).toBe(CPP_QUERIES);
-      expect(LANGUAGE_QUERIES[SupportedLanguages.CSharp]).toBe(CSHARP_QUERIES);
-      expect(LANGUAGE_QUERIES[SupportedLanguages.Rust]).toBe(RUST_QUERIES);
-      expect(LANGUAGE_QUERIES[SupportedLanguages.PHP]).toBe(PHP_QUERIES);
-      expect(LANGUAGE_QUERIES[SupportedLanguages.Swift]).toBe(SWIFT_QUERIES);
-    });
-  });
-
   describe('TypeScript queries', () => {
     it('captures class declarations', () => {
       expect(TYPESCRIPT_QUERIES).toContain('class_declaration');
@@ -54,6 +55,22 @@ describe('tree-sitter queries', () => {
     it('captures function declarations', () => {
       expect(TYPESCRIPT_QUERIES).toContain('function_declaration');
       expect(TYPESCRIPT_QUERIES).toContain('@definition.function');
+    });
+
+    it('captures async generator function declarations as function definitions', () => {
+      const names = capturedDefinitionFunctionNames(
+        TypeScript.typescript as Parameters<Parser['setLanguage']>[0],
+        TYPESCRIPT_QUERIES,
+        `
+        export function userText() { return ''; }
+        export async function* runCoachLoop(): AsyncGenerator<string> {
+          yield 'ready';
+        }
+      `,
+      );
+
+      expect(names).toContain('userText');
+      expect(names).toContain('runCoachLoop');
     });
 
     it('captures method definitions', () => {
@@ -74,11 +91,6 @@ describe('tree-sitter queries', () => {
       expect(TYPESCRIPT_QUERIES).toContain('call_expression');
       expect(TYPESCRIPT_QUERIES).toContain('@call');
     });
-
-    it('captures heritage (extends/implements)', () => {
-      expect(TYPESCRIPT_QUERIES).toContain('@heritage.extends');
-      expect(TYPESCRIPT_QUERIES).toContain('@heritage.implements');
-    });
   });
 
   describe('JavaScript queries', () => {
@@ -88,12 +100,28 @@ describe('tree-sitter queries', () => {
       expect(JAVASCRIPT_QUERIES).toContain('@definition.method');
     });
 
-    it('captures heritage (extends)', () => {
-      expect(JAVASCRIPT_QUERIES).toContain('@heritage.extends');
-    });
-
     it('does not have interface declarations', () => {
       expect(JAVASCRIPT_QUERIES).not.toContain('interface_declaration');
+    });
+
+    it('captures generator function declarations as function definitions', () => {
+      const names = capturedDefinitionFunctionNames(
+        JavaScript as Parameters<Parser['setLanguage']>[0],
+        JAVASCRIPT_QUERIES,
+        `
+        export function userText() { return ''; }
+        export async function* runCoachLoop() {
+          yield 'ready';
+        }
+        export function* plainGen() {
+          yield 1;
+        }
+      `,
+      );
+
+      expect(names).toContain('userText');
+      expect(names).toContain('runCoachLoop');
+      expect(names).toContain('plainGen');
     });
   });
 
@@ -107,10 +135,6 @@ describe('tree-sitter queries', () => {
       expect(PYTHON_QUERIES).toContain('import_statement');
       expect(PYTHON_QUERIES).toContain('import_from_statement');
     });
-
-    it('captures heritage (class inheritance)', () => {
-      expect(PYTHON_QUERIES).toContain('@heritage.extends');
-    });
   });
 
   describe('Java queries', () => {
@@ -123,9 +147,8 @@ describe('tree-sitter queries', () => {
       expect(JAVA_QUERIES).toContain('@definition.annotation');
     });
 
-    it('captures extends and implements heritage', () => {
-      expect(JAVA_QUERIES).toContain('@heritage.extends');
-      expect(JAVA_QUERIES).toContain('@heritage.implements');
+    it('captures method references as calls', () => {
+      expect(JAVA_QUERIES).toContain('(method_reference) @call');
     });
   });
 
@@ -178,10 +201,6 @@ describe('tree-sitter queries', () => {
       expect(CPP_QUERIES).toContain('@definition.template');
       expect(CPP_QUERIES).toContain('template_declaration');
     });
-
-    it('captures heritage (base class)', () => {
-      expect(CPP_QUERIES).toContain('@heritage.extends');
-    });
   });
 
   describe('C# queries', () => {
@@ -223,11 +242,6 @@ describe('tree-sitter queries', () => {
       expect(RUST_QUERIES).toContain('@definition.static');
       expect(RUST_QUERIES).toContain('@definition.macro');
     });
-
-    it('captures trait implementation heritage', () => {
-      expect(RUST_QUERIES).toContain('@heritage.trait');
-      expect(RUST_QUERIES).toContain('@heritage.class');
-    });
   });
 
   describe('PHP queries', () => {
@@ -251,12 +265,6 @@ describe('tree-sitter queries', () => {
     it('captures class properties', () => {
       expect(PHP_QUERIES).toContain('property_declaration');
       expect(PHP_QUERIES).toContain('@definition.property');
-    });
-
-    it('captures heritage (extends, implements, use trait)', () => {
-      expect(PHP_QUERIES).toContain('@heritage.extends');
-      expect(PHP_QUERIES).toContain('@heritage.implements');
-      expect(PHP_QUERIES).toContain('@heritage.trait');
     });
 
     it('captures namespace definitions', () => {
@@ -297,10 +305,6 @@ describe('tree-sitter queries', () => {
       expect(SWIFT_QUERIES).toContain('@definition.property');
     });
 
-    it('captures heritage (inheritance)', () => {
-      expect(SWIFT_QUERIES).toContain('@heritage.extends');
-    });
-
     it('captures type aliases', () => {
       expect(SWIFT_QUERIES).toContain('typealias_declaration');
       expect(SWIFT_QUERIES).toContain('@definition.type');
@@ -312,6 +316,138 @@ describe('tree-sitter queries', () => {
 
     it('captures actors as classes', () => {
       expect(SWIFT_QUERIES).toContain('"actor"');
+    });
+  });
+
+  describe('Dart queries', () => {
+    it('captures class, mixin, extension, enum declarations', () => {
+      expect(DART_QUERIES).toContain('@definition.class');
+      expect(DART_QUERIES).toContain('@definition.trait');
+      expect(DART_QUERIES).toContain('@definition.enum');
+    });
+
+    it('captures top-level functions and methods', () => {
+      expect(DART_QUERIES).toContain('@definition.function');
+      expect(DART_QUERIES).toContain('@definition.method');
+    });
+
+    it('captures constructors including factory constructors', () => {
+      expect(DART_QUERIES).toContain('@definition.constructor');
+      expect(DART_QUERIES).toContain('factory_constructor_signature');
+    });
+
+    it('captures field declarations and getters/setters', () => {
+      expect(DART_QUERIES).toContain('@definition.property');
+      expect(DART_QUERIES).toContain('getter_signature');
+      expect(DART_QUERIES).toContain('setter_signature');
+    });
+
+    it('captures import statements', () => {
+      expect(DART_QUERIES).toContain('@import');
+      expect(DART_QUERIES).toContain('library_import');
+    });
+
+    it('captures direct calls and method chains', () => {
+      expect(DART_QUERIES).toContain('expression_statement');
+      expect(DART_QUERIES).toContain('unconditional_assignable_selector');
+      expect(DART_QUERIES).toContain('@call');
+    });
+
+    it('captures await expressions as calls', () => {
+      expect(DART_QUERIES).toContain('await_expression');
+    });
+
+    it('captures named argument calls (widget children)', () => {
+      expect(DART_QUERIES).toContain('named_argument');
+    });
+
+    it('captures list literal calls (widget children lists)', () => {
+      expect(DART_QUERIES).toContain('list_literal');
+    });
+
+    it('captures cascade calls (obj..method())', () => {
+      expect(DART_QUERIES).toContain('cascade_section');
+    });
+
+    it('captures arrow function body calls (=> expr)', () => {
+      expect(DART_QUERIES).toContain('function_body "=>"');
+    });
+
+    it('captures lambda body calls (() => expr)', () => {
+      expect(DART_QUERIES).toContain('function_expression_body');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Variable/constant declaration capture tests
+  // ---------------------------------------------------------------------------
+
+  describe('Variable/constant declaration captures', () => {
+    it('TypeScript captures const/let as @definition.const', () => {
+      expect(TYPESCRIPT_QUERIES).toContain('@definition.const');
+      expect(TYPESCRIPT_QUERIES).toContain('lexical_declaration');
+    });
+
+    it('TypeScript captures var as @definition.variable', () => {
+      expect(TYPESCRIPT_QUERIES).toContain('@definition.variable');
+      expect(TYPESCRIPT_QUERIES).toContain('variable_declaration');
+    });
+
+    it('JavaScript captures const/let as @definition.const', () => {
+      expect(JAVASCRIPT_QUERIES).toContain('@definition.const');
+    });
+
+    it('JavaScript captures var as @definition.variable', () => {
+      expect(JAVASCRIPT_QUERIES).toContain('@definition.variable');
+    });
+
+    it('Python captures plain assignments as @definition.variable', () => {
+      expect(PYTHON_QUERIES).toContain('@definition.variable');
+    });
+
+    it('Go captures const_declaration and var_declaration', () => {
+      expect(GO_QUERIES).toContain('@definition.const');
+      expect(GO_QUERIES).toContain('@definition.variable');
+      expect(GO_QUERIES).toContain('short_var_declaration');
+    });
+
+    it('Java captures local_variable_declaration', () => {
+      expect(JAVA_QUERIES).toContain('local_variable_declaration');
+      expect(JAVA_QUERIES).toContain('@definition.variable');
+    });
+
+    it('C captures init_declarator as @definition.variable', () => {
+      expect(C_QUERIES).toContain('init_declarator');
+      expect(C_QUERIES).toContain('@definition.variable');
+    });
+
+    it('C++ captures init_declarator as @definition.variable', () => {
+      expect(CPP_QUERIES).toContain('init_declarator');
+      expect(CPP_QUERIES).toContain('@definition.variable');
+    });
+
+    it('C# captures local_declaration_statement', () => {
+      expect(CSHARP_QUERIES).toContain('local_declaration_statement');
+      expect(CSHARP_QUERIES).toContain('@definition.variable');
+    });
+
+    it('Rust retains const_item and static_item captures', () => {
+      expect(RUST_QUERIES).toContain('@definition.const');
+      expect(RUST_QUERIES).toContain('@definition.static');
+    });
+
+    it('PHP captures const_declaration', () => {
+      expect(PHP_QUERIES).toContain('const_declaration');
+      expect(PHP_QUERIES).toContain('@definition.const');
+    });
+
+    it('Ruby captures constant assignments', () => {
+      expect(RUBY_QUERIES).toContain('@definition.const');
+    });
+
+    it('Dart captures declaration as @definition.variable', () => {
+      expect(DART_QUERIES).toContain('(declaration');
+      expect(DART_QUERIES).toContain('@definition.variable');
     });
   });
 });
