@@ -21,6 +21,7 @@ import { NodeTableName, RELATION_SCHEMA } from './schema.js';
 import type { ContentRetention } from '../../storage/repo-meta.js';
 import { VALID_NODE_TABLES, parseRelationSchemaPairs, RelPairRouter } from './rel-pair-routing.js';
 import { parseTruthyEnv } from '../ingestion/utils/env.js';
+import { getMaxFileSizeBytes } from '../ingestion/utils/max-file-size.js';
 import { SYMBOL_NODE_LABELS } from '../ingestion/utils/symbol-labels.js';
 import { applyCjkSegmentationIfEnabled } from '../search/cjk-segmentation.js';
 
@@ -207,6 +208,7 @@ export class FileContentCache {
   private cache = new Map<string, PreparedFileContent>();
   private maxSize: number;
   private repoPath: string;
+  private readonly maxFileSizeBytes = getMaxFileSizeBytes();
 
   constructor(repoPath: string, maxSize: number = 3000) {
     this.repoPath = repoPath;
@@ -223,6 +225,14 @@ export class FileContentCache {
     }
     try {
       const fullPath = path.join(this.repoPath, relativePath);
+      // Relationship providers can add File nodes after the size-filtered
+      // scan (for example, a large Unity prefab referenced by a scene).
+      // Preserve those nodes/edges without reintroducing their entire text
+      // into the CSV/COPY path. Check bytes before allocating the content.
+      if ((await fs.stat(fullPath)).size > this.maxFileSizeBytes) {
+        this.set(relativePath, EMPTY_PREPARED);
+        return EMPTY_PREPARED;
+      }
       const content = await fs.readFile(fullPath, 'utf-8');
       const prepared: PreparedFileContent = {
         content,
@@ -322,6 +332,7 @@ const extractContent = async (
   // File content is stored in full — intentionally NOT length-capped here, so
   // text past the old 10KB cutoff stays FTS-searchable (#2317). It is already
   // bounded upstream by the walker's max-file-size cap (512KB default / 32MB),
+  // with the same limit enforced by FileContentCache for post-scan nodes,
   // and only whitespace-normalized for the tokenizer. The symbol snippet path
   // below, by contrast, deliberately stays capped at MAX_SNIPPET.
   if (node.label === 'File') {

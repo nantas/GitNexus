@@ -81,6 +81,8 @@ Changes to effective scope/extensions or C# define symbols automatically rebuild
 
 Use `$GN analyze --help` for available flags. `--index-only` skips context and skill generation; `--skip-agents-md` and `--skip-skills` control those outputs separately. `--name` selects a registry name; `--repo-alias` is a compatibility alias.
 
+`--max-file-size` (KiB; default 512) also limits lazy content reads during CSV export. Supplemental resource File nodes and their relationships are retained even when their text exceeds the limit; those nodes have empty `content`. Unity binding/lifecycle extraction is unaffected. Accepted files retain their full text under the `full` content-retention profile. `GITNEXUS_MAX_FILE_SIZE` supplies the same limit when no CLI override is given.
+
 After a failed or timed-out analyze, report the exact error and inspect the cause before another run. For Unity runtime validation, use the shared runtime-process and hydration contracts below.
 
 ### status — Check index freshness

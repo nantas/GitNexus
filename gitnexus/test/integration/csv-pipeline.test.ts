@@ -605,8 +605,8 @@ describe('streamAllCSVsToDisk', () => {
     // flush, exercising addRow's flush-promise return + the loop's
     // `if (pending) await pending` path that the small fixtures above never
     // reach (only the bench did).
-    const N = 10;
-    const CONTENT_SIZE = 1024 * 1024; // 1MB/file, 10MB total > FLUSH_BYTES
+    const N = 24;
+    const CONTENT_SIZE = 512 * 1024; // at default scan limit; 12MB total > FLUSH_BYTES
     const bigContent = 'x'.repeat(CONTENT_SIZE);
     await fs.mkdir(path.join(repoDir, 'src', 'big'), { recursive: true });
     const nodes: TestNodeInput[] = [];
@@ -620,6 +620,7 @@ describe('streamAllCSVsToDisk', () => {
     const fileCsv = result.nodeFiles.get('File');
     expect(fileCsv).toBeDefined();
     expect(fileCsv!.rows).toBe(N); // no rows dropped/duplicated at the flush boundary
+    expect((await fs.stat(fileCsv!.csvPath)).size).toBeGreaterThan(FLUSH_BYTES);
     const dataRows = dataRowsOf(await fs.readFile(fileCsv!.csvPath, 'utf-8'));
     expect(dataRows).toHaveLength(N);
     expect(new Set(dataRows).size).toBe(N); // all distinct — no flush-boundary corruption

@@ -37,6 +37,7 @@ scan → structure → parse → scopeResolution → … → communities
 5. Unity phases 与 derived phases 一同受 `skipGraphPhases/skipDerivedGraphPhases` 控制；deferred derived run 包含三个 Unity phases。
 6. 增量写入：`Method:unity-runtime-root` 与 Community/Process 同属派生层。重算时先删除旧根及关联边，再从完整新图一并写入根和所有关联边；无文件变化而保留派生层时不删除、不重复插入。最后一个 lifecycle host 消失时清理旧根。
 7. parity seed 在 `core/run-analyze.ts` 成功发布索引时写入 `unity-parity-seed.json`，供 MCP hydration 使用。
+8. 资源关系补建的 File 节点保留资源身份和边；CSV 导出读取全文时同样遵守 `--max-file-size` / `GITNEXUS_MAX_FILE_SIZE` 上限（默认 512 KiB），超限资源的 `File.content` 留空。该限制不影响 Unity 资源扫描、绑定提取或 lifecycle 注入，避免大 prefab 绕过扫描预算并撑爆数据库 COPY。
 
 ### 2.1.1 Scan-Context 承载器契约（As-Built + Design Direction）
 

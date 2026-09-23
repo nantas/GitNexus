@@ -49,6 +49,14 @@ Notes:
 
 Scope rules remain path prefixes, with a trailing `*` accepted as a wildcard prefix.
 
+The effective `--max-file-size` / `GITNEXUS_MAX_FILE_SIZE` limit also bounds lazy
+source-text reads during CSV export (512 KiB by default). Relationship providers
+may retain supplemental File nodes for oversized resources; those nodes and their
+edges remain in the graph, but their `content` is empty. Files within the limit
+retain their full text under `contentRetention=full`; the limit does not truncate
+accepted source text. This prevents post-scan resource nodes from bypassing the
+walker's size budget during database COPY.
+
 ## Repo-local optional inputs
 
 | File | Purpose |
