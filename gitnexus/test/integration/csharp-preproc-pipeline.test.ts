@@ -85,4 +85,23 @@ describe('csharp preprocessor normalization in pipeline', () => {
       await fs.rm(repoDir, { recursive: true, force: true });
     }
   });
+  it('does not extract a disabled method after an interpolated literal', async () => {
+    const { repoDir, csprojPath } = await createTempRepo();
+    try {
+      await fs.writeFile(
+        path.join(repoDir, 'Interpolated.cs'),
+        'class Interpolated { string s = $@"{ "/*" }";\n#if NEVER\nvoid Ghost() {}\n#endif\nvoid Visible() {}\n}',
+      );
+      const result = await runPipelineFromRepo(repoDir, () => {}, {
+        includeExtensions: ['.cs'],
+        csharpDefineCsproj: csprojPath,
+        skipGraphPhases: true,
+      });
+      const names = [...result.graph.iterNodes()].map((node) => node.properties.name);
+      expect(names).toContain('Visible');
+      expect(names).not.toContain('Ghost');
+    } finally {
+      await fs.rm(repoDir, { recursive: true, force: true });
+    }
+  });
 });

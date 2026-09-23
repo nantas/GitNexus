@@ -22,7 +22,8 @@ import type { LanguageProvider } from '../../src/core/ingestion/language-provide
 const FIXTURES: Partial<Record<SupportedLanguages, { filePath: string; source: string }>> = {
   [SupportedLanguages.CSharp]: {
     filePath: 'Fixture.cs',
-    source: 'class Demo {\r\n#if ACTIVE\nvoid 激活() {}\n#else\nvoid Inactive() {}\n#endif\n}',
+    source:
+      'class Demo { string s = $@"{ "/*" }";\r\n#if ACTIVE\nvoid 激活() {}\n#else\nvoid Inactive() {}\n#endif\n}',
   },
   [SupportedLanguages.Swift]: {
     filePath: 'Fixture.swift',

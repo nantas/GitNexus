@@ -197,59 +197,118 @@ function hasTrailingLineEnding(source: string): boolean {
 
 // Track only active source: disabled preprocessor text need not be valid C#.
 // In particular, an unmatched comment in a disabled branch must not hide #endif.
-interface DirectiveLexicalState {
-  blockComment: boolean;
-  verbatimString: boolean;
-  rawQuotes: number;
-}
+type DirectiveLexicalFrame =
+  | { kind: 'comment' }
+  | { kind: 'expression'; braces: number; parentheses: number; closingBraces: number }
+  | { kind: 'format'; closingBraces: number }
+  | { kind: 'string'; quote: string; verbatim: boolean; raw: boolean; interpolationBraces: number };
+
+// A stack is necessary: interpolation expressions can contain strings, comments,
+// object initializers, and further interpolations. Their quotes do not close the
+// enclosing string. The empty stack denotes ordinary source code.
+type DirectiveLexicalState = DirectiveLexicalFrame[];
 
 function advanceDirectiveLexicalState(line: string, state: DirectiveLexicalState): void {
   for (let i = 0; i < line.length; i += 1) {
-    if (state.blockComment) {
+    const frame = state.at(-1);
+    if (frame?.kind === 'comment') {
       if (line.startsWith('*/', i)) {
-        state.blockComment = false;
+        state.pop();
         i += 1;
       }
       continue;
     }
-    if (state.rawQuotes) {
-      if (line.startsWith('"'.repeat(state.rawQuotes), i)) {
-        i += state.rawQuotes - 1;
-        state.rawQuotes = 0;
+    if (frame?.kind === 'format') {
+      if (line.startsWith('}'.repeat(frame.closingBraces), i)) {
+        state.pop(); // format text
+        state.pop(); // interpolation expression
+        i += frame.closingBraces - 1;
       }
       continue;
     }
-    if (state.verbatimString) {
-      if (line[i] === '"') {
-        if (line[i + 1] === '"') i += 1;
-        else state.verbatimString = false;
+    if (frame?.kind === 'string') {
+      if (!frame.raw && !frame.verbatim && line[i] === '\\') {
+        i += 1;
+      } else if (line.startsWith(frame.quote, i)) {
+        if (frame.verbatim && line[i + 1] === '"') i += 1;
+        else {
+          state.pop();
+          i += frame.quote.length - 1;
+        }
+      } else if (frame.interpolationBraces && line[i] === '{') {
+        let braces = 1;
+        while (line[i + braces] === '{') braces++;
+        if (!frame.raw) {
+          // Pairs are escaped text; an odd final brace opens an expression.
+          if (braces % 2)
+            state.push({ kind: 'expression', braces: 0, parentheses: 0, closingBraces: 1 });
+        } else if (braces >= frame.interpolationBraces) {
+          state.push({
+            kind: 'expression',
+            braces: 0,
+            parentheses: 0,
+            closingBraces: frame.interpolationBraces,
+          });
+        }
+        i += braces - 1;
       }
       continue;
     }
     if (line.startsWith('//', i)) break;
     if (line.startsWith('/*', i)) {
-      state.blockComment = true;
+      state.push({ kind: 'comment' });
       i += 1;
-    } else if (line[i] === '"') {
-      let quotes = 1;
-      while (line[i + quotes] === '"') quotes += 1;
-      if (line[i - 1] === '@' || (line[i - 1] === '$' && line[i - 2] === '@')) {
-        state.verbatimString = true;
-      } else if (quotes >= 3) {
-        state.rawQuotes = quotes;
-        i += quotes - 1;
-      } else {
-        // Ordinary strings cannot span lines; skip escaped quotes and comment markers.
-        for (i += 1; i < line.length; i += 1) {
-          if (line[i] === '\\') i += 1;
-          else if (line[i] === '"') break;
+      continue;
+    }
+    if (frame?.kind === 'expression') {
+      if (line[i] === '(' || line[i] === '[') frame.parentheses++;
+      else if (line[i] === ')' || line[i] === ']') frame.parentheses--;
+      else if (
+        line[i] === ':' &&
+        !frame.braces &&
+        !frame.parentheses &&
+        line[i - 1] !== ':' &&
+        line[i + 1] !== ':'
+      ) {
+        // A top-level colon starts format text. Ternaries must be parenthesized;
+        // named arguments, indexers and global:: aliases remain expression code.
+        state.push({ kind: 'format', closingBraces: frame.closingBraces });
+        continue;
+      }
+      if (line[i] === '{') frame.braces++;
+      else if (line[i] === '}') {
+        if (frame.braces) frame.braces--;
+        else if (line.startsWith('}'.repeat(frame.closingBraces), i)) {
+          state.pop();
+          i += frame.closingBraces - 1;
+          continue;
         }
       }
-    } else if (line[i] === "'") {
-      for (i += 1; i < line.length; i += 1) {
-        if (line[i] === '\\') i += 1;
-        else if (line[i] === "'") break;
-      }
+    }
+    if (line[i] === "'") {
+      state.push({
+        kind: 'string',
+        quote: "'",
+        verbatim: false,
+        raw: false,
+        interpolationBraces: 0,
+      });
+    } else if (line[i] === '"' || line[i] === '@' || line[i] === '$') {
+      const opening = /^(\$+@?|@\$?)?("+)/.exec(line.slice(i));
+      if (!opening) continue;
+      const prefix = opening[1] ?? '';
+      const verbatim = prefix.includes('@');
+      const raw = !verbatim && opening[2].length >= 3;
+      const quote = raw ? opening[2] : '"';
+      const dollars = prefix.split('$').length - 1;
+      state.push({
+        kind: 'string',
+        quote,
+        verbatim,
+        raw,
+        interpolationBraces: raw ? dollars : Math.min(dollars, 1),
+      });
+      i += prefix.length + quote.length - 1;
     }
   }
 }
@@ -283,11 +342,7 @@ export function normalizeCSharpPreprocessorBranches(
   const stack: ConditionalFrame[] = [];
   const undefinedSymbols = new Set<string>();
 
-  const lexical: DirectiveLexicalState = {
-    blockComment: false,
-    verbatimString: false,
-    rawQuotes: 0,
-  };
+  const lexical: DirectiveLexicalState = [];
   let active = true;
   let changed = false;
   let directivesSeen = 0;
@@ -301,9 +356,7 @@ export function normalizeCSharpPreprocessorBranches(
       continue;
     }
     const directive =
-      !lexical.blockComment &&
-      !lexical.verbatimString &&
-      !lexical.rawQuotes &&
+      (lexical.length === 0 || lexical.at(-1)?.kind === 'expression') &&
       line.match(/^\s*#\s*(if|elif|else|endif)\b(.*)$/);
     if (directive) {
       directivesSeen += 1;

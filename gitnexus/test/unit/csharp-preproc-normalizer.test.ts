@@ -120,3 +120,37 @@ describe('directive lexical context', () => {
     expect(out.diagnostics.directivesSeen).toBe(3);
   });
 });
+
+describe('interpolated literal lexical context', () => {
+  it.each([
+    '$@"{ "/*" }"',
+    '$@"{ 1:/* }"',
+    '$@"{ (true ? "/*" : "//") }"',
+    '$@"{ global::System.String.Empty }"',
+    '@$"{ "/*" }"',
+    '$"{ "/*" }"',
+    '$@"{ $"{ "/*" }" }"',
+    '$@"{{literal}} { new[] { "/*", "//" }[0] }"',
+    '$@"{ /* comment */ "/*" // line comment\n }"',
+    '$$"""text {{ "/*" }} text"""',
+    '$"""{ """/*""" }"""',
+  ])('resumes real directives after %s', (literal) => {
+    const source = `class C {\r\n string s = ${literal};\r\n#if NEVER\r\n void Ghost() {}\r\n#endif\r\n void Visible() {}\r\n}`;
+    const out = normalizeCSharpPreprocessorBranches(source, new Set());
+    expect(out.diagnostics.directivesSeen).toBe(2);
+    expect(out.diagnostics.inactiveLines).toBe(1);
+    expect(out.normalizedText).not.toContain('Ghost');
+    expect(out.normalizedText).toContain(literal);
+    expect(out.normalizedText.indexOf('void Visible')).toBe(source.indexOf('void Visible'));
+    expect(out.normalizedText.length).toBe(source.length);
+  });
+
+  it('keeps directive-like text in nested multiline literals and resumes after them', () => {
+    const literal = '$@"{ @"\n#if NEVER\n" }\n#endif\n"';
+    const source = `class C { string s = ${literal};\n#if NEVER\nvoid Ghost() {}\n#endif\n}`;
+    const out = normalizeCSharpPreprocessorBranches(source, new Set());
+    expect(out.normalizedText).toContain(literal);
+    expect(out.normalizedText).not.toContain('Ghost');
+    expect(out.diagnostics.directivesSeen).toBe(2);
+  });
+});

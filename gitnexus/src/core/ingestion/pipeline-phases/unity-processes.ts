@@ -7,7 +7,9 @@ import type { ProcessesOutput } from './processes.js';
 import type { CommunitiesOutput } from './communities.js';
 
 const ROOT = 'Method:unity-runtime-root';
-const LIMIT = 8;
+const MAX_CALLBACKS = 256;
+const TRACES_PER_CALLBACK = 48;
+const MAX_BRANCHES = 4;
 const MAX_DEPTH = 10;
 const MAX_WALKS = 4096;
 
@@ -16,64 +18,92 @@ export const unityProcessesPhase: PipelinePhase = {
   name: 'unity-processes',
   deps: ['processes', 'unity-lifecycle', 'communities'],
   async execute(ctx, deps) {
-    const stats = { added: 0, walks: 0, branchesDropped: 0, depthCapped: 0, truncated: false };
+    const stats = {
+      added: 0,
+      walks: 0,
+      callbacksSeen: 0,
+      callbacksTraced: 0,
+      callbacksDropped: 0,
+      branchesDropped: 0,
+      depthCapped: 0,
+      candidateCapped: 0,
+      walkCapped: 0,
+      truncated: false,
+    };
     if (!ctx.graph.getNode(ROOT)) return stats;
     const { processResult } = getPhaseOutput<ProcessesOutput>(deps, 'processes');
     const existing = processResult.processes.filter((p) => p.entryPointId === ROOT);
-    if (existing.length >= LIMIT) return stats;
     const adjacency = new Map<string, Set<string>>();
     ctx.graph.forEachRelationshipFields((source, target, type, confidence, reason) => {
-      if (type !== 'CALLS' || confidence < 0.5 || isHeuristicEdgeReason(reason)) return;
+      if (type !== 'CALLS' || !(confidence >= 0.5) || isHeuristicEdgeReason(reason)) return;
       if (source === ROOT && reason !== 'unity-lifecycle-synthetic') return;
       if (!ctx.graph.getNode(source) || !ctx.graph.getNode(target)) return;
       let targets = adjacency.get(source);
       if (!targets) adjacency.set(source, (targets = new Set()));
       targets.add(target);
     });
-    const queue: string[][] = [[ROOT]];
-    const candidates: string[][] = [];
-    let cursor = 0;
-    while (cursor < queue.length && stats.walks < MAX_WALKS) {
-      const trace = queue[cursor++];
-      stats.walks++;
-      const targets = [...(adjacency.get(trace[trace.length - 1]) ?? [])].sort();
-      if (trace.length >= MAX_DEPTH || !targets.length) {
-        if (targets.length) stats.depthCapped++;
-        if (trace.length >= 3) candidates.push(trace);
-        continue;
-      }
-      // The synthetic root has many independent callbacks; ordinary methods
-      // retain the upstream branching budget. Bound the queue as well as visits.
-      const budget = trace.length === 1 ? 32 : 4;
-      stats.branchesDropped += Math.max(0, targets.length - budget);
-      const next = targets.slice(0, budget).filter((id) => !trace.includes(id));
-      if (!next.length && trace.length >= 3) candidates.push(trace);
-      for (const id of next) {
-        if (queue.length >= MAX_WALKS) {
-          stats.truncated = true;
-          break;
-        }
-        queue.push([...trace, id]);
-      }
-    }
-    const key = (trace: string[]) => JSON.stringify([trace[1], trace[trace.length - 1]]);
-    const seen = new Set(existing.map((p) => key(p.trace)));
-    // Prefer distinct callbacks, then longer traces, with a total-order tie break.
-    const usedCallbacks = new Set(existing.map((p) => p.trace[1]));
-    candidates.sort(
-      (a, b) => b.length - a.length || JSON.stringify(a).localeCompare(JSON.stringify(b)),
+    // Order by semantic identity, not the version-dependent symbol ID format.
+    // IDs only break ties between otherwise indistinguishable overloads.
+    const orderKey = (id: string) => {
+      const node = ctx.graph.getNode(id)!;
+      return JSON.stringify([node.properties.filePath, node.properties.name, id]);
+    };
+    const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+    const ordered = new Map(
+      [...adjacency].map(([source, targets]) => [
+        source,
+        [...targets].sort((a, b) => compare(orderKey(a), orderKey(b))),
+      ]),
     );
+    const callbacks = ordered.get(ROOT) ?? [];
+    stats.callbacksSeen = callbacks.length;
+    stats.callbacksDropped = Math.max(0, callbacks.length - MAX_CALLBACKS);
+    const candidates: string[][] = [];
+    for (const callback of callbacks.slice(0, MAX_CALLBACKS)) {
+      stats.callbacksTraced++;
+      const queue: string[][] = [[ROOT, callback]];
+      let cursor = 0;
+      let collected = 0;
+      while (cursor < queue.length && collected < TRACES_PER_CALLBACK) {
+        const trace = queue[cursor++];
+        stats.walks++;
+        const targets = ordered.get(trace[trace.length - 1]) ?? [];
+        if (trace.length >= MAX_DEPTH || !targets.length) {
+          if (targets.length) stats.depthCapped++;
+          if (trace.length >= 3) {
+            candidates.push(trace);
+            collected++;
+          }
+          continue;
+        }
+        stats.branchesDropped += Math.max(0, targets.length - MAX_BRANCHES);
+        const next = targets.slice(0, MAX_BRANCHES).filter((id) => !trace.includes(id));
+        if (!next.length && trace.length >= 3) {
+          candidates.push(trace);
+          collected++;
+        }
+        for (const id of next) {
+          if (queue.length >= MAX_WALKS) {
+            stats.walkCapped++;
+            break;
+          }
+          queue.push([...trace, id]);
+        }
+      }
+      if (cursor < queue.length) stats.candidateCapped++;
+    }
+    // Different ordered paths to the same endpoint are distinct evidence.
+    // Generic traces are preserved and suppress only an identical full trace.
+    const key = (trace: string[]) => JSON.stringify(trace);
+    const seen = new Set(existing.map((p) => key(p.trace)));
     const membership = new Map(
       getPhaseOutput<CommunitiesOutput>(deps, 'communities').communityResult.memberships.map(
         (m) => [m.nodeId, m.communityId],
       ),
     );
-    while (existing.length + stats.added < LIMIT && candidates.length) {
-      const diverse = candidates.findIndex((t) => !usedCallbacks.has(t[1]) && !seen.has(key(t)));
-      const trace = candidates.splice(diverse < 0 ? 0 : diverse, 1)[0];
+    for (const trace of candidates) {
       if (seen.has(key(trace))) continue;
       seen.add(key(trace));
-      usedCallbacks.add(trace[1]);
       const id = `proc_unity_${createHash('sha256').update(JSON.stringify(trace)).digest('hex').slice(0, 20)}`;
       const terminalId = trace[trace.length - 1];
       const label = `Unity lifecycle → ${ctx.graph.getNode(terminalId)?.properties.name ?? terminalId}`;
@@ -121,11 +151,12 @@ export const unityProcessesPhase: PipelinePhase = {
       });
       stats.added++;
     }
-    stats.truncated ||=
+    stats.truncated =
+      stats.callbacksDropped > 0 ||
       stats.branchesDropped > 0 ||
       stats.depthCapped > 0 ||
-      candidates.length > 0 ||
-      cursor < queue.length;
+      stats.candidateCapped > 0 ||
+      stats.walkCapped > 0;
     processResult.stats.totalProcesses = processResult.processes.length;
     processResult.stats.crossCommunityCount = processResult.processes.filter(
       (p) => p.processType === 'cross_community',

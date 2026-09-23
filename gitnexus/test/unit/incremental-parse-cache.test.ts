@@ -276,9 +276,9 @@ describe('PARSE_CACHE_VERSION', () => {
   // silently un-fixed on exactly the incremental path most users are on.
   // Moved 98 -> 99 for #3190: lexical import provenance and corrected export
   // evidence. origin/main took 98 for #3219; 99 is the next free value.
-  // v101 rejects phantom C# facts from preprocessing comment directives.
-  it('pins SCHEMA_BUMP to 101 so concurrent bumps cannot silently collide (#2766, #3015, #3088, #2885, #3128, #2865, #3130, #1432, #3161, #3179, #3219, #3190)', () => {
-    expect(Number(PARSE_CACHE_VERSION.split('+', 1)[0])).toBe(101);
+  // v102 rejects phantom C# facts after interpolated literals.
+  it('pins SCHEMA_BUMP to 102 so concurrent bumps cannot silently collide (#2766, #3015, #3088, #2885, #3128, #2865, #3130, #1432, #3161, #3179, #3219, #3190)', () => {
+    expect(Number(PARSE_CACHE_VERSION.split('+', 1)[0])).toBe(102);
     expect(PARSE_CACHE_BUCKET_COUNT).toBe(128);
     // The PREVIOUS version must fail the reuse gate, not merely differ from the
     // current one — a hardcoded number outside the conflict hunk rebases cleanly

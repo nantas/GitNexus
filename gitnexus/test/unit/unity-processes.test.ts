@@ -56,7 +56,7 @@ const depsFor = (result: any) =>
   ]) as any;
 
 describe('dedicated Unity process budget', () => {
-  it('restores eight real traces beyond the generic four-branch root budget and is idempotent', async () => {
+  it('retains bounded callback coverage beyond the generic budget and is idempotent', async () => {
     const graph = makeGraph();
     const result = await processProcesses(graph, [], undefined, { maxProcesses: 100 });
     expect(result.processes.filter((p) => p.entryPointId === ROOT).length).toBeLessThan(8);
@@ -65,7 +65,7 @@ describe('dedicated Unity process budget', () => {
     const stats = (await unityProcessesPhase.execute(ctx, deps)) as any;
     expect(stats.added).toBeGreaterThan(0);
     const traces = result.processes.filter((p) => p.entryPointId === ROOT);
-    expect(traces).toHaveLength(8);
+    expect(traces).toHaveLength(14);
     expect(
       traces.every((p) => !p.trace.some((id) => id.endsWith('Run15') || id.endsWith('Run14'))),
     ).toBe(true);
@@ -88,7 +88,7 @@ describe('dedicated Unity process budget', () => {
       ids.push(result.processes.map((p: any) => p.id));
     }
     expect(ids[0]).toEqual(ids[1]);
-    expect(ids[0]).toHaveLength(8);
+    expect(ids[0]).toHaveLength(14);
   });
   it('does nothing without the actual synthetic root', async () => {
     const graph = createKnowledgeGraph();
@@ -110,7 +110,7 @@ describe('dedicated Unity process budget', () => {
       const deps = depsFor(result);
       await unityProcessesPhase.execute({ graph: sink } as any, deps);
       await unityProcessSubtypePhase.execute({ graph: sink } as any, deps);
-      expect(result.processes).toHaveLength(8);
+      expect(result.processes).toHaveLength(14);
       for (const proc of result.processes as any[]) {
         expect(sink.getNode(proc.id)?.properties.sourceReasons).toContain(
           'unity-lifecycle-synthetic',
@@ -121,4 +121,120 @@ describe('dedicated Unity process budget', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+// More than 32 callbacks and more than eight pre-existing processes must not
+// prevent a later callback from retaining its actual ordered membership.
+it('gives later callbacks their own budget and preserves generic processes', async () => {
+  const graph = createKnowledgeGraph();
+  const add = (id: string) =>
+    graph.addNode({
+      id,
+      label: 'Method',
+      properties: { name: id.split(':').at(-1)!, filePath: 'Assets/Test.cs' },
+    });
+  add(ROOT);
+  const expected: string[][] = [];
+  for (let i = 0; i < 40; i++) {
+    const trace = [
+      ROOT,
+      `Method:Assets/Test.cs:Host${i}.Awake#0`,
+      `Method:Assets/Test.cs:Host${i}.Init#0`,
+      `Method:Assets/Test.cs:Host${i}.Done#0`,
+    ];
+    expected.push(trace);
+    trace.slice(1).forEach(add);
+    for (let step = 1; step < trace.length; step++)
+      graph.addRelationship({
+        id: `${i}:${step}`,
+        type: 'CALLS',
+        sourceId: trace[step - 1],
+        targetId: trace[step],
+        confidence: 1,
+        reason: step === 1 ? 'unity-lifecycle-synthetic' : 'local-call',
+      });
+  }
+  const generic = expected
+    .slice(0, 8)
+    .map((trace, i) => ({
+      id: `generic${i}`,
+      trace,
+      entryPointId: ROOT,
+      terminalId: trace.at(-1)!,
+      stepCount: trace.length,
+      processType: 'intra_community',
+      communities: [],
+    }));
+  const result = { processes: [...generic], steps: [], stats: {} };
+  await unityProcessesPhase.execute({ graph } as any, depsFor(result));
+  expect(result.processes.slice(0, 8)).toEqual(generic);
+  expect(result.processes.map((p) => p.trace)).toEqual(expect.arrayContaining(expected));
+  expect(result.processes).toHaveLength(40);
+});
+
+it('keeps distinct ordered paths with the same callback and terminal', async () => {
+  const graph = createKnowledgeGraph();
+  for (const id of [ROOT, 'callback', 'left', 'right', 'end'])
+    graph.addNode({ id, label: 'Method', properties: { name: id, filePath: 'Assets/Test.cs' } });
+  for (const [source, target] of [
+    [ROOT, 'callback'],
+    ['callback', 'left'],
+    ['callback', 'right'],
+    ['left', 'end'],
+    ['right', 'end'],
+  ])
+    graph.addRelationship({
+      id: `${source}:${target}`,
+      sourceId: source,
+      targetId: target,
+      type: 'CALLS',
+      confidence: 1,
+      reason: source === ROOT ? 'unity-lifecycle-synthetic' : 'local-call',
+    });
+  const result = { processes: [], steps: [], stats: {} };
+  await unityProcessesPhase.execute({ graph } as any, depsFor(result));
+  expect(result.processes.map((p: any) => p.trace)).toEqual([
+    [ROOT, 'callback', 'left', 'end'],
+    [ROOT, 'callback', 'right', 'end'],
+  ]);
+});
+
+it('bounds a busy callback without starving the next callback and reports truncation', async () => {
+  const graph = createKnowledgeGraph();
+  const add = (id: string) =>
+    graph.addNode({ id, label: 'Method', properties: { name: id, filePath: 'Assets/Test.cs' } });
+  const edge = (source: string, target: string) =>
+    graph.addRelationship({
+      id: `${source}:${target}`,
+      sourceId: source,
+      targetId: target,
+      type: 'CALLS',
+      confidence: 1,
+      reason: source === ROOT ? 'unity-lifecycle-synthetic' : 'local-call',
+    });
+  add(ROOT);
+  add('busy');
+  add('quiet');
+  add('end');
+  edge(ROOT, 'busy');
+  edge(ROOT, 'quiet');
+  edge('quiet', 'end');
+  let layer = ['busy'];
+  for (let depth = 0; depth < 4; depth++) {
+    const next: string[] = [];
+    for (const parent of layer)
+      for (let branch = 0; branch < 4; branch++) {
+        const child = `${parent}/${branch}`;
+        add(child);
+        edge(parent, child);
+        next.push(child);
+      }
+    layer = next;
+  }
+  const result = { processes: [], steps: [], stats: {} };
+  const stats = (await unityProcessesPhase.execute({ graph } as any, depsFor(result))) as any;
+  expect(result.processes).toHaveLength(49);
+  expect(result.processes.map((p: any) => p.trace)).toContainEqual([ROOT, 'quiet', 'end']);
+  expect(stats.candidateCapped).toBe(1);
+  expect(stats.truncated).toBe(true);
 });

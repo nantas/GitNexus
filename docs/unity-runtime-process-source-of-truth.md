@@ -41,9 +41,11 @@ scan → structure → parse → scopeResolution → … → communities
 
 ### 2.1.0 有界 lifecycle process 补充
 
-`unity-processes` 依赖 `processes/unity-lifecycle/communities`，在通用过程完成后补足 runtime-root 过程至最多 8 条（保留通用过程，不删已有结果）。只有真实 `Method:unity-runtime-root` 和 `unity-lifecycle-synthetic` 根边才启用。根首跳最多 32 分支，后续最多 4 分支，深度最多 10，最多 4096 个排队/访问状态；按 callback/terminal 去重，优先不同 callback，再按深度和稳定路径顺序选择。新增过程 ID 由路径 SHA-256 派生。
+`unity-processes` 依赖 `processes/unity-lifecycle/communities`，在通用过程完成后为每个 runtime-root callback 独立分配追踪预算，保留全部通用过程。只有真实 `Method:unity-runtime-root` 和 `unity-lifecycle-synthetic` 根边才启用。最多 256 个 callback（对应默认合成边上限），每个 callback 最多 48 条候选路径、4096 个排队/访问状态；后续每跳最多 4 分支，深度最多 10。各 callback 不共享候选预算，不再凑足总量 8 即停止。排序按文件/方法名及 ID 稳定排序，不依赖项目名评分或边插入顺序。
 
-补充器与上游一致排除 confidence < 0.5 及 global-name-fallback 等启发式边，流式图读取真实字段列；新增 Process/STEP_IN_PROCESS 随通用派生层统一持久化、增量清理，subtype phase 统一标注 medium lifecycle 证据。日志报告 added/walks/branchesDropped/depthCapped/truncated。这是有界采样，不是完整调用路径枚举，也不是 verifier-core 的 verified_full。`process-processor.ts` 保持上游零 patch。
+按完整有序 trace 去重，保留同 callback/terminal 的不同成员路径；新增过程 ID 由完整路径 SHA-256 派生。通用过程只抑制完全相同的补充路径，不占用其他 callback 的预算。新增上限为 256×48（可与通用过程重合而减少）；没有遍历到的路径不生成过程。
+
+补充器排除 confidence < 0.5 及 global-name-fallback 等启发式边，流式图读取真实字段列；新增 Process/STEP_IN_PROCESS 随通用派生层统一持久化、增量清理，subtype phase 统一标注 medium lifecycle 证据。日志报告 added/walks/callbacksSeen/callbacksTraced/callbacksDropped/branchesDropped/depthCapped/candidateCapped/walkCapped/truncated。所有预算裁剪均报告截断。这是有界采样，不是完整调用路径枚举，也不是 verifier-core 的 verified_full。覆盖回归须比较 callback、terminal 与有序 STEP_IN_PROCESS 成员，计数相同或 CALLS 仍在均不构成通过证据。`process-processor.ts` 保持上游零 patch。
 
 ### 2.1.1 Scan-Context 承载器契约（As-Built + Design Direction）
 

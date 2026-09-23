@@ -765,7 +765,8 @@ import { copyV8CacheIfPresent, tryLoadV8Cache, writeV8CacheFile } from './v8-sid
 // origin/main took 98 for #3219; 99 is the next free value.
 // v101: C# preprocessing preserves directives inside comments and literals;
 // discard cached phantom methods produced by damaged comment delimiters.
-const SCHEMA_BUMP = 101;
+// v102: interpolation-aware C# lexical states mask disabled branches reliably.
+const SCHEMA_BUMP = 102;
 const GITNEXUS_PKG_VERSION = (() => {
   try {
     // package.json sits at gitnexus/package.json — two levels up from
