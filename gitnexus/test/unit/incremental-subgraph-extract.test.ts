@@ -396,3 +396,21 @@ describe('computeEffectiveWriteSet (Finding 1)', () => {
     expect([...input]).toEqual(['/repo/c.ts']);
   });
 });
+
+describe('Unity synthetic root derived-layer ownership', () => {
+  it('replaces the root and all its edges together, or preserves the whole layer', () => {
+    const graph = createKnowledgeGraph();
+    const root = 'Method:unity-runtime-root';
+    graph.addNode(makeFileNode(root, '', 'Method'));
+    graph.addNode(makeFileNode('Method:changed', 'Assets/Changed.cs', 'Method'));
+    graph.addNode(makeFileNode('Method:unchanged', 'Assets/Other.cs', 'Method'));
+    graph.addRelationship(makeRel('a', root, 'Method:changed'));
+    graph.addRelationship(makeRel('b', root, 'Method:unchanged'));
+    const sub = extractChangedSubgraph(graph, new Set(['Assets/Changed.cs']));
+    expect(sub.getNode(root)).toBeDefined();
+    expect([...sub.iterRelationships()].map((r) => r.id).sort()).toEqual(['a', 'b']);
+    const preserved = extractChangedSubgraph(graph, new Set(), { includeDerivedGraphWide: false });
+    expect(preserved.getNode(root)).toBeUndefined();
+    expect([...preserved.iterRelationships()]).toEqual([]);
+  });
+});

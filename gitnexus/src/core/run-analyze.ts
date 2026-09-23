@@ -33,6 +33,8 @@ import {
   countCallsByLanguage,
 } from './ingestion/scope-resolution/name-fallback-summary.js';
 import { runPipelineFromRepo } from './ingestion/pipeline.js';
+import { resolveAnalysisInputs } from './analysis-inputs.js';
+import { SYNTHETIC_RUNTIME_ROOT_ID } from './ingestion/unity-lifecycle-synthetic-calls.js';
 import {
   logUnresolvedReceiverFiles,
   summarizeUnresolvedReceivers,
@@ -1899,6 +1901,14 @@ async function runFullAnalysisInner(
     options = { ...options, force: true };
   }
 
+  // Configuration changes can change graph rows without changing source hashes.
+  // Unknown legacy receipts rebuild once; only successful publication stamps it.
+  const analysisInputs = await resolveAnalysisInputs(repoPath, options);
+  if (existingMeta && existingMeta.analysisInputFingerprint !== analysisInputs.fingerprint) {
+    log('Analysis inputs changed or were not recorded; forcing a full rebuild.');
+    options = { ...options, force: true };
+  }
+
   // ── Early-return: already up to date ──────────────────────────────
   if (
     existingMeta &&
@@ -2228,7 +2238,9 @@ async function runFullAnalysisInner(
         fetchWrappers: options.fetchWrappers,
         skipDerivedGraphPhases,
         springActuatorPath: options.springActuatorPath,
+        // Use the exact symbol snapshot whose fingerprint will be published.
         csharpDefineCsproj: options.csharpDefineCsproj,
+        csharpDefineSymbols: analysisInputs.csharpDefineSymbols,
         includeExtensions: options.includeExtensions,
         scopeRules: options.scopeRules,
         asyncApiSpecPath: options.asyncApiSpecPath,
@@ -3185,6 +3197,12 @@ async function runFullAnalysisInner(
           //    from the fresh pipeline output below. Required for the
           //    "Leiden runs on the FULL graph" correctness invariant.
           await deleteAllCommunitiesAndProcesses();
+          // Lifecycle roots have no owning file. Replace the root and ALL its
+          // edges together with the recomputed derived layer (including removal
+          // of the final lifecycle host); preserve both on no-op derived runs.
+          await executeQuery(
+            `MATCH (n:Method {id: '${escapeCypherString(SYNTHETIC_RUNTIME_ROOT_ID)}'}) DETACH DELETE n`,
+          );
         }
         // 2a. Drop INJECTS edges (DI collection injection, #2200) — their
         //     validity is a whole-program property (a third-file change to the
@@ -4201,6 +4219,7 @@ async function runFullAnalysisInner(
           ? existingMeta?.undecidedInterfaceSatisfaction
           : summarizeUndecidedSatisfaction(pipelineResult.undecidedSatisfaction),
       analysisFeatures: currentAnalysisFeatures,
+      analysisInputFingerprint: analysisInputs.fingerprint,
       springVendorPrefixes: currentSpringVendorPrefixes,
       // Always stamped with the live resolved mode (#2331/#2339) — unlike
       // `pdg` below, 'none' is a meaningful value to compare, not an

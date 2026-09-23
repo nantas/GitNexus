@@ -7,7 +7,6 @@ export const unityProcessSubtypePhase: PipelinePhase = {
   name: 'unity-process-subtype',
   deps: ['processes', 'unity-lifecycle'],
   async execute(ctx, deps) {
-    if (!getPhaseOutput<{ enabled: boolean }>(deps, 'unity-lifecycle').enabled) return;
     const calls = new Map<string, GraphRelationship>();
     // Streamed object views intentionally omit reasons. Read the interned
     // field columns so cold and cached/streamed runs classify identically.

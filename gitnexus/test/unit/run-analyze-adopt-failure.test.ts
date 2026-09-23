@@ -1,3 +1,4 @@
+import { resolveAnalysisInputs } from '../../src/core/analysis-inputs.js';
 /**
  * Fast-path restamp failure modes (#2364 review F3, test gaps 4 and 7).
  * Separate from run-analyze.test.ts, which stays pure-real: these scenarios
@@ -53,6 +54,8 @@ import { runFullAnalysis } from '../../src/core/run-analyze.js';
 import { resolveAnalyzerRunnerIdentity } from '../../src/core/analyzer-identity.js';
 import { createTempDir } from '../helpers/test-db.js';
 import { CLASS_FRAMEWORK_ANNOTATIONS_FEATURE } from '../../src/core/analysis-features.js';
+
+const DEFAULT_INPUT_FINGERPRINT = (await resolveAnalysisInputs('.', {})).fingerprint;
 
 describe('fast-path restamp failure modes (#2364 F3)', () => {
   let tmpHome: Awaited<ReturnType<typeof createTempDir>>;
@@ -111,6 +114,7 @@ describe('fast-path restamp failure modes (#2364 F3)', () => {
       indexedAt: new Date().toISOString(),
       branch,
       schemaFingerprint: SCHEMA_FINGERPRINT,
+      analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
       analysisFeatures: {
         [CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id]: CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.version,
       },

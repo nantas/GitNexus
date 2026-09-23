@@ -1,3 +1,4 @@
+import { resolveAnalysisInputs } from '../../src/core/analysis-inputs.js';
 /**
  * #2798 — the vector-column width gate.
  *
@@ -48,6 +49,8 @@ const CURRENT_ANALYSIS_FEATURES = {
  * cases below stay typed at every other call site.
  */
 const fromUntrustedMeta = (value: unknown): number | undefined => value as number | undefined;
+
+const DEFAULT_INPUT_FINGERPRINT = (await resolveAnalysisInputs('.', {})).fingerprint;
 
 describe('embeddingDimsMismatch (#2798)', () => {
   it.each([
@@ -119,6 +122,7 @@ async function seedIndexedRepo(
     lastCommit,
     indexedAt: new Date().toISOString(),
     schemaFingerprint: SCHEMA_FINGERPRINT,
+    analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
     analysisFeatures: CURRENT_ANALYSIS_FEATURES,
     runnerIdentity: resolveAnalyzerRunnerIdentity(
       pathToFileURL(path.resolve(__dirname, '../../src/core/run-analyze.ts')).href,

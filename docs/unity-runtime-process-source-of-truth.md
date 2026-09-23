@@ -33,9 +33,10 @@ scan → structure → parse → scopeResolution → … → communities
 1. `unity-resources`：依赖 `communities/scopeResolution/structure`。独立模块 `unity-resource-scan.ts` 扫描资源路径并按 scope 过滤，随后由 `processUnityResources` 写入 Unity 绑定与 prefab-source 边。
 2. `unity-lifecycle`：依赖 `unity-resources/parse`。基类线索取同一 normalized AST 的 parse report，并与 Class 的文件/名称/行号对齐；不依赖外部引擎类型的虚拟继承节点。检测 `Assets/*.cs` 后加载目标仓 Unity 配置，调用 `applyUnityLifecycleSyntheticCalls`。
 3. `processes`：注册时增加 `unity-lifecycle` 依赖，确保追踪前已注入合成 CALLS；上游 `process-processor.ts` 保持原实现。
-4. `unity-process-subtype`：依赖 `processes/unity-lifecycle`，沿过程 trace 的 CALLS reason 回写 `processSubtype/runtimeChainConfidence/sourceReasons/sourceConfidences` 与步骤证据。流式图必须通过 `forEachRelationshipFields` 读取真实 reason；对象视图的 `streamed` 占位不能用于分类。`STEP_IN_PROCESS` 保留到 subtype 完成后统一落库。
+4. `unity-process-subtype`：依赖 `processes/unity-lifecycle`，对所有项目（含非 Unity 项目）沿过程 trace 的 CALLS reason 回写 `processSubtype/runtimeChainConfidence/sourceReasons/sourceConfidences` 与步骤证据。流式图必须通过 `forEachRelationshipFields` 读取真实 reason；对象视图的 `streamed` 占位不能用于分类。`STEP_IN_PROCESS` 保留到 subtype 完成后统一落库。
 5. Unity phases 与 derived phases 一同受 `skipGraphPhases/skipDerivedGraphPhases` 控制；deferred derived run 包含三个 Unity phases。
-6. parity seed 在 `core/run-analyze.ts` 成功发布索引时写入 `unity-parity-seed.json`，供 MCP hydration 使用。
+6. 增量写入：`Method:unity-runtime-root` 与 Community/Process 同属派生层。重算时先删除旧根及关联边，再从完整新图一并写入根和所有关联边；无文件变化而保留派生层时不删除、不重复插入。最后一个 lifecycle host 消失时清理旧根。
+7. parity seed 在 `core/run-analyze.ts` 成功发布索引时写入 `unity-parity-seed.json`，供 MCP hydration 使用。
 
 ### 2.1.1 Scan-Context 承载器契约（As-Built + Design Direction）
 
@@ -93,7 +94,7 @@ scan → structure → parse → scopeResolution → … → communities
 | Phase 1 | Unity summary schema hygiene | 已落地 | `gitnexus/src/core/lbug/schema.ts`（`REL_TYPES` 定义处） |
 | Phase 2 | class→method process 投影 | 已落地（query/context 双侧） | `local-backend.ts:1416-1449, 2393-2414` |
 | Phase 3 | lifecycle + loader synthetic CALLS | **V2 重构**：lifecycle 始终启用 | `unity-lifecycle-synthetic-calls.ts` |
-| Phase 4 | persisted lifecycle process artifact | **V2 变更**：仅在 Unity resource-binding flow 激活时持久化 | `pipeline-phases/unity-process-subtype.ts` |
+| Phase 4 | persisted lifecycle process artifact | 静态过程证据始终持久化；合成生命周期分类仅在 Unity 启用时产生 | `pipeline-phases/unity-process-subtype.ts` |
 | Phase 5 | confidence + verification_hint 合约 | **V2 变更**：扩展字段始终输出 | `process-confidence.ts`；`local-backend.ts` |
 | V1 Reload | on-demand verify + 验收闭环 | **V2 重构**：verifier 简化为图谱查询 | `runtime-chain-verify.ts` (934→297 行) |
 
@@ -160,7 +161,7 @@ V2 移除所有 `GITNEXUS_UNITY_*` 环境变量，行为由自动检测和显式
 | 行为 | 控制方式 |
 | --- | --- |
 | Lifecycle 合成边注入 | 对 Unity 项目自动生效（检测 `Assets/*.cs`） |
-| Process 元数据持久化 | 与 Unity resource-binding flow 绑定（Unity 自动检测命中 `Assets/*.cs` 时持久化） |
+| Process 元数据持久化 | 所有过程持久化静态证据；Unity 自动检测命中 `Assets/*.cs` 时另产生生命周期分类 |
 | 扩展置信度字段输出 | 始终输出 |
 | 运行时链路验证 | 请求参数 `runtime_chain_verify=on-demand` 为唯一开关 |
 

@@ -64,6 +64,7 @@ import {
 
 export interface PipelineOptions {
   csharpDefineCsproj?: string;
+  /** Resolved symbol snapshot; when present, takes precedence over re-reading csproj. */
   csharpDefineSymbols?: string[];
   includeExtensions?: string[];
   scopeRules?: string[];
@@ -391,15 +392,17 @@ export const runPipelineFromRepo = async (
   onProgress: (progress: PipelineProgress) => void,
   options?: PipelineOptions,
 ): Promise<PipelineResult> => {
-  const symbols = options?.csharpDefineCsproj
-    ? [
-        ...(
-          await loadCSharpDefineProfileFromCsproj(
-            path.resolve(repoPath, options.csharpDefineCsproj),
-          )
-        ).symbols,
-      ]
-    : options?.csharpDefineSymbols;
+  const symbols =
+    options?.csharpDefineSymbols ??
+    (options?.csharpDefineCsproj
+      ? [
+          ...(
+            await loadCSharpDefineProfileFromCsproj(
+              path.resolve(repoPath, options.csharpDefineCsproj),
+            )
+          ).symbols,
+        ]
+      : undefined);
   setCSharpDefineSymbols(symbols);
   options = { ...options, csharpDefineSymbols: symbols };
   const graph = createKnowledgeGraph();

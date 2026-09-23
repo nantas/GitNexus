@@ -1,3 +1,4 @@
+import { resolveAnalysisInputs } from '../../src/core/analysis-inputs.js';
 import { execSync } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
@@ -34,6 +35,8 @@ const currentRunnerIdentity = () =>
     pathToFileURL(path.resolve(__dirname, '../../src/core/run-analyze.ts')).href,
   );
 
+const DEFAULT_INPUT_FINGERPRINT = (await resolveAnalysisInputs('.', {})).fingerprint;
+
 describe('run-analyze module', () => {
   it('exports runFullAnalysis as a function', async () => {
     const mod = await import('../../src/core/run-analyze.js');
@@ -67,6 +70,7 @@ describe('run-analyze module', () => {
         // guard (#2289 P1) does not force a rebuild and short-circuit the
         // alreadyUpToDate fast path this test exercises.
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
       };
@@ -111,6 +115,7 @@ describe('run-analyze module', () => {
         lastCommit: currentCommit,
         indexedAt,
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
         capabilities: {
@@ -172,6 +177,7 @@ describe('run-analyze module', () => {
         lastCommit: currentCommit,
         indexedAt: new Date().toISOString(),
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
       };
@@ -221,6 +227,7 @@ describe('run-analyze module', () => {
         lastCommit: currentCommit,
         indexedAt: new Date().toISOString(),
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
       };
@@ -267,6 +274,7 @@ describe('run-analyze module', () => {
         lastCommit: 'aaaa',
         indexedAt: new Date().toISOString(),
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
       };
@@ -278,6 +286,7 @@ describe('run-analyze module', () => {
         lastCommit: commitB,
         indexedAt: new Date().toISOString(),
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
       };
@@ -318,6 +327,7 @@ describe('run-analyze module', () => {
         lastCommit: currentCommit,
         indexedAt: new Date().toISOString(),
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
       };
@@ -875,6 +885,7 @@ describe('run-analyze module', () => {
         indexedAt: new Date().toISOString(),
         branch: 'main',
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       };
@@ -886,6 +897,7 @@ describe('run-analyze module', () => {
         indexedAt: new Date().toISOString(),
         branch: 'feature/x',
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       });
@@ -943,6 +955,7 @@ describe('run-analyze module', () => {
         indexedAt: new Date().toISOString(),
         branch: 'main',
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       });
@@ -953,6 +966,7 @@ describe('run-analyze module', () => {
         indexedAt: new Date().toISOString(),
         branch: 'feature/x',
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       });
@@ -1002,6 +1016,7 @@ describe('run-analyze module', () => {
         indexedAt: new Date().toISOString(),
         branch: 'main',
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       });
@@ -1046,6 +1061,7 @@ describe('run-analyze module', () => {
         indexedAt: new Date().toISOString(),
         branch: 'main',
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       });
@@ -1056,6 +1072,7 @@ describe('run-analyze module', () => {
         indexedAt: new Date().toISOString(),
         branch: 'feature/x',
         schemaFingerprint: SCHEMA_FINGERPRINT,
+        analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       });

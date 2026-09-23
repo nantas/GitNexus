@@ -6,7 +6,7 @@
  * replaced, produce a smaller KnowledgeGraph that contains:
  *
  *   - Every node whose `properties.filePath` is in `toWriteSet`.
- *   - Graph-wide Community/Process nodes unless `includeDerivedGraphWide`
+ *   - Graph-wide Community/Process/Unity runtime root nodes unless `includeDerivedGraphWide`
  *     is false (#3016 incremental preserve). Spring metadata placeholders
  *     and `Destination` nodes are always included — their owning phase
  *     delete-alls them unconditionally before the writeback.
@@ -56,6 +56,7 @@ import {
   isSpringAutoConfigurationDeclaration,
   isSpringAutoConfigurationSyntheticClass,
 } from '../ingestion/frameworks/spring/auto-configuration.js';
+import { SYNTHETIC_RUNTIME_ROOT_ID } from '../ingestion/unity-lifecycle-synthetic-calls.js';
 import { isSpringAopEvidenceNode } from '../ingestion/frameworks/spring/aop.js';
 
 /**
@@ -80,6 +81,7 @@ import { isSpringAopEvidenceNode } from '../ingestion/frameworks/spring/aop.js';
  * anything not re-included would be dropped rather than merely stale.
  */
 const isGraphWideNode = (node: GraphNode): boolean =>
+  node.id === SYNTHETIC_RUNTIME_ROOT_ID ||
   node.label === 'Community' ||
   node.label === 'Process' ||
   node.label === 'Destination' ||
@@ -155,7 +157,8 @@ export const extractChangedSubgraph = (
   fullGraph.forEachNode((n: GraphNode) => {
     const filePath = n.properties?.filePath as string | undefined;
     const derivedWide =
-      includeDerivedGraphWide || (n.label !== 'Community' && n.label !== 'Process');
+      includeDerivedGraphWide ||
+      (n.label !== 'Community' && n.label !== 'Process' && n.id !== SYNTHETIC_RUNTIME_ROOT_ID);
     const include = (filePath && toWriteSet.has(filePath)) || (isGraphWideNode(n) && derivedWide);
     if (include) {
       sub.addNode(n);

@@ -19,6 +19,7 @@ This document defines the current configuration and state file rules used by Git
   "repoId": "resolved-repo-name-or-alias",
   "storagePath": "/abs/path/to/repo/.gitnexus",
   "lastCommit": "git-head-sha",
+  "analysisInputFingerprint": "sha256-of-effective-analysis-inputs",
   "indexedAt": "ISO-8601 timestamp",
   "stats": {
     "files": 0,
@@ -44,7 +45,9 @@ Notes:
 }
 ```
 
-`csharpDefineCsproj` resolves relative to the target repository. Define symbols are loaded once and passed into workerData; changing the define profile changes C# parse-cache keys. Scope rules remain path prefixes, with a trailing `*` accepted as a wildcard prefix.
+`csharpDefineCsproj` resolves relative to the target repository. Define symbols are loaded once and passed into workerData; changing the define profile changes C# parse-cache keys. Before freshness checks, analyze fingerprints normalized scope/extensions and the actual define symbols (including external csproj content changes). A changed or missing fingerprint forces full graph writeback; successful publication records it in index metadata. An unchanged configuration still permits the up-to-date fast path. This receipt is not a source of option defaults.
+
+Scope rules remain path prefixes, with a trailing `*` accepted as a wildcard prefix.
 
 ## Repo-local optional inputs
 
@@ -85,7 +88,7 @@ Notes:
 ### Unity runtime process persistence note
 
 - `Process` lifecycle metadata persistence has no external config/env switch.
-- Behavior is pipeline-derived: persistence is enabled when Unity resource-binding flow is active (Unity auto-detected via `Assets/*.cs`).
+- Static process evidence is persisted for all projects. Unity lifecycle classification is pipeline-derived when Unity is auto-detected via `Assets/*.cs`. The synthetic root and its edges are replaced together during derived-layer incremental refresh.
 
 ## Ownership rules
 

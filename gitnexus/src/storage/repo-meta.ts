@@ -87,6 +87,8 @@ export interface AnalyzerRunnerIdentity {
 }
 
 export interface RepoMeta {
+  /** Effective scope/extensions/define symbols used by the published graph. */
+  analysisInputFingerprint?: string;
   /** Legacy alias metadata, read for compatibility; .gitnexusrc owns current options. */
   repoId?: string;
   analyzeOptions?: {

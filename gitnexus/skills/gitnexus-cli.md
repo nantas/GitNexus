@@ -76,6 +76,9 @@ $GN analyze --force
 $GN analyze --extensions .cs,.meta --scope Assets/,Packages/ --csharp-define-csproj Assembly-CSharp.csproj
 ```
 
+Changes to effective scope/extensions or C# define symbols automatically rebuild the graph, even on a clean unchanged Git HEAD. External csproj symbol changes are included. Older indexes without an analysis-input receipt rebuild once; unchanged inputs retain the fast path.
+
+
 Use `$GN analyze --help` for available flags. `--index-only` skips context and skill generation; `--skip-agents-md` and `--skip-skills` control those outputs separately. `--name` selects a registry name; `--repo-alias` is a compatibility alias.
 
 After a failed or timed-out analyze, report the exact error and inspect the cause before another run. For Unity runtime validation, use the shared runtime-process and hydration contracts below.

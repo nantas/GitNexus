@@ -17,7 +17,7 @@ const LIFECYCLE_CALLBACKS = new Set([
 ]);
 
 const SYNTHETIC_RUNTIME_ROOT_NAME = 'unity-runtime-root';
-const SYNTHETIC_RUNTIME_ROOT_ID = generateId('Method', SYNTHETIC_RUNTIME_ROOT_NAME);
+export const SYNTHETIC_RUNTIME_ROOT_ID = generateId('Method', SYNTHETIC_RUNTIME_ROOT_NAME);
 
 export interface UnityLifecycleSyntheticConfig {
   enabled: boolean;
