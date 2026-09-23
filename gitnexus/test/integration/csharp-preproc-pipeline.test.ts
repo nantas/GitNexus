@@ -104,4 +104,28 @@ describe('csharp preprocessor normalization in pipeline', () => {
       await fs.rm(repoDir, { recursive: true, force: true });
     }
   });
+  it.each(["Bob's methods", 'Unmatched " title'])(
+    'excludes disabled methods after region text: %s',
+    async (title) => {
+      const { repoDir, csprojPath } = await createTempRepo();
+      try {
+        await fs.writeFile(
+          path.join(repoDir, 'Region.cs'),
+          `class Region {\n#region ${title}\n#if NEVER\nvoid Ghost() {}\n#endif\n#endregion\nvoid Visible() {}\n}`,
+        );
+        const result = await runPipelineFromRepo(repoDir, () => {}, {
+          includeExtensions: ['.cs'],
+          csharpDefineCsproj: csprojPath,
+          skipGraphPhases: true,
+        });
+        const names = [...result.graph.iterNodes()]
+          .filter((node) => node.label === 'Method')
+          .map((node) => node.properties.name);
+        expect(names).toContain('Visible');
+        expect(names).not.toContain('Ghost');
+      } finally {
+        await fs.rm(repoDir, { recursive: true, force: true });
+      }
+    },
+  );
 });

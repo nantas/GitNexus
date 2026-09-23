@@ -154,3 +154,52 @@ describe('interpolated literal lexical context', () => {
     expect(out.diagnostics.directivesSeen).toBe(2);
   });
 });
+
+describe('non-conditional directive text', () => {
+  it.each([
+    "#region Bob's methods",
+    '#region Unmatched " title',
+    '#region $@" title',
+    "#endregion Bob's methods",
+    '#warning Unmatched " title',
+    "#error Bob's message",
+    '#pragma warning disable CS0168 // "',
+    '#line 100 "Generated.cs"',
+    '#nullable enable',
+    '#define FLAG',
+    '#undef FLAG',
+  ])('does not scan directive arguments as C# literals: %s', (directive) => {
+    const source = `class C {\r\n${directive}\n#if NEVER\rvoid Ghost() {}\r\n#endif\nvoid Visible() {}\n}`;
+    const out = normalizeCSharpPreprocessorBranches(source, new Set());
+    expect(out.diagnostics.directivesSeen).toBe(2);
+    expect(out.normalizedText).toContain(directive);
+    expect(out.normalizedText).not.toContain('Ghost');
+    expect(out.normalizedText.indexOf('void Visible')).toBe(source.indexOf('void Visible'));
+    expect(out.normalizedText.length).toBe(source.length);
+  });
+
+  it.each([
+    '/*\n#region */',
+    'var text = @"\n#region ";',
+    'var text = """\n#region "\n""";',
+    'var text = $@"{ @"\n#region " }";',
+  ])('retains lexical handling of directive-looking text in literals/comments: %s', (prefix) => {
+    const source = `${prefix}\n#if NEVER\nvoid Ghost() {}\n#endif\nvoid Visible() {}`;
+    const out = normalizeCSharpPreprocessorBranches(source, new Set());
+    expect(out.normalizedText).toContain(prefix);
+    expect(out.diagnostics.directivesSeen).toBe(2);
+    expect(out.normalizedText).not.toContain('Ghost');
+    expect(out.normalizedText).toContain('Visible');
+  });
+
+  it('masks non-conditional directives in inactive branches without changing lexical state', () => {
+    const source =
+      "#if NEVER\n#region Bob's methods\nvoid Ghost() {}\n#endregion\n#else\nvoid Visible() {}\n#endif";
+    const out = normalizeCSharpPreprocessorBranches(source, new Set());
+    expect(out.diagnostics.directivesSeen).toBe(3);
+    expect(out.normalizedText).not.toContain('Ghost');
+    expect(out.normalizedText).not.toContain('#region');
+    expect(out.normalizedText).toContain('Visible');
+    expect(out.diagnostics.unterminatedIfBlocks).toBe(0);
+  });
+});

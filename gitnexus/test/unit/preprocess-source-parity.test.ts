@@ -23,7 +23,7 @@ const FIXTURES: Partial<Record<SupportedLanguages, { filePath: string; source: s
   [SupportedLanguages.CSharp]: {
     filePath: 'Fixture.cs',
     source:
-      'class Demo { string s = $@"{ "/*" }";\r\n#if ACTIVE\nvoid 激活() {}\n#else\nvoid Inactive() {}\n#endif\n}',
+      'class Demo { string s = $@"{ "/*" }";\r\n#region Bob\'s methods\n#if ACTIVE\nvoid 激活() {}\n#else\nvoid Inactive() {}\n#endif\n#endregion\n}',
   },
   [SupportedLanguages.Swift]: {
     filePath: 'Fixture.swift',

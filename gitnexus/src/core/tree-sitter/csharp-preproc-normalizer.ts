@@ -357,8 +357,8 @@ export function normalizeCSharpPreprocessorBranches(
     }
     const directive =
       (lexical.length === 0 || lexical.at(-1)?.kind === 'expression') &&
-      line.match(/^\s*#\s*(if|elif|else|endif)\b(.*)$/);
-    if (directive) {
+      line.match(/^\s*#\s*([a-z]+)\b(.*)$/);
+    if (directive && /^(if|elif|else|endif)$/.test(directive[1])) {
       directivesSeen += 1;
       changed = true;
       const keyword = directive[1] || '';
@@ -417,7 +417,11 @@ export function normalizeCSharpPreprocessorBranches(
     }
 
     if (active) {
-      advanceDirectiveLexicalState(line, lexical);
+      // Non-conditional directives have their own argument/text grammar:
+      // e.g. #region Bob's methods is not an unterminated character literal.
+      // Preserve the line, but never feed directive text into the C# lexer.
+      // The context guard above still lets comments/strings consume lookalikes.
+      if (!directive) advanceDirectiveLexicalState(line, lexical);
       outputLines.push(line);
       continue;
     }

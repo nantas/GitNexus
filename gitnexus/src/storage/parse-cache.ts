@@ -766,7 +766,8 @@ import { copyV8CacheIfPresent, tryLoadV8Cache, writeV8CacheFile } from './v8-sid
 // v101: C# preprocessing preserves directives inside comments and literals;
 // discard cached phantom methods produced by damaged comment delimiters.
 // v102: interpolation-aware C# lexical states mask disabled branches reliably.
-const SCHEMA_BUMP = 102;
+// v103: non-conditional directive text cannot contaminate C# lexical state.
+const SCHEMA_BUMP = 103;
 const GITNEXUS_PKG_VERSION = (() => {
   try {
     // package.json sits at gitnexus/package.json — two levels up from
