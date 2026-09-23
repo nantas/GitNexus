@@ -1963,10 +1963,23 @@ export function emitReceiverBoundCalls(
         // resolved through the application it was written as, so the erasure
         // takes the GROUNDED route rather than binding whatever the workspace
         // declares under that base name — see {@link erasedTypeApplication}.
+        // An unresolved callable alias names a method, not its return class.
+        // If the provider supplied an argument fallback, a same-named class
+        // must not turn that alias into a successful primary type resolution.
+        // Chain-followed declared returns carry their annotation source and
+        // continue through the normal primary path.
+        const unresolvedCalleeFallback =
+          typeRef.source === 'assignment-inferred' ? typeRef.fallbackRawName : undefined;
+        if (unresolvedCalleeFallback !== undefined) {
+          // This pass owns the provider's fallback, including a missing type
+          // or member. Receiver-blind emission must not resurrect the callee's
+          // same-named class after this path declines it.
+          handledSites.add(siteKey);
+        }
         const typeApplication = erasedTypeApplication(typeRef);
         let ownerDef = resolveClassBindingForName(
           site.inScope,
-          typeApplication ?? typeRef.rawName,
+          unresolvedCalleeFallback ?? typeApplication ?? typeRef.rawName,
           scopes,
         );
         // `findClassBindingInScope(..., typeRef.rawName)` only works when
@@ -1983,7 +1996,11 @@ export function emitReceiverBoundCalls(
         // MANUFACTURED by erasing type arguments, where the file may never
         // have named it at all. The lookup above already answered that case on
         // grounds; re-asking it here without any would undo them.
-        if (ownerDef === undefined && typeApplication === undefined) {
+        if (
+          ownerDef === undefined &&
+          typeApplication === undefined &&
+          unresolvedCalleeFallback === undefined
+        ) {
           const qnameIds = scopes.qualifiedNames.get(typeRef.rawName);
           if (qnameIds.length === 1) {
             const qdef = scopes.defs.get(qnameIds[0]!);
@@ -2004,7 +2021,11 @@ export function emitReceiverBoundCalls(
         // `rawName`; its callable-alias step retries the same name as a
         // construction). Asking again by a route that cannot see the grounds
         // would make the refusal decorative.
-        if (ownerDef === undefined && typeApplication === undefined) {
+        if (
+          ownerDef === undefined &&
+          typeApplication === undefined &&
+          unresolvedCalleeFallback === undefined
+        ) {
           ownerDef = resolveCompoundReceiverClass(
             receiverName,
             site.inScope,
@@ -2036,7 +2057,10 @@ export function emitReceiverBoundCalls(
         // name resolving in the index is precisely the evidence just rejected,
         // so claiming `in-program` from it would relaunder the fabrication as a
         // diagnostic, and the absent field hedges (the safe direction).
-        if (ownerDef === undefined && typeApplication !== undefined) {
+        if (
+          ownerDef === undefined &&
+          (typeApplication !== undefined || unresolvedCalleeFallback !== undefined)
+        ) {
           options.recordResolutionOutcome?.({
             kind: 'suppressed',
             reason: 'receiver-unresolved',
