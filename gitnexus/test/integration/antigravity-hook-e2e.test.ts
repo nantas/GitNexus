@@ -15,7 +15,7 @@
  * verifies the complete contract documented at
  * https://geminicli.com/docs/hooks/reference/.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { spawnSync } from 'child_process';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -95,6 +95,11 @@ beforeAll(async () => {
 
   registryHome = path.join(tempHome, 'gitnexus-home');
   fs.mkdirSync(registryHome, { recursive: true });
+});
+
+beforeEach(() => {
+  // An augment may launch a CLI that prunes this deliberately incomplete index.
+  // Every case needs its own registration, independent of earlier hook calls.
   fs.writeFileSync(
     path.join(registryHome, 'registry.json'),
     JSON.stringify([
