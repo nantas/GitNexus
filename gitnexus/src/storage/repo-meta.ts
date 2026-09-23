@@ -356,8 +356,8 @@ export interface RepoMeta {
   fileHashes?: Record<string, string>;
   /**
    * Coverage policy used when `fileHashes` was recorded. `status` replays it
-   * so analyze-time `--max-file-size` / `GITNEXUS_MAX_FILE_SIZE` cannot make
-   * a later default-cap walk drop a file the index actually covers.
+   * so analyze-time scope/extensions and `--max-file-size` are also respected
+   * when checking freshness. This is a receipt, not analyze option defaults.
    * `dirtyPaths` are covered files that were dirty vs HEAD at that moment —
    * status must re-hash those even after Git becomes clean (indexed-dirty then
    * restore). Absent on indexes written before this field.
@@ -365,6 +365,9 @@ export interface RepoMeta {
   indexCoverage?: {
     maxFileSizeBytes: number;
     dirtyPaths?: string[];
+    /** Empty means unrestricted; absent means a legacy receipt requiring analyze. */
+    scopeRules?: string[];
+    includeExtensions?: string[];
   };
   /**
    * Set when a run finished but the persisted edge count came back far short

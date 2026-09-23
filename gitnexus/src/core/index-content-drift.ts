@@ -14,7 +14,7 @@
  * `meta.fileHashes` already records the exact set of files the last run
  * covered, so the question can be answered directly. This module recomputes
  * the coverage set with the same `walkRepositoryPaths` scan (ignore rules and
- * dotfile handling stay shared) and the large-file cap recorded in
+ * dotfile handling stay shared), then replays the scope, extensions and cap recorded in
  * `meta.indexCoverage`, hashes only the paths that can actually have changed
  * since that run, and diffs against what was recorded.
  */
@@ -23,6 +23,7 @@ import { constants as fsConstants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
 import { walkRepositoryPaths } from './ingestion/filesystem-walker.js';
+import { selectEntriesByScopeRules } from './ingestion/scope-filter.js';
 import { computeFileHashesDetailed } from '../storage/file-hash.js';
 import { listWorkingTreeDirtyPaths } from '../storage/git.js';
 import { isGitNexusManagedPath } from '../storage/gitnexus-managed-paths.js';
@@ -104,7 +105,18 @@ export const detectIndexContentDrift = async (
       quiet: true,
       maxFileSizeBytes: coverage?.maxFileSizeBytes,
     });
-    const scannedPaths = scanned.map((file) => file.path).filter((p) => !isGitNexusManagedPath(p));
+    // Replay the completed run's selection, not today's CLI/config defaults.
+    // Keep scan.ts semantics: prefix scopes and case-insensitive extensions.
+    const selected = selectEntriesByScopeRules(scanned, coverage?.scopeRules ?? []).selected;
+    const extensions = new Set(
+      (coverage?.includeExtensions ?? []).map((ext) =>
+        (ext.startsWith('.') ? ext : `.${ext}`).toLowerCase(),
+      ),
+    );
+    const scannedPaths = selected
+      .map((file) => file.path)
+      .filter((p) => !isGitNexusManagedPath(p))
+      .filter((p) => extensions.size === 0 || extensions.has(path.extname(p).toLowerCase()));
     const scannedSet = new Set(scannedPaths);
     const recordedSet = new Set(Object.keys(recorded));
 

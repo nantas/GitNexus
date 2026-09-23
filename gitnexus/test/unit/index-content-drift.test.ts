@@ -78,6 +78,80 @@ afterEach(() => {
 });
 
 describe('detectIndexContentDrift', () => {
+  it.each([
+    { scopeRules: ['Assets'], includeExtensions: [] },
+    { scopeRules: [], includeExtensions: ['CS'] },
+    { scopeRules: ['./Assets/', 'Packages/com.veewo.*'], includeExtensions: ['.cs', '.META'] },
+  ])('replays the indexed selection %j and detects only covered changes', async (selection) => {
+    const repo = makeRepo({
+      'Assets/A.cs': 'class A {}\n',
+      'Assets/Delete.cs': 'class Delete {}\n',
+      'AiDoc/README.md': 'outside\n',
+    });
+    const hashes = Object.fromEntries(
+      await computeFileHashes(repo, ['Assets/A.cs', 'Assets/Delete.cs']),
+    );
+    const coverage = { maxFileSizeBytes: 512 * 1024, ...selection };
+    expect(await detectIndexContentDrift(repo, hashes, coverage)).toMatchObject({
+      kind: 'current',
+    });
+    fs.writeFileSync(path.join(repo, 'AiDoc/README.md'), 'changed outside\n');
+    fs.writeFileSync(path.join(repo, 'AiDoc/New.md'), 'new outside\n');
+    expect(await detectIndexContentDrift(repo, hashes, coverage)).toMatchObject({
+      kind: 'current',
+    });
+    fs.rmSync(path.join(repo, 'AiDoc/README.md'));
+    expect(await detectIndexContentDrift(repo, hashes, coverage)).toMatchObject({
+      kind: 'current',
+    });
+    fs.writeFileSync(path.join(repo, 'Assets/A.cs'), 'class Changed {}\n');
+    fs.writeFileSync(path.join(repo, 'Assets/New.cs'), 'class New {}\n');
+    fs.rmSync(path.join(repo, 'Assets/Delete.cs'));
+    expect(await detectIndexContentDrift(repo, hashes, coverage)).toEqual({
+      kind: 'drifted',
+      changed: ['Assets/A.cs'],
+      added: ['Assets/New.cs'],
+      deleted: ['Assets/Delete.cs'],
+    });
+  });
+
+  it('keeps scope boundaries, wildcard prefixes and extension normalization aligned with analyze', async () => {
+    const repo = makeRepo({
+      'Assets/A.cs': 'class A {}',
+      'Assets/notes.md': 'excluded extension',
+      'AssetsExtra/Outside.cs': 'class Outside {}',
+      'Packages/com.veewo.game/B.CS': 'class B {}',
+      'Packages/com.other/C.cs': 'class C {}',
+    });
+    const hashes = Object.fromEntries(
+      await computeFileHashes(repo, ['Assets/A.cs', 'Packages/com.veewo.game/B.CS']),
+    );
+    const coverage = {
+      maxFileSizeBytes: 512 * 1024,
+      scopeRules: ['./Assets/', 'Packages/com.veewo.*'],
+      includeExtensions: ['CS'],
+    };
+    expect(await detectIndexContentDrift(repo, hashes, coverage)).toMatchObject({
+      kind: 'current',
+    });
+    fs.writeFileSync(path.join(repo, 'Packages/com.veewo.game/New.CS'), 'class New {}');
+    expect(await detectIndexContentDrift(repo, hashes, coverage)).toMatchObject({
+      kind: 'drifted',
+      added: ['Packages/com.veewo.game/New.CS'],
+    });
+  });
+
+  it('does not infer missing legacy selection from the recorded paths', async () => {
+    const repo = makeRepo({ 'Assets/A.cs': 'class A {}', 'Other/B.cs': 'class B {}' });
+    const hashes = Object.fromEntries(await computeFileHashes(repo, ['Assets/A.cs']));
+    expect(
+      await detectIndexContentDrift(repo, hashes, { maxFileSizeBytes: 512 * 1024 }),
+    ).toMatchObject({
+      kind: 'drifted',
+      added: ['Other/B.cs'],
+    });
+  });
+
   it('reports current when every covered file still matches disk', async () => {
     const repo = makeRepo({ 'a.js': 'export const a = 1;\n' });
     const recorded = await recordCoverage(repo);

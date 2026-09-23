@@ -115,6 +115,7 @@ describe('fast-path restamp failure modes (#2364 F3)', () => {
       branch,
       schemaFingerprint: SCHEMA_FINGERPRINT,
       analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+      indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
       analysisFeatures: {
         [CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.id]: CLASS_FRAMEWORK_ANNOTATIONS_FEATURE.version,
       },

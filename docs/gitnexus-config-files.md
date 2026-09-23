@@ -49,6 +49,43 @@ Notes:
 
 Scope rules remain path prefixes, with a trailing `*` accepted as a wildcard prefix.
 
+### Freshness coverage receipt
+
+For Git repositories, successful analysis records `indexCoverage` next to
+`fileHashes` in both metadata files:
+
+```json
+{
+  "indexCoverage": {
+    "maxFileSizeBytes": 524288,
+    "scopeRules": ["Assets/", "Packages/"],
+    "includeExtensions": [".cs", ".meta"],
+    "dirtyPaths": []
+  }
+}
+```
+
+`status` without `--repo` replays this completed run's scope, extensions and size
+limit when comparing source content. Scope and extension filtering have the same
+semantics as analyze; empty arrays mean unrestricted selection. Out-of-scope
+changes do not count as content drift, while in-scope additions, edits and
+removals still do. Git HEAD, runner identity and incomplete-index checks remain
+independent freshness gates.
+
+The receipt describes indexed coverage, not current configuration intent. Changing
+`.gitnexusrc` does not retroactively change that coverage; run analyze to apply the
+new defaults. Its analysis-input fingerprint forces a rebuild for changed
+scope/extensions. Receipt fields never supply missing analyze options.
+
+Older receipts missing either selection array remain readable. Status retains
+its conservative legacy scan for missing filters; it cannot reconstruct scope
+from hashes or an opaque fingerprint and may report out-of-scope additions until
+reanalyzed. The next analyze bypasses the clean-HEAD fast path once, rebuilds
+using explicit CLI / `.gitnexusrc` / built-in defaults, and records both arrays.
+To preserve a previous one-off selection, pass those flags again or put them in
+`.gitnexusrc`. Subsequent unchanged runs retain the fast path.
+
+
 The effective `--max-file-size` / `GITNEXUS_MAX_FILE_SIZE` limit also bounds lazy
 source-text reads during CSV export (512 KiB by default). Relationship providers
 may retain supplemental File nodes for oversized resources; those nodes and their

@@ -1909,6 +1909,18 @@ async function runFullAnalysisInner(
     options = { ...options, force: true };
   }
 
+  // The fingerprint cannot recover the selection used by an older run.
+  // Rebuild once to publish its coverage receipt even on a clean checkout.
+  if (
+    existingMeta &&
+    hasGitDir(repoPath) &&
+    (!Array.isArray(existingMeta.indexCoverage?.scopeRules) ||
+      !Array.isArray(existingMeta.indexCoverage?.includeExtensions))
+  ) {
+    log('Index coverage selection was not recorded; forcing a full rebuild.');
+    options = { ...options, force: true };
+  }
+
   // ── Early-return: already up to date ──────────────────────────────
   if (
     existingMeta &&
@@ -4234,6 +4246,8 @@ async function runFullAnalysisInner(
       indexCoverage: hasGitDir(repoPath)
         ? {
             maxFileSizeBytes: getMaxFileSizeBytes(),
+            scopeRules: [...(options.scopeRules ?? [])],
+            includeExtensions: [...(options.includeExtensions ?? [])],
             dirtyPaths: (
               listWorkingTreeDirtyPaths(repoPath) ?? Object.keys(newFileHashesRecord)
             ).filter(

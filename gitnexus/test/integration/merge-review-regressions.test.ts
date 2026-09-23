@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { detectIndexContentDrift } from '../../src/core/index-content-drift.js';
 import { runFullAnalysis } from '../../src/core/run-analyze.js';
 import { initLbug, closeLbug, executeQuery } from '../../src/core/lbug/lbug-adapter.js';
 import { getStoragePaths, loadMeta, saveMeta } from '../../src/storage/repo-manager.js';
@@ -96,6 +97,39 @@ describe.skipIf(process.platform === 'win32')('merge review regressions', () => 
     await saveMeta(storage, meta);
     expect((await analyze()).alreadyUpToDate).not.toBe(true);
     expect((await analyze()).alreadyUpToDate).toBe(true);
+  }, 180_000);
+
+  it('persists scoped coverage, migrates old receipts, and does not reuse receipts as defaults', async () => {
+    await write('src/a.ts', 'export function alpha() { return 1; }');
+    await write('other/b.ts', 'export function beta() { return 2; }');
+    await write('src/readme.md', 'outside extension');
+    commit();
+    const options = { scopeRules: ['src/'], includeExtensions: ['TS'] };
+    await analyze(options);
+    const storage = getStoragePaths(repo.dbPath).storagePath;
+    let meta = (await loadMeta(storage))!;
+    expect(meta.indexCoverage).toMatchObject(options);
+    expect(
+      await detectIndexContentDrift(repo.dbPath, meta.fileHashes, meta.indexCoverage),
+    ).toMatchObject({ kind: 'current' });
+    expect((await analyze(options)).alreadyUpToDate).toBe(true);
+    // A clean checkout with the same input fingerprint must still upgrade a legacy receipt.
+    delete meta.indexCoverage!.scopeRules;
+    delete meta.indexCoverage!.includeExtensions;
+    await saveMeta(storage, meta);
+    expect((await analyze(options)).alreadyUpToDate).not.toBe(true);
+    meta = (await loadMeta(storage))!;
+    expect(meta.indexCoverage).toMatchObject(options);
+    expect((await analyze(options)).alreadyUpToDate).toBe(true);
+    // Omitting CLI options means defaults, not the previous receipt's selection.
+    expect((await analyze()).alreadyUpToDate).not.toBe(true);
+    meta = (await loadMeta(storage))!;
+    expect(meta.indexCoverage).toMatchObject({ scopeRules: [], includeExtensions: [] });
+    expect(Object.keys(meta.fileHashes!)).toContain('other/b.ts');
+    expect(Object.keys(meta.fileHashes!)).toContain('src/readme.md');
+    expect(
+      await detectIndexContentDrift(repo.dbPath, meta.fileHashes, meta.indexCoverage),
+    ).toMatchObject({ kind: 'current' });
   }, 180_000);
 
   it('adds, retains without duplicates, and removes the Unity root on incremental writes', async () => {

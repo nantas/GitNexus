@@ -123,6 +123,7 @@ async function seedIndexedRepo(
     indexedAt: new Date().toISOString(),
     schemaFingerprint: SCHEMA_FINGERPRINT,
     analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+    indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
     analysisFeatures: CURRENT_ANALYSIS_FEATURES,
     runnerIdentity: resolveAnalyzerRunnerIdentity(
       pathToFileURL(path.resolve(__dirname, '../../src/core/run-analyze.ts')).href,

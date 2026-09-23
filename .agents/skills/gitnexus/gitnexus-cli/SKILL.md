@@ -93,6 +93,18 @@ $GN status
 
 Shows whether the current repo has a GitNexus index, when it was last updated, and symbol/relationship counts. Use this to check if re-indexing is needed.
 
+For working-tree freshness, run `status` without `--repo`: it compares content
+using the last successful analysis's `indexCoverage` scope/extensions and size
+limit. Out-of-scope edits do not cause content drift; covered additions, edits
+and removals still do. HEAD and analyzer identity checks also apply.
+
+After changing scope/extensions in `.gitnexusrc`, run analyze to apply them.
+For legacy receipts missing those filters, rerun analyze once with the intended
+CLI flags or `.gitnexusrc` defaults to record coverage; until then status keeps a
+conservative scan that may include out-of-scope additions. Metadata receipts
+are index state, not option defaults. `status --repo` reports registered-index
+availability rather than working-tree freshness.
+
 ### clean — Delete the index
 
 ```bash

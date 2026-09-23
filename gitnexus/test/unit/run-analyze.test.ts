@@ -71,6 +71,7 @@ describe('run-analyze module', () => {
         // alreadyUpToDate fast path this test exercises.
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
       };
@@ -116,6 +117,7 @@ describe('run-analyze module', () => {
         indexedAt,
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
         capabilities: {
@@ -178,6 +180,7 @@ describe('run-analyze module', () => {
         indexedAt: new Date().toISOString(),
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
       };
@@ -228,6 +231,7 @@ describe('run-analyze module', () => {
         indexedAt: new Date().toISOString(),
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
       };
@@ -275,6 +279,7 @@ describe('run-analyze module', () => {
         indexedAt: new Date().toISOString(),
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
       };
@@ -287,6 +292,7 @@ describe('run-analyze module', () => {
         indexedAt: new Date().toISOString(),
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
       };
@@ -328,6 +334,7 @@ describe('run-analyze module', () => {
         indexedAt: new Date().toISOString(),
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity: currentRunnerIdentity(),
       };
@@ -886,6 +893,7 @@ describe('run-analyze module', () => {
         branch: 'main',
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       };
@@ -898,6 +906,7 @@ describe('run-analyze module', () => {
         branch: 'feature/x',
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       });
@@ -956,6 +965,7 @@ describe('run-analyze module', () => {
         branch: 'main',
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       });
@@ -967,6 +977,7 @@ describe('run-analyze module', () => {
         branch: 'feature/x',
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       });
@@ -1017,6 +1028,7 @@ describe('run-analyze module', () => {
         branch: 'main',
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       });
@@ -1062,6 +1074,7 @@ describe('run-analyze module', () => {
         branch: 'main',
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       });
@@ -1073,6 +1086,7 @@ describe('run-analyze module', () => {
         branch: 'feature/x',
         schemaFingerprint: SCHEMA_FINGERPRINT,
         analysisInputFingerprint: DEFAULT_INPUT_FINGERPRINT,
+        indexCoverage: { maxFileSizeBytes: 524288, scopeRules: [], includeExtensions: [] },
         analysisFeatures: CURRENT_ANALYSIS_FEATURES,
         runnerIdentity,
       });
