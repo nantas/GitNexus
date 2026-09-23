@@ -5,7 +5,7 @@ import type { ProcessesOutput } from './processes.js';
 
 export const unityProcessSubtypePhase: PipelinePhase = {
   name: 'unity-process-subtype',
-  deps: ['processes', 'unity-lifecycle'],
+  deps: ['processes', 'unity-lifecycle', 'unity-processes'],
   async execute(ctx, deps) {
     const calls = new Map<string, GraphRelationship>();
     // Streamed object views intentionally omit reasons. Read the interned

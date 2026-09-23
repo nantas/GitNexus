@@ -195,6 +195,65 @@ function hasTrailingLineEnding(source: string): boolean {
   return /\r?\n$/.test(source);
 }
 
+// Track only active source: disabled preprocessor text need not be valid C#.
+// In particular, an unmatched comment in a disabled branch must not hide #endif.
+interface DirectiveLexicalState {
+  blockComment: boolean;
+  verbatimString: boolean;
+  rawQuotes: number;
+}
+
+function advanceDirectiveLexicalState(line: string, state: DirectiveLexicalState): void {
+  for (let i = 0; i < line.length; i += 1) {
+    if (state.blockComment) {
+      if (line.startsWith('*/', i)) {
+        state.blockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (state.rawQuotes) {
+      if (line.startsWith('"'.repeat(state.rawQuotes), i)) {
+        i += state.rawQuotes - 1;
+        state.rawQuotes = 0;
+      }
+      continue;
+    }
+    if (state.verbatimString) {
+      if (line[i] === '"') {
+        if (line[i + 1] === '"') i += 1;
+        else state.verbatimString = false;
+      }
+      continue;
+    }
+    if (line.startsWith('//', i)) break;
+    if (line.startsWith('/*', i)) {
+      state.blockComment = true;
+      i += 1;
+    } else if (line[i] === '"') {
+      let quotes = 1;
+      while (line[i + quotes] === '"') quotes += 1;
+      if (line[i - 1] === '@' || (line[i - 1] === '$' && line[i - 2] === '@')) {
+        state.verbatimString = true;
+      } else if (quotes >= 3) {
+        state.rawQuotes = quotes;
+        i += quotes - 1;
+      } else {
+        // Ordinary strings cannot span lines; skip escaped quotes and comment markers.
+        for (i += 1; i < line.length; i += 1) {
+          if (line[i] === '\\') i += 1;
+          else if (line[i] === '"') break;
+        }
+      }
+    } else if (line[i] === "'") {
+      for (i += 1; i < line.length; i += 1) {
+        if (line[i] === '\\') i += 1;
+        else if (line[i] === "'") break;
+      }
+    }
+  }
+}
+
 export function normalizeCSharpPreprocessorBranches(
   source: string,
   defines: Set<string>,
@@ -224,6 +283,11 @@ export function normalizeCSharpPreprocessorBranches(
   const stack: ConditionalFrame[] = [];
   const undefinedSymbols = new Set<string>();
 
+  const lexical: DirectiveLexicalState = {
+    blockComment: false,
+    verbatimString: false,
+    rawQuotes: 0,
+  };
   let active = true;
   let changed = false;
   let directivesSeen = 0;
@@ -236,7 +300,11 @@ export function normalizeCSharpPreprocessorBranches(
       outputLines.push(line);
       continue;
     }
-    const directive = line.match(/^\s*#\s*(if|elif|else|endif)\b(.*)$/);
+    const directive =
+      !lexical.blockComment &&
+      !lexical.verbatimString &&
+      !lexical.rawQuotes &&
+      line.match(/^\s*#\s*(if|elif|else|endif)\b(.*)$/);
     if (directive) {
       directivesSeen += 1;
       changed = true;
@@ -296,6 +364,7 @@ export function normalizeCSharpPreprocessorBranches(
     }
 
     if (active) {
+      advanceDirectiveLexicalState(line, lexical);
       outputLines.push(line);
       continue;
     }

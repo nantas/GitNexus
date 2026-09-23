@@ -1,3 +1,4 @@
+import { unityProcessesPhase } from './pipeline-phases/unity-processes.js';
 import { summarizeCSharpContainers } from '../tree-sitter/csharp-container-diagnostics.js';
 import { unityResourcesPhase } from './pipeline-phases/unity-resources.js';
 import { unityLifecyclePhase } from './pipeline-phases/unity-lifecycle.js';
@@ -376,6 +377,9 @@ export function buildPhaseList(options?: PipelineOptions): PipelinePhase[] {
           enabledWhen: (o) => !o.skipGraphPhases && o.skipDerivedGraphPhases !== true,
         },
       )
+      .register(unityProcessesPhase, {
+        enabledWhen: (o) => !o.skipGraphPhases && !o.skipDerivedGraphPhases,
+      })
       .register(unityProcessSubtypePhase, {
         enabledWhen: (o) => !o.skipGraphPhases && !o.skipDerivedGraphPhases,
       })
@@ -571,6 +575,7 @@ export const runPipelineFromRepo = async (
               'processes',
               'unity-resources',
               'unity-lifecycle',
+              'unity-processes',
               'unity-process-subtype',
             ].includes(p.name) && !results.has(p.name),
         )

@@ -27,17 +27,23 @@ Pipeline 通过 `buildPhaseList` 注册显式依赖的 phase（`gitnexus/src/cor
 
 ```text
 scan → structure → parse → scopeResolution → … → communities
-  → unity-resources → unity-lifecycle → processes → unity-process-subtype
+  → unity-resources → unity-lifecycle → processes → unity-processes → unity-process-subtype
 ```
 
 1. `unity-resources`：依赖 `communities/scopeResolution/structure`。独立模块 `unity-resource-scan.ts` 扫描资源路径并按 scope 过滤，随后由 `processUnityResources` 写入 Unity 绑定与 prefab-source 边。
 2. `unity-lifecycle`：依赖 `unity-resources/parse`。基类线索取同一 normalized AST 的 parse report，并与 Class 的文件/名称/行号对齐；不依赖外部引擎类型的虚拟继承节点。检测 `Assets/*.cs` 后加载目标仓 Unity 配置，调用 `applyUnityLifecycleSyntheticCalls`。
 3. `processes`：注册时增加 `unity-lifecycle` 依赖，确保追踪前已注入合成 CALLS；上游 `process-processor.ts` 保持原实现。
-4. `unity-process-subtype`：依赖 `processes/unity-lifecycle`，对所有项目（含非 Unity 项目）沿过程 trace 的 CALLS reason 回写 `processSubtype/runtimeChainConfidence/sourceReasons/sourceConfidences` 与步骤证据。流式图必须通过 `forEachRelationshipFields` 读取真实 reason；对象视图的 `streamed` 占位不能用于分类。`STEP_IN_PROCESS` 保留到 subtype 完成后统一落库。
-5. Unity phases 与 derived phases 一同受 `skipGraphPhases/skipDerivedGraphPhases` 控制；deferred derived run 包含三个 Unity phases。
+4. `unity-process-subtype`：依赖 `processes/unity-lifecycle/unity-processes`，对所有项目（含非 Unity 项目）沿过程 trace 的 CALLS reason 回写 `processSubtype/runtimeChainConfidence/sourceReasons/sourceConfidences` 与步骤证据。流式图必须通过 `forEachRelationshipFields` 读取真实 reason；对象视图的 `streamed` 占位不能用于分类。`STEP_IN_PROCESS` 保留到 subtype 完成后统一落库。
+5. Unity phases 与 derived phases 一同受 `skipGraphPhases/skipDerivedGraphPhases` 控制；deferred derived run 包含四个 Unity phases。
 6. 增量写入：`Method:unity-runtime-root` 与 Community/Process 同属派生层。重算时先删除旧根及关联边，再从完整新图一并写入根和所有关联边；无文件变化而保留派生层时不删除、不重复插入。最后一个 lifecycle host 消失时清理旧根。
 7. parity seed 在 `core/run-analyze.ts` 成功发布索引时写入 `unity-parity-seed.json`，供 MCP hydration 使用。
 8. 资源关系补建的 File 节点保留资源身份和边；CSV 导出读取全文时同样遵守 `--max-file-size` / `GITNEXUS_MAX_FILE_SIZE` 上限（默认 512 KiB），超限资源的 `File.content` 留空。该限制不影响 Unity 资源扫描、绑定提取或 lifecycle 注入，避免大 prefab 绕过扫描预算并撑爆数据库 COPY。
+
+### 2.1.0 有界 lifecycle process 补充
+
+`unity-processes` 依赖 `processes/unity-lifecycle/communities`，在通用过程完成后补足 runtime-root 过程至最多 8 条（保留通用过程，不删已有结果）。只有真实 `Method:unity-runtime-root` 和 `unity-lifecycle-synthetic` 根边才启用。根首跳最多 32 分支，后续最多 4 分支，深度最多 10，最多 4096 个排队/访问状态；按 callback/terminal 去重，优先不同 callback，再按深度和稳定路径顺序选择。新增过程 ID 由路径 SHA-256 派生。
+
+补充器与上游一致排除 confidence < 0.5 及 global-name-fallback 等启发式边，流式图读取真实字段列；新增 Process/STEP_IN_PROCESS 随通用派生层统一持久化、增量清理，subtype phase 统一标注 medium lifecycle 证据。日志报告 added/walks/branchesDropped/depthCapped/truncated。这是有界采样，不是完整调用路径枚举，也不是 verifier-core 的 verified_full。`process-processor.ts` 保持上游零 patch。
 
 ### 2.1.1 Scan-Context 承载器契约（As-Built + Design Direction）
 

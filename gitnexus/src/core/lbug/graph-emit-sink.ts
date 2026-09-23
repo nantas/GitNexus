@@ -393,7 +393,10 @@ export class GraphEmitSink implements KnowledgeGraph, GraphEmitControl {
         let ok = true;
         for (const part of tail.slice(1).split(':')) {
           const n = Number(part);
-          if (part.length === 0 || !Number.isInteger(n)) {
+          // Unity object IDs are signed int64 strings. Number() rounds IDs
+          // outside the safe range, collapsing distinct component edges.
+          // Non-canonical numeric spellings must also retain their exact ID.
+          if (!Number.isSafeInteger(n) || String(n) !== part) {
             ok = false;
             break;
           }

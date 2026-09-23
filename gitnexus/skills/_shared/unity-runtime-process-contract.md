@@ -52,3 +52,7 @@ When on-demand verification is used, report `runtime_chain.status`, `evidence_le
   - `policy-adjusted`: user-visible result after hydration policy is applied
 - If `hydration_policy=strict` and `hydrationMeta.fallbackToCompact=true`, the result is downgraded policy-adjusted output and is not closure.
 - In that downgraded state, rerun with parity before final conclusions.
+
+## Analyze-time lifecycle sampling
+
+A dedicated `unity-processes` phase supplements generic runtime-root processes to eight bounded samples before subtype annotation. It uses real lifecycle CALLS, excludes heuristic/low-confidence calls, and logs truncation. Generic `process-processor` stays upstream-compatible. A process count (including eight samples) is never proof of complete coverage or verifier-core closure; use graph anchors and on-demand verification for closure.

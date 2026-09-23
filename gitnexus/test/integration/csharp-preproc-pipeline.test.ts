@@ -9,25 +9,33 @@ async function createTempRepo(): Promise<{ repoDir: string; csprojPath: string }
   const csprojPath = path.join(repoDir, 'Assembly-CSharp.csproj');
   const sourcePath = path.join(repoDir, 'Feature.cs');
 
-  await fs.writeFile(csprojPath, [
-    '<Project Sdk="Microsoft.NET.Sdk">',
-    '  <PropertyGroup>',
-    '    <TargetFramework>netstandard2.1</TargetFramework>',
-    '    <DefineConstants>UNITY_EDITOR;TRACE</DefineConstants>',
-    '  </PropertyGroup>',
-    '</Project>',
-  ].join('\n'), 'utf-8');
+  await fs.writeFile(
+    csprojPath,
+    [
+      '<Project Sdk="Microsoft.NET.Sdk">',
+      '  <PropertyGroup>',
+      '    <TargetFramework>netstandard2.1</TargetFramework>',
+      '    <DefineConstants>UNITY_EDITOR;TRACE</DefineConstants>',
+      '  </PropertyGroup>',
+      '</Project>',
+    ].join('\n'),
+    'utf-8',
+  );
 
-  await fs.writeFile(sourcePath, [
-    'namespace Demo;',
-    'public class Feature {',
-    '#if UNITY_EDITOR',
-    '  public void EditorOnly() {}',
-    '#else',
-    '  public void RuntimeOnly() {}',
-    '#endif',
-    '}',
-  ].join('\n'), 'utf-8');
+  await fs.writeFile(
+    sourcePath,
+    [
+      'namespace Demo;',
+      'public class Feature {',
+      '#if UNITY_EDITOR',
+      '  public void EditorOnly() {}',
+      '#else',
+      '  public void RuntimeOnly() {}',
+      '#endif',
+      '}',
+    ].join('\n'),
+    'utf-8',
+  );
 
   return { repoDir, csprojPath };
 }
@@ -53,6 +61,26 @@ describe('csharp preprocessor normalization in pipeline', () => {
       expect(result.csharpPreprocDiagnostics?.enabled).toBe(true);
       expect(result.csharpPreprocDiagnostics?.normalizedFiles).toBe(1);
       expect(result.csharpPreprocDiagnostics?.defineSymbolCount).toBe(2);
+    } finally {
+      await fs.rm(repoDir, { recursive: true, force: true });
+    }
+  });
+  it('does not extract phantom methods from a commented preprocessor block', async () => {
+    const { repoDir, csprojPath } = await createTempRepo();
+    try {
+      await fs.writeFile(
+        path.join(repoDir, 'Commented.cs'),
+        '/*#if OFF\nclass Hidden { void Ghost() {} }\n#endif */',
+      );
+      const result = await runPipelineFromRepo(repoDir, () => {}, {
+        includeExtensions: ['.cs'],
+        csharpDefineCsproj: csprojPath,
+        skipGraphPhases: true,
+      });
+      const names = [...result.graph.iterNodes()].map((node) => node.properties.name);
+      expect(names).toContain('EditorOnly');
+      expect(names).not.toContain('Ghost');
+      expect(names).not.toContain('Hidden');
     } finally {
       await fs.rm(repoDir, { recursive: true, force: true });
     }

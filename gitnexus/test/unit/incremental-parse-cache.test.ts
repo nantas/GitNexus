@@ -276,8 +276,9 @@ describe('PARSE_CACHE_VERSION', () => {
   // silently un-fixed on exactly the incremental path most users are on.
   // Moved 98 -> 99 for #3190: lexical import provenance and corrected export
   // evidence. origin/main took 98 for #3219; 99 is the next free value.
-  it('pins SCHEMA_BUMP to 99 so concurrent bumps cannot silently collide (#2766, #3015, #3088, #2885, #3128, #2865, #3130, #1432, #3161, #3179, #3219, #3190)', () => {
-    expect(Number(PARSE_CACHE_VERSION.split('+', 1)[0])).toBe(100);
+  // v101 rejects phantom C# facts from preprocessing comment directives.
+  it('pins SCHEMA_BUMP to 101 so concurrent bumps cannot silently collide (#2766, #3015, #3088, #2885, #3128, #2865, #3130, #1432, #3161, #3179, #3219, #3190)', () => {
+    expect(Number(PARSE_CACHE_VERSION.split('+', 1)[0])).toBe(101);
     expect(PARSE_CACHE_BUCKET_COUNT).toBe(128);
     // The PREVIOUS version must fail the reuse gate, not merely differ from the
     // current one — a hardcoded number outside the conflict hunk rebases cleanly
@@ -285,7 +286,7 @@ describe('PARSE_CACHE_VERSION', () => {
     // Every nearby historical or in-flight value is rejected.
     for (const taken of [
       59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81,
-      82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98,
+      82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100,
     ]) {
       expect(Number(PARSE_CACHE_VERSION.split('+', 1)[0])).not.toBe(taken);
     }
@@ -420,22 +421,25 @@ describe('loadParseCache / saveParseCache (round-trip)', () => {
     }
   });
 
-  it('returns an empty cache on version mismatch (next-run regen)', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'gnx-pc-'));
-    try {
-      // Write a cache file with a different version directly
-      const fs = await import('fs/promises');
-      await fs.writeFile(
-        path.join(dir, 'parse-cache.json'),
-        JSON.stringify({ version: 'foreign-99', entries: { h: [] } }),
-        'utf-8',
-      );
-      const loaded = await loadParseCache(dir);
-      expect(loaded.entries.size).toBe(0); // mismatch → empty
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
+  it.each(['foreign-99', PARSE_CACHE_VERSION.replace(/^\d+/, '100')])(
+    'returns an empty cache on version mismatch %s (next-run regen)',
+    async (version) => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'gnx-pc-'));
+      try {
+        // Write a cache file with a different version directly
+        const fs = await import('fs/promises');
+        await fs.writeFile(
+          path.join(dir, 'parse-cache.json'),
+          JSON.stringify({ version, entries: { h: [] } }),
+          'utf-8',
+        );
+        const loaded = await loadParseCache(dir);
+        expect(loaded.entries.size).toBe(0); // mismatch → empty
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('returns an empty cache on corrupt JSON', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'gnx-pc-'));

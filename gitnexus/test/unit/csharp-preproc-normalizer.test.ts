@@ -91,3 +91,32 @@ describe('preprocessSource offset contract', () => {
     }
   });
 });
+
+describe('directive lexical context', () => {
+  it.each([
+    '/*#if OFF\nclass Hidden { void Ghost() {} }\n#endif */',
+    '/*\n#if OFF\n*/\nclass Visible {}',
+    'var text = @"\n#if OFF\n";\nclass Visible {}',
+    'var text = """\n#if OFF\n""";\nclass Visible {}',
+    'var text = "/*"; // /*\n/*\n#endif */',
+  ])('preserves directive-looking text inside comments and literals: %s', (source) => {
+    const out = normalizeCSharpPreprocessorBranches(source, new Set());
+    expect(out.normalizedText).toBe(source);
+    expect(out.diagnostics.directivesSeen).toBe(0);
+  });
+
+  it('does not let disabled source comments swallow the matching endif', () => {
+    const source = '#if OFF\n/*\n#endif\nclass Visible {}';
+    const out = normalizeCSharpPreprocessorBranches(source, new Set());
+    expect(out.normalizedText).toContain('class Visible {}');
+    expect(out.diagnostics.unterminatedIfBlocks).toBe(0);
+  });
+
+  it('resumes directives after a block comment closes', () => {
+    const source = '/*\n#if OFF\n*/\n#if ON\nclass Visible {}\n#else\nclass Hidden {}\n#endif';
+    const out = normalizeCSharpPreprocessorBranches(source, new Set(['ON']));
+    expect(out.normalizedText).toContain('class Visible {}');
+    expect(out.normalizedText).not.toContain('class Hidden {}');
+    expect(out.diagnostics.directivesSeen).toBe(3);
+  });
+});

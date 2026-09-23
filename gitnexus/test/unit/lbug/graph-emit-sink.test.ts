@@ -311,6 +311,28 @@ describe('GraphEmitSink IO faults', () => {
 });
 
 describe('dedup key exactness', () => {
+  it('preserves distinct Unity int64 component IDs while deduplicating exact repeats', async () => {
+    const sink = new GraphEmitSink(createKnowledgeGraph(), csvDir);
+    sink.beginStreaming();
+    const sourceId = 'Class:Assets/Demo.cs:Demo',
+      targetId = 'File:Assets/Demo.prefab';
+    for (const objectId of ['-730060000000000001', '-730060000000000002', '-730060000000000001']) {
+      sink.addRelationship({
+        id: `UNITY_COMPONENT_INSTANCE:${sourceId}->${targetId}:${objectId}`,
+        sourceId,
+        targetId,
+        type: 'UNITY_COMPONENT_INSTANCE',
+        confidence: 1,
+        reason: objectId,
+      });
+    }
+    const count = sink.relationshipCount;
+    const manifest = sink.finalize();
+    expect(count).toBe(2);
+    expect(manifest.totalRows).toBe(2);
+    expect(await dataRows(manifest.relsByPair.get('Class|File')!.csvPath)).toHaveLength(2);
+  });
+
   const endpoints = { sourceId: fnId('f'), targetId: fnId('g') };
   const withId = (id: string): GraphRelationship => ({
     id,

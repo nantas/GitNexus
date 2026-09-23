@@ -86,6 +86,7 @@ const FULL_ORDER = [
   'unity-resources',
   'unity-lifecycle',
   'processes',
+  'unity-processes',
   'unity-process-subtype',
 ];
 
@@ -133,6 +134,7 @@ describe('buildPhaseList parity (registry refactor, #2080)', () => {
       'unity-resources',
       'unity-lifecycle',
       'processes',
+      'unity-processes',
       'unity-process-subtype',
     ]);
   });
