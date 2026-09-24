@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 import { glob } from 'glob';
 import { buildMetaIndex } from './meta-index.js';
 import type { MergedUnityComponent, UnityObjectLayer } from './override-merger.js';
@@ -114,7 +116,12 @@ export async function resolveUnityBindings(input: ResolveInput): Promise<Resolve
         resourceSizeCache,
       );
     if (shouldUseLightweightBinding) {
-      resourceBindings.push(createLightweightBinding(hit));
+      resourceBindings.push(...await createLightweightBindings(
+        input.repoRoot,
+        hit,
+        scriptGuid,
+        input.scanContext?.assetGuidToPath,
+      ));
       continue;
     }
 
@@ -171,24 +178,95 @@ function applyResourceAllowlist(
   return hits.filter((hit) => normalizedAllowlist.has(normalizePath(hit.resourcePath)));
 }
 
-function createLightweightBinding(hit: UnityResourceGuidHit): ResolvedUnityBinding {
-  return {
-    resourcePath: hit.resourcePath,
-    resourceType: hit.resourceType,
-    bindingKind: hit.resourceType === 'scene' ? 'scene-override' : 'direct',
-    componentObjectId: `line-${hit.line}`,
-    lightweight: true,
-    evidence: {
-      line: hit.line,
-      lineText: hit.lineText,
-    },
-    serializedFields: {
-      scalarFields: [],
-      referenceFields: [],
-    },
-    resolvedReferences: [],
-    assetRefPaths: [],
+/** Extract only external GUID fields from large MonoBehaviour blocks, without retaining YAML bodies. */
+async function createLightweightBindings(
+  repoRoot: string,
+  hit: UnityResourceGuidHit,
+  scriptGuid: string,
+  assetGuidToPath?: Map<string, string>,
+): Promise<ResolvedUnityBinding[]> {
+  const stream = createReadStream(path.join(repoRoot, normalizePath(hit.resourcePath)), { encoding: 'utf-8' });
+  const reader = createInterface({ input: stream, crlfDelay: Infinity });
+  const bindings: ResolvedUnityBinding[] = [];
+  let objectId: string | undefined;
+  let stripped = false;
+  let inMonoBehaviour = false;
+  let matchesScript = false;
+  let fieldName: string | undefined;
+  let listIndex = 0;
+  let references: UnityResolvedReference[] = [];
+
+  const flush = () => {
+    if (!inMonoBehaviour || !matchesScript || !objectId) return;
+    bindings.push({
+      resourcePath: hit.resourcePath,
+      resourceType: hit.resourceType,
+      bindingKind: stripped ? (hit.resourceType === 'scene' ? 'scene-override' : 'nested')
+        : (hit.resourceType === 'scene' ? 'scene-override' : 'direct'),
+      componentObjectId: objectId,
+      lightweight: true,
+      evidence: { line: hit.line, lineText: hit.lineText },
+      serializedFields: { scalarFields: [], referenceFields: [] },
+      resolvedReferences: references,
+      assetRefPaths: [],
+    });
   };
+
+  try {
+    for await (const line of reader) {
+      const header = line.match(/^--- !u!\d+ &(-?\d+)(?:\s+(\w+))?\s*$/);
+      if (header) {
+        flush();
+        objectId = header[1];
+        stripped = header[2] === 'stripped';
+        inMonoBehaviour = false;
+        matchesScript = false;
+        fieldName = undefined;
+        references = [];
+        continue;
+      }
+      if (!objectId) continue;
+      if (/^MonoBehaviour:\s*$/.test(line)) {
+        inMonoBehaviour = true;
+        continue;
+      }
+      if (!inMonoBehaviour) continue;
+
+      const field = line.match(/^ {2}(?!-)([^ ][^:]*):(.*)$/);
+      if (field) {
+        fieldName = field[1].trim();
+        listIndex = 0;
+        const value = field[2].trim();
+        if (fieldName === 'm_Script') {
+          matchesScript = extractGuidFromScriptField(value)?.toLowerCase() === scriptGuid.toLowerCase();
+        } else if (!fieldName.startsWith('m_')) {
+          const ref = parseObjectReference(value);
+          if (ref?.guid) {
+            references.push(resolveReferenceCandidate({
+              fieldName, sourceLayer: baseLayerName(hit.resourceType),
+              fileId: ref.fileId, guid: ref.guid, fromList: false,
+            }, new Map(), hit.resourcePath, assetGuidToPath));
+          }
+        }
+        continue;
+      }
+
+      if (!fieldName || fieldName.startsWith('m_')) continue;
+      const listRef = line.match(/^ {4}-\s*(\{[^\n]*\})\s*$/);
+      if (!listRef) continue;
+      const ref = parseObjectReference(listRef[1]);
+      if (!ref?.guid) continue;
+      references.push(resolveReferenceCandidate({
+        fieldName, sourceLayer: baseLayerName(hit.resourceType),
+        fileId: ref.fileId, guid: ref.guid, fromList: true, listIndex: listIndex++,
+      }, new Map(), hit.resourcePath, assetGuidToPath));
+    }
+    flush();
+  } finally {
+    reader.close();
+    stream.destroy();
+  }
+  return bindings;
 }
 
 async function isLargeResourceForDeepParse(

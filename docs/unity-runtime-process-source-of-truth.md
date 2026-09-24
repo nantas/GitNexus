@@ -53,6 +53,7 @@ scan → structure → parse → scopeResolution → … → communities
    - `scan-context` 已承担 Unity 资源扫描阶段的核心索引输入（脚本 GUID 命中、资源路径集合、GUID 映射等）。
    - `scan-context` 在同次资源扫描中以流式方式产出 `PrefabInstance.m_SourcePrefab` 轻量线索（streaming delivery）。
    - `processUnityResources` 在 `unity-resources` 统一消费 `scanContext.streamPrefabSourceRefs(...)` 写入 `UNITY_ASSET_GUID_REF`，并统一执行 dedupe/diagnostics/reason payload。
+   - 超过 512 KiB 的资源由 `resolver` 逐行定位命中脚本的 `MonoBehaviour`，只提取普通序列化字段的外部 GUID 引用，不缓存或深解析完整 YAML。`processUnityResources` 沿原有绑定写图路径生成 `UNITY_ASSET_GUID_REF`；`m_SourcePrefab` 仍只走 scan-context 的独立扫描与去重路径。
    - `scan-context does not write graph edges`; 图谱写入职责仅在 `processUnityResources`。
 2. Design Direction（重构方向，待实现）：
    - `scan-context` 持续作为可扩展的“资源字段识别承载器（resource signal carrier）”。

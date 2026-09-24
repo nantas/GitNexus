@@ -150,6 +150,61 @@ test('fixture run emits scene->prefab UNITY_ASSET_GUID_REF and keeps script ref 
   assert.ok(scriptRefs.length > 0);
 });
 
+test('large prefab retains ordinary GUID fields without duplicating prefab-source references', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-large-guid-'));
+  const scriptPath = 'Assets/Scripts/Carrier.cs';
+  const targetPath = 'Assets/Data/Poison.asset';
+  const sourcePrefabPath = 'Assets/Prefabs/Source.prefab';
+  const scriptGuid = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const targetGuid = 'dd558a5720d6b394687c2c230446ab7c';
+  const sourceGuid = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  const resourcePaths = ['Assets/Prefabs/Small.prefab', 'Assets/Prefabs/Large.prefab'];
+
+  try {
+    for (const relative of [scriptPath, targetPath, sourcePrefabPath, ...resourcePaths]) {
+      await fs.mkdir(path.dirname(path.join(root, relative)), { recursive: true });
+    }
+    await fs.writeFile(path.join(root, scriptPath), 'public class Carrier {}');
+    await fs.writeFile(path.join(root, `${scriptPath}.meta`), `guid: ${scriptGuid}\n`);
+    await fs.writeFile(path.join(root, targetPath), '%YAML 1.1\n');
+    await fs.writeFile(path.join(root, `${targetPath}.meta`), `guid: ${targetGuid}\n`);
+    await fs.writeFile(path.join(root, sourcePrefabPath), '%YAML 1.1\n');
+    await fs.writeFile(path.join(root, `${sourcePrefabPath}.meta`), `guid: ${sourceGuid}\n`);
+    const content = (padding: string) => [
+      '--- !u!114 &100', 'MonoBehaviour:',
+      `  m_Script: {fileID: 11500000, guid: ${scriptGuid}, type: 3}`,
+      `  element: {fileID: 11400000, guid: ${targetGuid}, type: 2}`,
+      '--- !u!1001 &200', 'PrefabInstance:',
+      `  m_SourcePrefab: {fileID: 100100000, guid: ${sourceGuid}, type: 3}`,
+      '--- !u!114 &300', 'MonoBehaviour:',
+      '  m_Script: {fileID: 11500000, guid: cccccccccccccccccccccccccccccccc, type: 3}',
+      `  wrongTarget: {fileID: 11400000, guid: ${targetGuid}, type: 2}`,
+      padding,
+    ].join('\n');
+    await fs.writeFile(path.join(root, resourcePaths[0]), content(''));
+    await fs.writeFile(path.join(root, resourcePaths[1]), content(`#${'x'.repeat(600 * 1024)}`));
+
+    const graph = createKnowledgeGraph();
+    const fileId = generateId('File', scriptPath);
+    const classId = generateId('Class', `${scriptPath}:Carrier`);
+    graph.addNode({ id: fileId, label: 'File', properties: { name: 'Carrier.cs', filePath: scriptPath } });
+    graph.addNode({ id: classId, label: 'Class', properties: { name: 'Carrier', filePath: scriptPath } });
+    graph.addRelationship({ id: generateId('DEFINES', `${fileId}->${classId}`), type: 'DEFINES', sourceId: fileId, targetId: classId, confidence: 1, reason: '' });
+
+    const result = await processUnityResources(graph, { repoPath: root });
+    const refs = [...graph.iterRelationships()]
+      .filter((rel) => rel.type === 'UNITY_ASSET_GUID_REF')
+      .map((rel) => JSON.parse(String(rel.reason || '{}')));
+    assert.equal(result.bindingCount, 2);
+    assert.deepEqual(refs.filter((ref) => ref.fieldName === 'element').map((ref) => ref.resourcePath).sort(), [...resourcePaths].sort());
+    assert.equal(refs.filter((ref) => ref.fieldName === 'm_SourcePrefab').length, 2);
+    assert.equal(refs.filter((ref) => ref.fieldName === 'wrongTarget').length, 0);
+    assert.ok(refs.filter((ref) => ref.fieldName === 'element').every((ref) => ref.targetResourcePath === targetPath));
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('processUnityResources persists UNITY_RESOURCE_SUMMARY in LadybugDB', async () => {
   const graph = createKnowledgeGraph();
 
