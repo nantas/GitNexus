@@ -1,5 +1,6 @@
 import type { GraphNode, GraphRelationship, KnowledgeGraph } from '../graph/types.js';
 import { generateId } from '../../lib/utils.js';
+import { isHeuristicEdgeReason } from '../graph/edge-reasons.js';
 
 const PLACEHOLDER_RE = /(TODO|TBD|\/placeholder\/)/i;
 const UNITY_MONOBEHAVIOUR = 'MonoBehaviour';
@@ -17,6 +18,7 @@ const LIFECYCLE_CALLBACKS = new Set([
 ]);
 
 const SYNTHETIC_RUNTIME_ROOT_NAME = 'unity-runtime-root';
+const MAX_PROCESS_CALLBACKS = 256;
 export const SYNTHETIC_RUNTIME_ROOT_ID = generateId('Method', SYNTHETIC_RUNTIME_ROOT_NAME);
 
 export interface UnityLifecycleSyntheticConfig {
@@ -46,8 +48,68 @@ export interface UnityLifecycleSyntheticResult {
   loaderEdgeCount: number;
   hostCount: number;
   rejectedHostCount: number;
+  candidateCallbackCount: number;
+  truncatedCallbackCount: number;
+  uncoveredHostCount: number;
+  uncoveredHostIds: string[];
+  noTrustedCallsCount: number;
+  tiedScoreCount: number;
   runtimeRootNodeId?: string;
 }
+
+interface CallbackCandidate {
+  host: UnityLifecycleHost;
+  callback: GraphNode;
+  score: readonly [number, number, number, number];
+}
+
+const compareText = (left: string, right: string): number =>
+  left < right ? -1 : left > right ? 1 : 0;
+
+const normalizedPath = (node: GraphNode): string =>
+  String(node.properties.filePath ?? '').replaceAll('\\', '/');
+
+const compareCandidateIdentity = (left: CallbackCandidate, right: CallbackCandidate): number =>
+  compareText(normalizedPath(left.host.classNode), normalizedPath(right.host.classNode)) ||
+  compareText(String(left.host.classNode.properties.name), String(right.host.classNode.properties.name)) ||
+  compareText(String(left.callback.properties.name), String(right.callback.properties.name)) ||
+  compareText(left.callback.id, right.callback.id) ||
+  compareText(left.host.classNode.id, right.host.classNode.id);
+
+const compareCandidateValue = (left: CallbackCandidate, right: CallbackCandidate): number => {
+  for (let index = 0; index < left.score.length; index++) {
+    if (left.score[index] !== right.score[index]) return right.score[index] - left.score[index];
+  }
+  return compareCandidateIdentity(left, right);
+};
+
+const trustedCalls = (graph: KnowledgeGraph): Map<string, Set<string>> => {
+  const calls = new Map<string, Set<string>>();
+  for (const rel of graph.iterRelationships()) {
+    if (rel.type !== 'CALLS' || !(rel.confidence >= 0.5) || isHeuristicEdgeReason(rel.reason)) continue;
+    if (!graph.getNode(rel.sourceId) || !graph.getNode(rel.targetId)) continue;
+    const targets = calls.get(rel.sourceId) ?? new Set<string>();
+    targets.add(rel.targetId);
+    calls.set(rel.sourceId, targets);
+  }
+  return calls;
+};
+
+const scoreCallback = (
+  callbackId: string,
+  calls: ReadonlyMap<string, ReadonlySet<string>>,
+): CallbackCandidate['score'] => {
+  const direct = [...(calls.get(callbackId) ?? [])].filter((id) => id !== callbackId);
+  let twoHopPaths = 0;
+  for (const callee of direct) {
+    for (const terminal of calls.get(callee) ?? []) {
+      if (terminal !== callbackId && terminal !== callee) twoHopPaths++;
+      if (twoHopPaths >= 4) break;
+    }
+    if (twoHopPaths >= 4) break;
+  }
+  return [Number(twoHopPaths > 0), Math.min(4, twoHopPaths), Number(direct.length > 0), Math.min(4, direct.length)];
+};
 
 export const detectUnityLifecycleHosts = (
   graph: KnowledgeGraph,
@@ -139,46 +201,124 @@ export const applyUnityLifecycleSyntheticCalls = (
       loaderEdgeCount: 0,
       hostCount: 0,
       rejectedHostCount,
+      candidateCallbackCount: 0,
+      truncatedCallbackCount: 0,
+      uncoveredHostCount: 0,
+      uncoveredHostIds: [],
+      noTrustedCallsCount: 0,
+      tiedScoreCount: 0,
     };
   }
 
   ensureRuntimeRootNode(graph);
 
   const existingPairs = new Set<string>();
+  const existingRootCallbacks = new Set<string>();
   for (const rel of graph.iterRelationships()) {
-    if (rel.type === 'CALLS') existingPairs.add(`${rel.sourceId}->${rel.targetId}`);
+    if (rel.type !== 'CALLS') continue;
+    existingPairs.add(`${rel.sourceId}->${rel.targetId}`);
+    if (rel.sourceId === SYNTHETIC_RUNTIME_ROOT_ID && rel.reason === 'unity-lifecycle-synthetic') {
+      existingRootCallbacks.add(rel.targetId);
+    }
   }
 
-  const syntheticEdgesPerClass = new Map<string, number>();
+  const budget = Math.max(0, Math.min(MAX_PROCESS_CALLBACKS, cfg.maxSyntheticEdgesTotal) - existingRootCallbacks.size);
+  const perClassBudget = Math.max(0, cfg.maxSyntheticEdgesPerClass);
+  const allowanceByHost = new Map(acceptedHosts.map((host) => [
+    host.classNode.id,
+    Math.max(0, perClassBudget - host.lifecycleCallbacks.filter((callback) => existingRootCallbacks.has(callback.id)).length),
+  ]));
+  const candidatesByGroup = new Map<number, CallbackCandidate[]>();
+  for (const host of acceptedHosts) {
+    const group = candidatesByGroup.get(host.lifecycleCallbacks.length) ?? [];
+    for (const callback of host.lifecycleCallbacks) {
+      if (existingPairs.has(`${SYNTHETIC_RUNTIME_ROOT_ID}->${callback.id}`)) continue;
+      group.push({ host, callback, score: [0, 0, 0, 0] });
+    }
+    candidatesByGroup.set(host.lifecycleCallbacks.length, group);
+  }
+  const groupCapacity = (group: CallbackCandidate[]): number => {
+    const perHost = new Map<string, number>();
+    for (const item of group) perHost.set(item.host.classNode.id, (perHost.get(item.host.classNode.id) ?? 0) + 1);
+    return [...perHost].reduce((sum, [hostId, count]) => sum + Math.min(count, allowanceByHost.get(hostId) ?? 0), 0);
+  };
+  const candidateCallbackCount = [...candidatesByGroup.values()].reduce((sum, group) => sum + groupCapacity(group), 0);
+  const selected: CallbackCandidate[] = [];
+  let tiedScoreCount = 0;
+  let noTrustedCallsCount = 0;
+  const uncoveredHostIds: string[] = [];
+  let calls: Map<string, Set<string>> | undefined;
+
+  for (const count of [...candidatesByGroup.keys()].sort((a, b) => b - a)) {
+    const group = candidatesByGroup.get(count)!;
+    const capacity = groupCapacity(group);
+    if (capacity === 0) continue;
+    const remaining = budget - selected.length;
+    if (remaining <= 0) {
+      uncoveredHostIds.push(...new Set(group.map((item) => item.host.classNode.id)));
+      continue;
+    }
+    if (capacity <= remaining) {
+      const perHost = new Map<string, number>();
+      for (const item of group.sort(compareCandidateIdentity)) {
+        const hostId = item.host.classNode.id;
+        const count = perHost.get(hostId) ?? 0;
+        if (count >= (allowanceByHost.get(hostId) ?? 0)) continue;
+        selected.push(item);
+        perHost.set(hostId, count + 1);
+      }
+      continue;
+    }
+
+    calls ??= trustedCalls(graph);
+    const ranked = group.map((item) => ({ ...item, score: scoreCallback(item.callback.id, calls!) })).sort(compareCandidateValue);
+    for (let index = 1; index < ranked.length; index++) {
+      if (ranked[index].score.every((value, i) => value === ranked[index - 1].score[i])) tiedScoreCount++;
+    }
+    const bestByHost = new Map<string, CallbackCandidate>();
+    for (const item of ranked) {
+      if ((allowanceByHost.get(item.host.classNode.id) ?? 0) > 0 && !bestByHost.has(item.host.classNode.id)) {
+        bestByHost.set(item.host.classNode.id, item);
+      }
+    }
+    const reservations = [...bestByHost.values()].sort(compareCandidateValue).slice(0, remaining);
+    const reservedIds = new Set(reservations.map((item) => item.callback.id));
+    const reservedHosts = new Set(reservations.map((item) => item.host.classNode.id));
+    const perHost = new Map(reservations.map((item) => [item.host.classNode.id, 1]));
+    const remainingSelections: CallbackCandidate[] = [];
+    for (const item of ranked) {
+      if (remainingSelections.length >= remaining - reservations.length) break;
+      if (reservedIds.has(item.callback.id)) continue;
+      const hostId = item.host.classNode.id;
+      const count = perHost.get(hostId) ?? 0;
+      if (count >= (allowanceByHost.get(hostId) ?? 0)) continue;
+      remainingSelections.push(item);
+      perHost.set(hostId, count + 1);
+    }
+    selected.push(...reservations, ...remainingSelections);
+    noTrustedCallsCount += [...reservations, ...remainingSelections].filter((item) => item.score[2] === 0).length;
+    uncoveredHostIds.push(...[...bestByHost.keys()].filter((id) => !reservedHosts.has(id)));
+  }
+
   let syntheticEdgeCount = 0;
   let lifecycleEdgeCount = 0;
-
-  for (const host of acceptedHosts) {
-    const classId = host.classNode.id;
-    for (const callback of host.lifecycleCallbacks) {
-      const classCount = syntheticEdgesPerClass.get(classId) ?? 0;
-      if (syntheticEdgeCount >= cfg.maxSyntheticEdgesTotal) break;
-      if (classCount >= cfg.maxSyntheticEdgesPerClass) break;
-
-      const pairKey = `${SYNTHETIC_RUNTIME_ROOT_ID}->${callback.id}`;
-      if (existingPairs.has(pairKey)) continue;
-
-      graph.addRelationship({
-        id: generateId(
-          'CALLS',
-          `${SYNTHETIC_RUNTIME_ROOT_ID}->${callback.id}:unity-lifecycle-synthetic`,
-        ),
-        sourceId: SYNTHETIC_RUNTIME_ROOT_ID,
-        targetId: callback.id,
-        type: 'CALLS',
-        confidence: cfg.lifecycleEdgeConfidence,
-        reason: 'unity-lifecycle-synthetic',
-      });
-      existingPairs.add(pairKey);
-      syntheticEdgeCount += 1;
-      lifecycleEdgeCount += 1;
-      syntheticEdgesPerClass.set(classId, classCount + 1);
-    }
+  for (const { callback } of selected) {
+    const pairKey = `${SYNTHETIC_RUNTIME_ROOT_ID}->${callback.id}`;
+    if (existingPairs.has(pairKey)) continue;
+    graph.addRelationship({
+      id: generateId(
+        'CALLS',
+        `${SYNTHETIC_RUNTIME_ROOT_ID}->${callback.id}:unity-lifecycle-synthetic`,
+      ),
+      sourceId: SYNTHETIC_RUNTIME_ROOT_ID,
+      targetId: callback.id,
+      type: 'CALLS',
+      confidence: cfg.lifecycleEdgeConfidence,
+      reason: 'unity-lifecycle-synthetic',
+    });
+    existingPairs.add(pairKey);
+    syntheticEdgeCount++;
+    lifecycleEdgeCount++;
   }
 
   return {
@@ -187,6 +327,12 @@ export const applyUnityLifecycleSyntheticCalls = (
     loaderEdgeCount: 0,
     hostCount: acceptedHosts.length,
     rejectedHostCount,
+    candidateCallbackCount,
+    truncatedCallbackCount: candidateCallbackCount - syntheticEdgeCount,
+    uncoveredHostCount: uncoveredHostIds.length,
+    uncoveredHostIds: uncoveredHostIds.sort(compareText),
+    noTrustedCallsCount,
+    tiedScoreCount,
     runtimeRootNodeId: syntheticEdgeCount > 0 ? SYNTHETIC_RUNTIME_ROOT_ID : undefined,
   };
 };
