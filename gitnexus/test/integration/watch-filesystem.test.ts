@@ -120,6 +120,7 @@ describe('watch filesystem integration', () => {
     const successful: string[][] = [];
     const errors: string[][] = [];
     let failNext = false;
+    let firstRefreshCount = 0;
     let releaseRefresh: (() => void) | undefined;
     const loop = await startWatchFileLoop(
       repo,
@@ -131,9 +132,12 @@ describe('watch filesystem integration', () => {
         }
         successful.push([...paths]);
         if (paths.includes('first.ts')) {
-          await new Promise<void>((resolve) => {
-            releaseRefresh = resolve;
-          });
+          firstRefreshCount += 1;
+          if (firstRefreshCount === 1) {
+            await new Promise<void>((resolve) => {
+              releaseRefresh = resolve;
+            });
+          }
         }
       },
       (_error, paths) => errors.push([...paths]),
@@ -142,9 +146,14 @@ describe('watch filesystem integration', () => {
 
     await fs.writeFile(path.join(repo, 'first.ts'), 'export const first = 1;', 'utf8');
     await waitFor(() => releaseRefresh !== undefined);
+    await fs.writeFile(path.join(repo, 'first.ts'), 'export const first = 2;', 'utf8');
+    await new Promise((resolve) => setTimeout(resolve, 200));
     await fs.writeFile(path.join(repo, 'during.ts'), 'export const during = 1;', 'utf8');
     releaseRefresh!();
+    await waitFor(() => firstRefreshCount === 2);
     await waitFor(() => successful.flat().includes('during.ts'));
+    await fs.writeFile(path.join(repo, 'afterDuplicate.ts'), 'export const afterDuplicate = 1;', 'utf8');
+    await waitFor(() => successful.flat().includes('afterDuplicate.ts'));
 
     failNext = true;
     await fs.writeFile(path.join(repo, 'fails.ts'), 'export const fail = 1;', 'utf8');
