@@ -47,16 +47,19 @@ function median(xs: number[]): number {
   return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }
 
-/** Median elapsed ms to run `emitSwiftScopeCaptures` over `reps` runs. */
+/** Median process CPU ms to run `emitSwiftScopeCaptures` over `reps` runs. */
 function timeEmit(n: number, reps: number): number {
   const src = generateSource(n);
   // Warm up parser/query compilation so the first run's JIT cost is excluded.
   emitSwiftScopeCaptures(src, 'warmup.swift');
   const samples: number[] = [];
   for (let i = 0; i < reps; i++) {
-    const start = process.hrtime.bigint();
+    // Wall time includes scheduling delays from other Vitest forks. CPU time
+    // keeps this tripwire focused on work done by the capture path itself.
+    const start = process.cpuUsage();
     emitSwiftScopeCaptures(src, `bench-${n}.swift`);
-    samples.push(Number(process.hrtime.bigint() - start) / 1e6);
+    const cpu = process.cpuUsage(start);
+    samples.push((cpu.user + cpu.system) / 1e3);
   }
   return median(samples);
 }
@@ -75,6 +78,6 @@ describe.skipIf(!swiftAvailable)('swift scope-capture scaling (O(n) tripwire)', 
     // Linear would be ~4× (4× the entities). Allow generous headroom for noise
     // and parser variance; quadratic would be ~16×, so 8× cleanly separates them.
     const ratio = tLarge / Math.max(tSmall, 0.001);
-    expect(ratio).toBeLessThan(8);
+    expect(ratio, `CPU scaling: ${tSmall.toFixed(1)}ms → ${tLarge.toFixed(1)}ms`).toBeLessThan(8);
   });
 });
