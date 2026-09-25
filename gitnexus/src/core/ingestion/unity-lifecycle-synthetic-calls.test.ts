@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateId } from '../../lib/utils.js';
 import { createKnowledgeGraph } from '../graph/graph.js';
+import { GLOBAL_NAME_FALLBACK_REASON } from '../graph/edge-reasons.js';
 import {
   applyUnityLifecycleSyntheticCalls,
   detectUnityLifecycleHosts,
@@ -670,7 +671,7 @@ test('truncated group reserves hosts, ranks trusted two-hop calls, and ignores h
   call(id('A', 'Awake'), id('A', 'First'));
   call(id('A', 'First'), id('A', 'Second'));
   call(id('B', 'Start'), id('B', 'First'));
-  call(id('C', 'Awake'), id('C', 'First'), 'heuristic-name-match');
+  call(id('C', 'Awake'), id('C', 'First'), GLOBAL_NAME_FALLBACK_REASON);
   call(id('C', 'OnEnable'), id('C', 'First'), 'local-call', 0.4);
 
   const result = applyUnityLifecycleSyntheticCalls(graph, { maxSyntheticEdgesTotal: 4 });
@@ -679,12 +680,52 @@ test('truncated group reserves hosts, ranks trusted two-hop calls, and ignores h
   assert.equal(result.candidateCallbackCount, 9);
   assert.equal(result.truncatedCallbackCount, 5);
   assert.equal(result.uncoveredHostCount, 0);
-  assert.equal(result.noTrustedCallsCount >= 1, true);
+  assert.equal(result.noTrustedCallsCount, 2);
   assert.equal(result.tiedScoreCount > 0, true);
   assert.equal(selected.has(id('A', 'Awake')), true);
   assert.equal(selected.has(id('B', 'Start')), true);
   assert.equal(selected.has(id('C', 'Awake')), true); // stable tie, no trusted call
   assert.equal(selected.has(id('C', 'OnEnable')), false);
+});
+
+test('direct calls beat no calls when hosts compete for one entry', () => {
+  const graph = createKnowledgeGraph();
+  for (const host of ['A', 'B']) {
+    addClass(graph, { className: host, filePath: `Assets/${host}.cs`, baseType: 'MonoBehaviour', callbackNames: ['Awake'], extraMethods: ['Target'] });
+  }
+  const bCallback = generateId('Method', 'Assets/B.cs:B.Awake');
+  graph.addRelationship({ id: 'b-direct', sourceId: bCallback, targetId: generateId('Method', 'Assets/B.cs:B.Target'), type: 'CALLS', confidence: 1, reason: 'local-call' });
+  const result = applyUnityLifecycleSyntheticCalls(graph, { maxSyntheticEdgesTotal: 1 });
+  assert.deepEqual(selectedCallbacks(graph), [bCallback]);
+  assert.equal(result.noTrustedCallsCount, 0);
+});
+
+test('global-name-fallback calls do not beat a callback with no calls', () => {
+  const graph = createKnowledgeGraph();
+  for (const host of ['A', 'B']) {
+    addClass(graph, { className: host, filePath: `Assets/${host}.cs`, baseType: 'MonoBehaviour', callbackNames: ['Awake'], extraMethods: ['Target'] });
+  }
+  graph.addRelationship({
+    id: 'b-heuristic',
+    sourceId: generateId('Method', 'Assets/B.cs:B.Awake'),
+    targetId: generateId('Method', 'Assets/B.cs:B.Target'),
+    type: 'CALLS',
+    confidence: 0.5,
+    reason: GLOBAL_NAME_FALLBACK_REASON,
+  });
+  const result = applyUnityLifecycleSyntheticCalls(graph, { maxSyntheticEdgesTotal: 1 });
+  assert.deepEqual(selectedCallbacks(graph), [generateId('Method', 'Assets/A.cs:A.Awake')]);
+  assert.equal(result.noTrustedCallsCount, 1);
+  assert.equal(result.tiedScoreCount, 1);
+});
+
+test('full groups report selected callbacks without trusted calls', () => {
+  const graph = createKnowledgeGraph();
+  addClass(graph, { className: 'A', filePath: 'Assets/A.cs', baseType: 'MonoBehaviour', callbackNames: ['Awake'] });
+  const result = applyUnityLifecycleSyntheticCalls(graph, { maxSyntheticEdgesTotal: 1 });
+  assert.equal(result.syntheticEdgeCount, 1);
+  assert.equal(result.noTrustedCallsCount, 1);
+  assert.equal(result.uncoveredHostCount, 0);
 });
 
 test('callback count groups outrank value and report uncovered hosts when slots are fewer', () => {
@@ -775,4 +816,31 @@ test('existing synthetic root edges consume the total budget', () => {
   assert.equal(result.syntheticEdgeCount, 1);
   assert.equal(selectedCallbacks(graph).length, 2);
   assert.equal(selectedCallbacks(graph).some((id) => id === generateId('Method', 'Assets/A.cs:A.Start')), false);
+  assert.equal(result.uncoveredHostCount, 0);
+});
+
+test('existing root coverage is reported accurately when the budget is full', () => {
+  const graph = createKnowledgeGraph();
+  const a = addClass(graph, { className: 'A', filePath: 'Assets/A.cs', baseType: 'MonoBehaviour', callbackNames: ['Awake', 'Start'] });
+  const b = addClass(graph, { className: 'B', filePath: 'Assets/B.cs', baseType: 'MonoBehaviour', callbackNames: ['Awake'] });
+  graph.addNode({ id: SYNTHETIC_RUNTIME_ROOT_ID, label: 'Method', properties: { name: 'unity-runtime-root', filePath: '' } });
+  graph.addRelationship({ id: 'preexisting-root', sourceId: SYNTHETIC_RUNTIME_ROOT_ID, targetId: generateId('Method', 'Assets/A.cs:A.Awake'), type: 'CALLS', confidence: 0.72, reason: 'unity-lifecycle-synthetic' });
+  const result = applyUnityLifecycleSyntheticCalls(graph, { maxSyntheticEdgesTotal: 1 });
+  assert.equal(result.syntheticEdgeCount, 0);
+  assert.deepEqual(result.uncoveredHostIds, [b]);
+  assert.equal(result.uncoveredHostIds.includes(a), false);
+});
+
+test('a precovered host does not take the last reservation from an uncovered host', () => {
+  const graph = createKnowledgeGraph();
+  const a = addClass(graph, { className: 'A', filePath: 'Assets/A.cs', baseType: 'MonoBehaviour', callbackNames: ['Awake', 'Start'], extraMethods: ['Target'] });
+  const b = addClass(graph, { className: 'B', filePath: 'Assets/B.cs', baseType: 'MonoBehaviour', callbackNames: ['Awake', 'Start'] });
+  graph.addNode({ id: SYNTHETIC_RUNTIME_ROOT_ID, label: 'Method', properties: { name: 'unity-runtime-root', filePath: '' } });
+  graph.addRelationship({ id: 'preexisting-root', sourceId: SYNTHETIC_RUNTIME_ROOT_ID, targetId: generateId('Method', 'Assets/A.cs:A.Awake'), type: 'CALLS', confidence: 0.72, reason: 'unity-lifecycle-synthetic' });
+  graph.addRelationship({ id: 'a-direct', sourceId: generateId('Method', 'Assets/A.cs:A.Start'), targetId: generateId('Method', 'Assets/A.cs:A.Target'), type: 'CALLS', confidence: 1, reason: 'local-call' });
+  const result = applyUnityLifecycleSyntheticCalls(graph, { maxSyntheticEdgesTotal: 2 });
+  assert.equal(result.syntheticEdgeCount, 1);
+  assert.equal(result.uncoveredHostCount, 0);
+  assert.equal(result.uncoveredHostIds.includes(a) || result.uncoveredHostIds.includes(b), false);
+  assert.equal(selectedCallbacks(graph).includes(generateId('Method', 'Assets/B.cs:B.Awake')), true);
 });

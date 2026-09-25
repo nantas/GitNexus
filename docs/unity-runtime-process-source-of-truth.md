@@ -33,7 +33,7 @@ scan → structure → parse → scopeResolution → … → communities
 1. `unity-resources`：依赖 `communities/scopeResolution/structure`。独立模块 `unity-resource-scan.ts` 扫描资源路径并按 scope 过滤，随后由 `processUnityResources` 写入 Unity 绑定与 prefab-source 边。
 2. `unity-lifecycle`：依赖 `unity-resources/parse`。基类线索取同一 normalized AST 的 parse report，并与 Class 的文件/名称/行号对齐；不依赖外部引擎类型的虚拟继承节点。检测 `Assets/*.cs` 后加载目标仓 Unity 配置，调用 `applyUnityLifecycleSyntheticCalls`。
    - 宿主按 lifecycle 回调数降序分组；完整落入预算的组全部接入。仅在跨越总预算的同分组内，按可信 CALLS（confidence ≥ 0.5、非 heuristic、两端节点存在）的无重复节点两跳存在性/路径数、直接调用存在性/目标数依次降序选择 callback，两个计数各封顶 4。同分按规范化文件路径、类名、callback 名、ID 稳定排序。
-   - 截断组名额足够时先给每宿主预留最高价值 callback，再按价值填满余量；名额不足时按宿主最佳 callback 选择可覆盖者。phase 结果记录候选/截断 callback 数、未覆盖宿主 ID、入选但无可信调用数、同分数。评分只决定合成入口，不证明持久 Process 成员链。
+   - 截断组先为尚无合成 root 入口的宿主预留最高价值 callback，再按价值填满余量；名额不足时按宿主最佳 callback 选择可覆盖者。未覆盖宿主以本次注入后实际 root 入口计算，已存在的合成入口计为覆盖。phase 结果记录候选/截断 callback 数、未覆盖宿主 ID、所有新入选 callback 中无可信调用的数量、截断组同分数。评分只决定合成入口，不证明持久 Process 成员链。
    - 合成 root 入口受每宿主上限和总上限约束，实际总上限最多 256，与 `unity-processes` 的独立 callback 上限一致。
 3. `processes`：注册时增加 `unity-lifecycle` 依赖，确保追踪前已注入合成 CALLS；上游 `process-processor.ts` 保持原实现。
 4. `unity-process-subtype`：依赖 `processes/unity-lifecycle/unity-processes`，对所有项目（含非 Unity 项目）沿过程 trace 的 CALLS reason 回写 `processSubtype/runtimeChainConfidence/sourceReasons/sourceConfidences` 与步骤证据。流式图必须通过 `forEachRelationshipFields` 读取真实 reason；对象视图的 `streamed` 占位不能用于分类。`STEP_IN_PROCESS` 保留到 subtype 完成后统一落库。

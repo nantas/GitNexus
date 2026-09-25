@@ -60,8 +60,22 @@ export interface UnityLifecycleSyntheticResult {
 interface CallbackCandidate {
   host: UnityLifecycleHost;
   callback: GraphNode;
-  score: readonly [number, number, number, number];
+  score: CallbackScore;
 }
+
+interface CallbackScore {
+  hasTwoHop: boolean;
+  twoHopPathCount: number;
+  hasDirectCall: boolean;
+  directTargetCount: number;
+}
+
+const EMPTY_CALLBACK_SCORE: CallbackScore = {
+  hasTwoHop: false,
+  twoHopPathCount: 0,
+  hasDirectCall: false,
+  directTargetCount: 0,
+};
 
 const compareText = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0;
@@ -77,11 +91,20 @@ const compareCandidateIdentity = (left: CallbackCandidate, right: CallbackCandid
   compareText(left.host.classNode.id, right.host.classNode.id);
 
 const compareCandidateValue = (left: CallbackCandidate, right: CallbackCandidate): number => {
-  for (let index = 0; index < left.score.length; index++) {
-    if (left.score[index] !== right.score[index]) return right.score[index] - left.score[index];
-  }
-  return compareCandidateIdentity(left, right);
+  return (
+    Number(right.score.hasTwoHop) - Number(left.score.hasTwoHop) ||
+    right.score.twoHopPathCount - left.score.twoHopPathCount ||
+    Number(right.score.hasDirectCall) - Number(left.score.hasDirectCall) ||
+    right.score.directTargetCount - left.score.directTargetCount ||
+    compareCandidateIdentity(left, right)
+  );
 };
+
+const sameCandidateValue = (left: CallbackCandidate, right: CallbackCandidate): boolean =>
+  left.score.hasTwoHop === right.score.hasTwoHop &&
+  left.score.twoHopPathCount === right.score.twoHopPathCount &&
+  left.score.hasDirectCall === right.score.hasDirectCall &&
+  left.score.directTargetCount === right.score.directTargetCount;
 
 const trustedCalls = (graph: KnowledgeGraph): Map<string, Set<string>> => {
   const calls = new Map<string, Set<string>>();
@@ -108,7 +131,12 @@ const scoreCallback = (
     }
     if (twoHopPaths >= 4) break;
   }
-  return [Number(twoHopPaths > 0), Math.min(4, twoHopPaths), Number(direct.length > 0), Math.min(4, direct.length)];
+  return {
+    hasTwoHop: twoHopPaths > 0,
+    twoHopPathCount: Math.min(4, twoHopPaths),
+    hasDirectCall: direct.length > 0,
+    directTargetCount: Math.min(4, direct.length),
+  };
 };
 
 export const detectUnityLifecycleHosts = (
@@ -233,7 +261,7 @@ export const applyUnityLifecycleSyntheticCalls = (
     const group = candidatesByGroup.get(host.lifecycleCallbacks.length) ?? [];
     for (const callback of host.lifecycleCallbacks) {
       if (existingPairs.has(`${SYNTHETIC_RUNTIME_ROOT_ID}->${callback.id}`)) continue;
-      group.push({ host, callback, score: [0, 0, 0, 0] });
+      group.push({ host, callback, score: EMPTY_CALLBACK_SCORE });
     }
     candidatesByGroup.set(host.lifecycleCallbacks.length, group);
   }
@@ -245,8 +273,11 @@ export const applyUnityLifecycleSyntheticCalls = (
   const candidateCallbackCount = [...candidatesByGroup.values()].reduce((sum, group) => sum + groupCapacity(group), 0);
   const selected: CallbackCandidate[] = [];
   let tiedScoreCount = 0;
-  let noTrustedCallsCount = 0;
-  const uncoveredHostIds: string[] = [];
+  const alreadyCoveredHosts = new Set(
+    acceptedHosts
+      .filter((host) => host.lifecycleCallbacks.some((callback) => existingRootCallbacks.has(callback.id)))
+      .map((host) => host.classNode.id),
+  );
   let calls: Map<string, Set<string>> | undefined;
 
   for (const count of [...candidatesByGroup.keys()].sort((a, b) => b - a)) {
@@ -254,10 +285,7 @@ export const applyUnityLifecycleSyntheticCalls = (
     const capacity = groupCapacity(group);
     if (capacity === 0) continue;
     const remaining = budget - selected.length;
-    if (remaining <= 0) {
-      uncoveredHostIds.push(...new Set(group.map((item) => item.host.classNode.id)));
-      continue;
-    }
+    if (remaining <= 0) continue;
     if (capacity <= remaining) {
       const perHost = new Map<string, number>();
       for (const item of group.sort(compareCandidateIdentity)) {
@@ -273,7 +301,7 @@ export const applyUnityLifecycleSyntheticCalls = (
     calls ??= trustedCalls(graph);
     const ranked = group.map((item) => ({ ...item, score: scoreCallback(item.callback.id, calls!) })).sort(compareCandidateValue);
     for (let index = 1; index < ranked.length; index++) {
-      if (ranked[index].score.every((value, i) => value === ranked[index - 1].score[i])) tiedScoreCount++;
+      if (sameCandidateValue(ranked[index], ranked[index - 1])) tiedScoreCount++;
     }
     const bestByHost = new Map<string, CallbackCandidate>();
     for (const item of ranked) {
@@ -281,9 +309,11 @@ export const applyUnityLifecycleSyntheticCalls = (
         bestByHost.set(item.host.classNode.id, item);
       }
     }
-    const reservations = [...bestByHost.values()].sort(compareCandidateValue).slice(0, remaining);
+    const reservations = [...bestByHost.values()]
+      .filter((item) => !alreadyCoveredHosts.has(item.host.classNode.id))
+      .sort(compareCandidateValue)
+      .slice(0, remaining);
     const reservedIds = new Set(reservations.map((item) => item.callback.id));
-    const reservedHosts = new Set(reservations.map((item) => item.host.classNode.id));
     const perHost = new Map(reservations.map((item) => [item.host.classNode.id, 1]));
     const remainingSelections: CallbackCandidate[] = [];
     for (const item of ranked) {
@@ -296,9 +326,20 @@ export const applyUnityLifecycleSyntheticCalls = (
       perHost.set(hostId, count + 1);
     }
     selected.push(...reservations, ...remainingSelections);
-    noTrustedCallsCount += [...reservations, ...remainingSelections].filter((item) => item.score[2] === 0).length;
-    uncoveredHostIds.push(...[...bestByHost.keys()].filter((id) => !reservedHosts.has(id)));
   }
+
+  const coveredHostIds = new Set([
+    ...alreadyCoveredHosts,
+    ...selected.map((item) => item.host.classNode.id),
+  ]);
+  const uncoveredHostIds = acceptedHosts
+    .filter((host) => host.lifecycleCallbacks.length > 0 && !coveredHostIds.has(host.classNode.id))
+    .map((host) => host.classNode.id)
+    .sort(compareText);
+  const callsForDiagnostics = calls ?? trustedCalls(graph);
+  const noTrustedCallsCount = selected.filter((item) =>
+    ![...(callsForDiagnostics.get(item.callback.id) ?? [])].some((target) => target !== item.callback.id),
+  ).length;
 
   let syntheticEdgeCount = 0;
   let lifecycleEdgeCount = 0;
@@ -330,7 +371,7 @@ export const applyUnityLifecycleSyntheticCalls = (
     candidateCallbackCount,
     truncatedCallbackCount: candidateCallbackCount - syntheticEdgeCount,
     uncoveredHostCount: uncoveredHostIds.length,
-    uncoveredHostIds: uncoveredHostIds.sort(compareText),
+    uncoveredHostIds,
     noTrustedCallsCount,
     tiedScoreCount,
     runtimeRootNodeId: syntheticEdgeCount > 0 ? SYNTHETIC_RUNTIME_ROOT_ID : undefined,
