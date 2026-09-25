@@ -2,6 +2,22 @@
 
 All notable changes to GitNexus will be documented in this file.
 
+## [1.6.12] - 2026-09-25
+
+> Stable release notes comparing `v1.5.9` → `v1.6.12`. Synced [upstream v1.6.12](https://github.com/abhigyanpatwari/GitNexus/releases/tag/v1.6.12) while retaining the fork's Unity, C#, GDScript, and agent workflow support.
+
+### Added
+- Added configurable external index storage and source-content retention tiers, Objective-C indexing, resumable embedding generation, and clearer index freshness reporting from upstream.
+- Restored Unity resource bindings and lifecycle execution traces on the new ingestion pipeline, including bounded lifecycle process discovery and persisted process evidence.
+
+### Changed
+- Adopted upstream's language-provider ingestion and safe-parse path while retaining C# conditional-compilation normalization, csproj define configuration, generic receiver inference, and container diagnostics.
+- Kept GDScript analysis and agent-facing CLI, MCP, skill, and hook workflows aligned with the new architecture.
+
+### Fixed
+- Prevented large Unity resource files from exhausting graph persistence memory and restored serialized field GUID references from oversized prefabs.
+- Restored generic `GetComponent<T>()` call edges and lifecycle entry coverage in real Unity projects; corrected scoped-index freshness checks and C# interpolation parsing.
+
 ## [1.5.9] - 2026-06-08
 
 > Stable release notes comparing `v1.5.8` → `v1.5.9`.
