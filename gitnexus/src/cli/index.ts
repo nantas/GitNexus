@@ -35,6 +35,12 @@ program
   )
   .option('--scope <scope>', 'Install target: global (default) or project')
   .option('--agent <agent>', 'Target coding agent: claude, opencode, or codex')
+  .option('--rc-mode <mode>', 'Project analysis config: auto (default), migrate, create, or skip')
+  .option('--accept-rc', 'Accept a complete analysis config plan without a TTY')
+  .option('--rc-scope <paths>', 'Analysis paths: all or comma-separated prefixes')
+  .option('--rc-extensions <extensions>', 'Analysis extensions: all or comma-separated extensions')
+  .option('--rc-name <name>', 'Repository name in the analysis config')
+  .option('--rc-csharp-define-csproj <path>', 'C# DefineConstants project in the analysis config')
   .option(
     '--cli-version <version>',
     'Pin npx GitNexus version/tag for generated MCP commands (e.g. 1.4.7-rc)',

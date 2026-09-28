@@ -4,7 +4,7 @@
 
 1. 全局安装 `@veewo/gitnexus` CLI
 2. 执行 `gitnexus setup`(按用户选择 `global/project` + `--agent`)
-3. 按"已保存 scope 优先"策略确定索引范围
+3. 根据 `.gitnexusrc` 和旧索引覆盖记录确认索引范围
 4. 执行 `gitnexus analyze` 构建索引
 5. 完成检索测试验收(`query/context/impact/cypher`)
 
@@ -50,10 +50,10 @@ GN="gitnexus"
 1. `setup` 作用域:`global` 或 `project`
 2. 目标 agent:`claude` / `opencode` / `codex`
 3. 索引范围决策:
-   - 先检查仓库内 `.gitnexus/meta.json` 是否存在且包含 `analyzeOptions`
-   - 若存在:默认复用已有 analyze options,先向用户复述"将复用已有 scope",不再先问"全量还是 scoped"
-   - 若不存在:再询问用户是全量还是 scoped(确认包含/排除目录)
-   - 首次 analyze 时的 CLI 选项会自动持久化到 `meta.json.analyzeOptions`
+   - 先检查仓库根目录 `.gitnexusrc`;它是后续 analyze 的配置来源。项目级 `setup` 可在确认计划后生成它
+   - 若文件缺失,查看 `.gitnexus/gitnexus.json`(或旧版 `meta.json`)的 `indexCoverage` 和可能存在的旧 `analyzeOptions`,作为上次范围的线索
+   - 向用户复述并确认目标 scope、extensions、仓库名与 C# 项目;若无可靠旧记录,确认全量或指定范围
+   - 项目级 setup 展示迁移计划并确认后创建 `.gitnexusrc`;索引元数据本身不会自动成为下次 analyze 的默认选项
 4. 验收输入:至少 2-3 个业务关键词,以及 1-2 个关键符号名(用于 `context/impact`)
 
 ## 1. 安装与版本确认
@@ -169,40 +169,30 @@ cd "$REPO_ROOT"
 ALIAS="$(basename "$REPO_ROOT")-core"
 ```
 
-## 4. Scope 决策与 analyze 选项(已保存选项优先)
+## 4. Scope 决策与 analyze 选项
 
 执行顺序(必须遵守):
 
-1. 先检查 `.gitnexus/meta.json` 是否存在且包含 `analyzeOptions`
-2. 若存在:直接复用已保存选项(extensions、scope rules、repo alias 等),并向用户确认"本次将复用已有 scope"
-3. **若不存在:必须先询问用户"全量索引还是指定 scope",禁止默认全量执行**(指定 scope 时需确认包含/排除目录)
-4. 只有用户明确要求改 scope 时,才传新的 CLI 选项
+1. 先检查仓库根目录 `.gitnexusrc`。若存在,检查其中的 `scopeRules`、`includeExtensions`、`name` 和 `csharpDefineCsproj` 是否仍符合目标范围。
+2. 若缺失,读取 `.gitnexus/gitnexus.json`(或旧版 `.gitnexus/meta.json`)中的 `indexCoverage`。旧 `analyzeOptions` 若存在,也只作为历史线索,不是下次运行的默认值。
+3. 向用户确认目标范围。没有可靠旧记录时,必须询问全量还是指定 scope,禁止默认全量执行。
+4. 将确认后的长期配置写入 `.gitnexusrc`,然后运行 analyze。CLI 显式选项会覆盖该配置。
 
-> **⚠ clean 会删除 meta.json**:`gitnexus clean --force` 会删除整个 `.gitnexus/` 目录,包括 `meta.json`。如果需要 clean 后重建索引,需重新指定 CLI 选项:
-> ```bash
-> $GN clean --force
-> $GN analyze --force --extensions ".cs,.meta" --repo-alias "$ALIAS"
-> ```
-
-> **⚠ scope 变更场景**:如果要修改 scope(从全量切 scoped 或改变 extensions),必须加 `--no-reuse-options` 防止复用旧 scope:
-> ```bash
-> $GN analyze --force --repo-alias "$ALIAS" --extensions ".cs,.meta" --no-reuse-options
-> ```
+项目级 `setup` 默认使用 `--rc-mode auto`。有 TTY 时展示计划、询问缺失的路径和扩展名并确认创建；非交互调用显示 `Analysis config: pending`，不会写入缺失的 rc。脚本可用 `--rc-mode migrate --accept-rc` 接受完整且无冲突的旧索引计划，或用 `--rc-mode create --rc-scope Assets/,Packages/ --rc-extensions .cs,.meta --accept-rc` 明确新范围；两个选择都可填 `all` 表示全量。`--scope project` 选择安装位置，`--rc-scope` 选择分析路径。`clean --force` 保留配置和旧元数据,但删除索引数据;清理前仍须确认重建范围。
 
 ```bash
-if [ -f .gitnexus/meta.json ]; then
-  echo "Found existing meta.json with analyze options"
+if [ -f .gitnexusrc ]; then
+  echo "Found repository analyze defaults in .gitnexusrc"
 else
-  echo "No existing meta.json found."
+  echo "No .gitnexusrc; inspect old index coverage and confirm scope before analyze."
 fi
 ```
 
-**analyze 选项持久化规则:**
+**analyze 选项规则:**
 
-- 首次 analyze 时传入的 `--extensions`、`--repo-alias`、`--embeddings`、`--csharp-define-csproj` 会自动保存到 `meta.json.analyzeOptions`
-- 后续 `analyze` 自动复用已保存选项,无需重复传参
-- `--no-reuse-options` 忽略已保存选项,使用默认值
-- 存储选项在使用前会自动校验(格式、文件存在性等)
+- 长期选项写在 `.gitnexusrc`;仅一次性使用的 CLI 选项不会自动成为下次默认值
+- `gitnexus.json` / `meta.json` 记录索引状态与上次覆盖范围,不提供 analyze 默认选项
+- 变更 scope、extensions 或 C# define 配置会触发重建
 
 ### 4.1 Unity 项目首次接入(推荐做法)
 
@@ -221,18 +211,18 @@ $GN analyze --force \
 - `--extensions ".cs,.meta"` 用于启用 Unity 资源边所需的 C# 与 `.meta` 解析
 - `--scope "Assets/,Packages/"` 限制索引范围到 Unity 项目目录,跳过 `Library/`、`Temp/`、`obj/`
 - `--repo-alias` 建议一并传入,减少后续命令重复传参
-- `--csharp-define-csproj` 用于加载 `DefineConstants` 做条件编译归一化,该选项也会自动持久化
-- 这些选项在首次 analyze 后会自动保存,后续只需 `$GN analyze --force`
+- `--csharp-define-csproj` 用于加载 `DefineConstants` 做条件编译归一化
+- 将这些长期选项写入 `.gitnexusrc` 后,后续才可只用 `$GN analyze --force`
 
 ## 5. 执行 Analyze
 
-### 5.1 复用已保存选项(推荐)
+### 5.1 使用仓库配置(推荐)
 
 ```bash
 $GN analyze --force
 ```
 
-如果 meta.json 中已有 `analyzeOptions`,以上命令自动复用。如需覆盖特定选项,显式传入即可:
+以上命令读取 `.gitnexusrc`,不会复用 `meta.json.analyzeOptions`。如需临时覆盖特定选项,显式传入即可:
 
 ```bash
 $GN analyze --force --repo-alias "$ALIAS"
@@ -251,8 +241,8 @@ $GN analyze --force \
 规则:
 
 - Unity 项目推荐传入 `--extensions ".cs,.meta"`、`--scope "Assets/,Packages/"` 和 `--repo-alias`
-- `--csharp-define-csproj` 用于加载 `DefineConstants` 做条件编译归一化,该选项会自动持久化
-- 后续 rebuild 只需 `$GN analyze --force`
+- `--csharp-define-csproj` 用于加载 `DefineConstants` 做条件编译归一化
+- 后续 rebuild 只需 `$GN analyze --force` 的前提是已把长期选项写入 `.gitnexusrc`
 
 ### 5.2 Full(全量)
 
@@ -333,7 +323,7 @@ $GN cypher "MATCH (n) RETURN count(n) AS total_nodes" --repo "$ALIAS"
 - Setup scope/agent: global|project + claude|opencode|codex
 - Analyze mode: scoped|full
 - Repo alias: <alias>
-- Stored options: meta.json.analyzeOptions（若 scoped）
+- Analyze defaults: .gitnexusrc（确认 scope / extensions / name / csharpDefineCsproj）
 - Status: PASS/FAIL
 - Query: PASS/FAIL
 - Context: PASS/FAIL

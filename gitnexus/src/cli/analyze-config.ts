@@ -396,7 +396,7 @@ export async function loadAnalyzeConfigStrict(
   return raw === null ? undefined : parseAnalyzeConfig(raw);
 }
 
-function parseAnalyzeConfig(rawInput: string): Partial<AnalyzeOptions> {
+export function parseAnalyzeConfig(rawInput: string): Partial<AnalyzeOptions> {
   let raw = rawInput;
 
   // Strip a leading UTF-8 BOM: Node's 'utf-8' decode keeps it, and JSON.parse

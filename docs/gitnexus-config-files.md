@@ -35,6 +35,7 @@ This document defines the current configuration and state file rules used by Git
 Notes:
 - `gitnexus.json` and its legacy `meta.json` mirror store index state, not analyze option defaults. Ownership and schema fields are managed by `analyze`; do not hand-edit or copy metadata between repositories. Analyze configuration comes from `.gitnexusrc`.
 - Commit `.gitnexusrc` in the repository root for recurring analyze defaults. CLI arguments override configured values.
+- Project `setup --scope project` previews a `.gitnexusrc` plan. In a terminal it asks for missing scope/extensions and confirmation; without a TTY, default `auto` leaves a missing rc pending. `--rc-mode migrate|create --accept-rc` can create it from a complete plan. Old metadata is evidence of prior coverage, not a source of analyze defaults until the confirmed rc is written.
 
 ```json
 {
@@ -138,7 +139,7 @@ walker's size budget during database COPY.
 ## Ownership rules
 
 - `analyze` owns `.gitnexus/gitnexus.json`, its legacy `.gitnexus/meta.json` mirror, `.gitnexus/lbug`, `.gitnexus/unity-parity-seed.json`.
-- `setup` owns global `~/.gitnexus/config.json` and agent MCP wiring.
+- `setup` owns global `~/.gitnexus/config.json`, agent MCP wiring, and confirmed creation of repo-root `.gitnexusrc`; it reads index metadata without changing it.
 
 - `gitnexus-unity-rule-gen` now points to direct public flow guidance: `approved -> compile -> analyze -> CLI validation`.
 

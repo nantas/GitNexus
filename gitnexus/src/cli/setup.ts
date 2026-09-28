@@ -22,6 +22,14 @@ import { getGlobalDir, loadCLIConfig, saveCLIConfig } from '../storage/repo-mana
 import { getGitRoot } from '../storage/git.js';
 import { glob } from 'glob';
 import { resolveCliSpec } from '../config/cli-spec.js';
+import { createInterface } from 'node:readline/promises';
+import {
+  createRepositoryAnalyzeConfig,
+  planRepositoryAnalyzeConfig,
+  type RcMode,
+  type RcPlan,
+  type RcChoices,
+} from './setup-analyze-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,6 +49,12 @@ interface SetupOptions {
   agent?: string;
   cliVersion?: string;
   cliSpec?: string;
+  rcMode?: string;
+  acceptRc?: boolean;
+  rcScope?: string;
+  rcExtensions?: string;
+  rcName?: string;
+  rcCsharpDefineCsproj?: string;
 }
 
 interface McpEntry {
@@ -585,9 +599,11 @@ async function copyDirRecursive(src: string, dest: string): Promise<void> {
 
 export const setupCommand = async (options: SetupOptions = {}) => {
   if (options.codingAgent !== undefined) {
-    if (options.agent || options.scope || options.cliSpec || options.cliVersion) {
+    if (options.agent || options.scope || options.cliSpec || options.cliVersion ||
+      (options.rcMode && options.rcMode !== 'skip') || options.acceptRc || options.rcScope ||
+      options.rcExtensions || options.rcName || options.rcCsharpDefineCsproj) {
       process.stderr.write(
-        '--coding-agent cannot be combined with --agent, --scope, or CLI pin overrides.\n',
+        '--coding-agent cannot be combined with --agent, --scope, CLI pin overrides, or repository rc options.\n',
       );
       process.exitCode = 1;
       return;
@@ -615,6 +631,85 @@ export const setupCommand = async (options: SetupOptions = {}) => {
     console.log(`  ${err?.message || String(err)}\n`);
     process.exitCode = 1;
     return;
+  }
+
+  const rcMode = (options.rcMode ?? 'auto') as RcMode;
+  if (!['auto', 'migrate', 'create', 'skip'].includes(rcMode)) {
+    console.log(`  Invalid --rc-mode value "${options.rcMode}". Use auto, migrate, create, or skip.\n`);
+    process.exitCode = 1;
+    return;
+  }
+  const hasRcChoices = options.acceptRc || options.rcScope !== undefined ||
+    options.rcExtensions !== undefined || options.rcName !== undefined ||
+    options.rcCsharpDefineCsproj !== undefined;
+  if (scope !== 'project' && (rcMode === 'migrate' || rcMode === 'create' || hasRcChoices)) {
+    console.log('  Repository rc options require --scope project.\n');
+    process.exitCode = 1;
+    return;
+  }
+  let repoRoot: string | null = null;
+  let rcPlan: RcPlan | undefined;
+  let rcState: 'created' | 'preserved' | 'pending' | 'skipped' | 'failed' | undefined;
+  if (scope === 'project') {
+    repoRoot = getGitRoot(process.cwd());
+    if (!repoRoot) {
+      console.log('  --scope project requires running inside a git repository\n');
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const choices: RcChoices = {
+        scope: options.rcScope, extensions: options.rcExtensions,
+        name: options.rcName, csharpDefineCsproj: options.rcCsharpDefineCsproj,
+      };
+      if (rcMode === 'create' && (choices.scope === undefined || choices.extensions === undefined)) {
+        throw new Error('--rc-mode create requires --rc-scope and --rc-extensions.');
+      }
+      rcPlan = await planRepositoryAnalyzeConfig(repoRoot, rcMode, choices);
+      if (rcPlan.state === 'pending') {
+        console.log('  Analysis config plan:');
+        console.log(`    Repository: ${repoRoot}`);
+        console.log(`    Metadata: ${rcPlan.metadataPath ?? 'none'}${rcPlan.indexedAt ? ` (${rcPlan.indexedAt})` : ''}`);
+        console.log(`    Proposed JSON: ${JSON.stringify(rcPlan.proposed)}`);
+        for (const [field, source] of Object.entries(rcPlan.sources)) console.log(`    ${field} ← ${source}`);
+        for (const conflict of rcPlan.conflicts) console.log(`    Conflict: ${conflict}`);
+        for (const missing of rcPlan.unresolved) console.log(`    Unresolved: ${missing}`);
+        if (rcPlan.error) console.log(`    Error: ${rcPlan.error}`);
+        if (rcMode === 'migrate' && !rcPlan.metadataPath && !rcPlan.error) {
+          throw new Error('--rc-mode migrate requires owned index metadata.');
+        }
+        if ((rcMode === 'migrate' || rcMode === 'create') &&
+          (!process.stdin.isTTY || !process.stdout.isTTY || options.acceptRc)) {
+          if (!options.acceptRc) throw new Error(`${rcMode} requires --accept-rc without a TTY.`);
+          if (rcPlan.error || rcPlan.conflicts.length || rcPlan.unresolved.length) {
+            throw new Error(`${rcMode} requires a complete, conflict-free plan. Supply explicit --rc-scope and --rc-extensions choices.`);
+          }
+          await createRepositoryAnalyzeConfig(rcPlan);
+          rcState = 'created';
+        } else if (process.stdin.isTTY && process.stdout.isTTY && !rcPlan.error) {
+          const prompt = createInterface({ input: process.stdin, output: process.stdout });
+          try {
+            if (rcPlan.unresolved.includes('scopeRules') || rcPlan.conflicts.some((c) => c.includes('scopeRules'))) {
+              choices.scope = await prompt.question('  Analysis paths (all or comma-separated prefixes): ');
+            }
+            if (rcPlan.unresolved.includes('includeExtensions') || rcPlan.conflicts.some((c) => c.includes('includeExtensions'))) {
+              choices.extensions = await prompt.question('  Analysis extensions (all or comma-separated extensions): ');
+            }
+            rcPlan = await planRepositoryAnalyzeConfig(repoRoot, rcMode, choices);
+            console.log(`    Final JSON: ${JSON.stringify(rcPlan.proposed, null, 2)}`);
+            if (!rcPlan.error && !rcPlan.conflicts.length && !rcPlan.unresolved.length &&
+              (await prompt.question('  Create .gitnexusrc? [y/N] ')).trim().toLowerCase() === 'y') {
+              await createRepositoryAnalyzeConfig(rcPlan);
+              rcState = 'created';
+            } else rcState = 'skipped';
+          } finally { prompt.close(); }
+        } else rcState = 'pending';
+      } else rcState = rcPlan.state;
+    } catch (err: any) {
+      console.log(`  Analysis config: failed — ${err?.message ?? String(err)}\n`);
+      process.exitCode = 1;
+      return;
+    }
   }
 
   // Ensure global directory exists
@@ -657,12 +752,7 @@ export const setupCommand = async (options: SetupOptions = {}) => {
       await saveSetupConfig(scope, resolvedCliSpec.packageSpec, result);
     }
   } else {
-    const repoRoot = getGitRoot(process.cwd());
-    if (!repoRoot) {
-      console.log('  --scope project requires running inside a git repository\n');
-      process.exitCode = 1;
-      return;
-    }
+    if (!repoRoot) throw new Error('Project repository resolution failed.');
     if (agent === 'claude') {
       await setupProjectMcp(repoRoot, result, mcpPackageSpec);
     } else if (agent === 'codex') {
@@ -702,6 +792,17 @@ export const setupCommand = async (options: SetupOptions = {}) => {
   console.log('  Summary:');
   console.log(`    Scope: ${scope}`);
   console.log(`    Agent: ${legacyCursorMode ? LEGACY_CURSOR_AGENT : agent}`);
+  if (rcState) {
+    console.log(`    Analysis config: ${rcState}`);
+    if (rcState === 'created' || rcState === 'preserved') {
+      console.log(`    Analysis paths: ${JSON.stringify(rcPlan?.proposed.scopeRules ?? 'unknown')}`);
+      console.log(`    Analysis extensions: ${JSON.stringify(rcPlan?.proposed.includeExtensions ?? 'unknown')}`);
+    }
+    if (rcState === 'pending') {
+      console.log('    To create: gitnexus setup --scope project --rc-mode create --rc-scope all --rc-extensions all --accept-rc');
+      console.log('    Replace each all with your intended paths/extensions before running.');
+    }
+  }
   console.log(`    CLI package spec: ${mcpPackageSpec}`);
   console.log(
     `    MCP configured for: ${result.configured.filter((c) => !c.includes('skills')).join(', ') || 'none'}`,
@@ -712,7 +813,7 @@ export const setupCommand = async (options: SetupOptions = {}) => {
   console.log('');
   console.log('  Next steps:');
   console.log('    1. cd into any git repo');
-  console.log('    2. Run: gitnexus analyze');
+  console.log(rcState === 'created' ? '    2. Run: gitnexus analyze (applies the new analysis config)' : '    2. Run: gitnexus analyze after confirming the intended analysis config');
   console.log('    3. Open the repo in your editor — MCP is ready!');
   console.log('');
 };
