@@ -70,6 +70,69 @@ withTestLbugDB('drop-fts-index-benign-cases', (handle) => {
   });
 });
 
+describe('createFTSIndex when LadybugDB reports an internal FTS collision', () => {
+  const probe: { dbPath: string; cleanup: () => Promise<void> } = {
+    dbPath: '',
+    cleanup: async () => {},
+  };
+  let ftsAvailable = true;
+
+  beforeAll(async () => {
+    const adapter = await import('../../src/core/lbug/lbug-adapter.js');
+    const tmp = await createTempDir('gitnexus-orphan-fts-probe-');
+    probe.dbPath = tmp.dbPath;
+    probe.cleanup = tmp.cleanup;
+    await adapter.initLbug(probe.dbPath);
+    ftsAvailable = await adapter.loadFTSExtension(undefined, {
+      policy: resolveAnalyzeInstallPolicy(),
+    });
+    if (ftsAvailable) {
+      await adapter.executeQuery('CREATE NODE TABLE OrphanProbe (id STRING PRIMARY KEY, name STRING)');
+    }
+  }, 120_000);
+
+  afterAll(async () => {
+    const adapter = await import('../../src/core/lbug/lbug-adapter.js');
+    await adapter.closeLbug();
+    await probe.cleanup();
+  });
+
+  it('surfaces the native collision when the requested index is absent', async (ctx) => {
+    if (!ftsAvailable) {
+      if (process.env.GITNEXUS_REQUIRE_FTS === '1') {
+        throw new Error('GITNEXUS_REQUIRE_FTS=1 but the FTS extension is unavailable');
+      }
+      ctx.skip();
+      return;
+    }
+    const adapter = await import('../../src/core/lbug/lbug-adapter.js');
+    const { default: lbug } = await import('@ladybugdb/core');
+    const originalQuery = lbug.Connection.prototype.query;
+    const nativeError =
+      'Binder exception: Table: 0_orphan_probe_fts_appears_info already exists. ' +
+      'Please drop or rename the table before creating a full text search index.';
+    const spy = vi.spyOn(lbug.Connection.prototype, 'query').mockImplementation(function (
+      this: unknown,
+      sql: string,
+      ...rest: unknown[]
+    ) {
+      if (sql.includes("CREATE_FTS_INDEX('OrphanProbe', 'orphan_probe_fts'")) {
+        return Promise.reject(new Error(nativeError));
+      }
+      return originalQuery.call(this, sql, ...rest);
+    });
+    try {
+      await expect(adapter.createFTSIndex('OrphanProbe', 'orphan_probe_fts', ['name'])).rejects.toThrow(
+        nativeError,
+      );
+      const indexes = await adapter.executeQuery('CALL SHOW_INDEXES() RETURN *');
+      expect(JSON.stringify(indexes)).not.toContain('orphan_probe_fts');
+    } finally {
+      spy.mockRestore();
+    }
+  }, 120_000);
+});
+
 /**
  * #2841: "function DROP_FTS_INDEX is not defined" is benign only when there is
  * nothing to drop. When the index is LIVE, that same message means the drop did

@@ -3468,8 +3468,14 @@ export const createFTSIndex = async (
   try {
     await queryAndDrain(conn, query);
     ensuredFTSIndexes.add(key);
-  } catch (e: any) {
-    if (e.message?.includes('already exists')) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    // LadybugDB can report an orphaned internal FTS table as "already exists"
+    // even when the requested index is absent from SHOW_INDEXES().
+    if (
+      message.includes('already exists') &&
+      (await ftsIndexPresenceInCatalog(tableName, indexName)) === 'present'
+    ) {
       ensuredFTSIndexes.add(key);
       return;
     }
