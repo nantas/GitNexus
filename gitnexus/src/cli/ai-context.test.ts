@@ -54,6 +54,29 @@ test('generateAIContextFiles installs repo skills under .agents/skills/gitnexus'
   }
 });
 
+test('generateAIContextFiles keeps skills when .claude/skills aliases .agents/skills', async () => {
+  const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-ai-context-alias-'));
+
+  try {
+    await fs.mkdir(path.join(repoPath, '.agents', 'skills'), { recursive: true });
+    await fs.mkdir(path.join(repoPath, '.claude'), { recursive: true });
+    await fs.symlink(path.join('..', '.agents', 'skills'), path.join(repoPath, '.claude', 'skills'), 'dir');
+
+    await generateAIContextFiles(repoPath, '', 'demo-repo', {
+      nodes: 1,
+      edges: 2,
+      processes: 3,
+    }, { skillScope: 'project' });
+
+    for (const skill of ['gitnexus-exploring', 'gitnexus-debugging', 'gitnexus-cli']) {
+      const skillPath = path.join(repoPath, '.agents', 'skills', 'gitnexus', skill, 'SKILL.md');
+      assert.match(await fs.readFile(skillPath, 'utf8'), /GitNexus/);
+    }
+  } finally {
+    await fs.rm(repoPath, { recursive: true, force: true });
+  }
+});
+
 test('generateAIContextFiles with global scope skips repo skill install', async () => {
   const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-ai-context-global-'));
 

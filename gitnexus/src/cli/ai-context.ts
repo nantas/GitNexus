@@ -578,6 +578,11 @@ Use GitNexus tools to accomplish this task.
         const legacyDir = path.join(legacySkillsDir, skill.name);
         const nestedSkill = path.join(legacyDir, 'SKILL.md');
         const leftover = await inspectLegacySkillDir(legacyDir);
+        // Some repositories alias .claude/skills to .agents/skills. In that
+        // case the legacy path is the skill we just installed, not a copy.
+        if (leftover !== null && await fs.realpath(legacyDir) === await fs.realpath(skillDir)) {
+          continue;
+        }
         if (leftover !== null && skillBytesDiverge(leftover.nestedExisting, skillContent)) {
           logger.warn(`Preserved customized skill ${nestedSkill}; ${SKILL_PRESERVE_HINT}.`);
           legacyPreserved += 1;
