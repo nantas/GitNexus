@@ -6,6 +6,7 @@ export interface UnityObjectBlock {
   stripped: boolean;
   fields: Record<string, string>;
   rawBody: string;
+  scriptEvidence?: { line: number; lineText: string };
 }
 
 const SUPPORTED_TYPES = new Set<UnityObjectType>(['MonoBehaviour', 'PrefabInstance', 'GameObject']);
@@ -16,6 +17,7 @@ export function parseUnityYamlObjects(text: string): UnityObjectBlock[] {
 
   let currentHeader: { objectId: string; stripped: boolean } | null = null;
   let currentBody: string[] = [];
+  let scriptEvidence: UnityObjectBlock['scriptEvidence'];
 
   const flush = () => {
     if (!currentHeader) return;
@@ -33,13 +35,14 @@ export function parseUnityYamlObjects(text: string): UnityObjectBlock[] {
       stripped: currentHeader.stripped,
       fields: parseFields(currentBody),
       rawBody: currentBody.join('\n'),
+      ...(scriptEvidence ? { scriptEvidence } : {}),
     });
 
     currentHeader = null;
     currentBody = [];
   };
 
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     const header = line.match(/^--- !u!\d+ &(-?\d+)(?:\s+(\w+))?\s*$/);
     if (header) {
       flush();
@@ -47,11 +50,13 @@ export function parseUnityYamlObjects(text: string): UnityObjectBlock[] {
         objectId: header[1],
         stripped: header[2] === 'stripped',
       };
+      scriptEvidence = undefined;
       continue;
     }
 
     if (currentHeader) {
       currentBody.push(line);
+      if (/^ {2}m_Script\s*:/.test(line)) scriptEvidence = { line: index + 1, lineText: line };
     }
   }
 

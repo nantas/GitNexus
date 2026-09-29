@@ -1704,6 +1704,11 @@ async function runFullAnalysisInner(
     options = { ...options, force: true };
   }
 
+  if (existingMeta?.unityResourceFailures?.length) {
+    log('Previous Unity resource analysis was incomplete; forcing a full re-analyze.');
+    options = { ...options, force: true };
+  }
+
   // ── independently-versioned analysis capabilities ────────────────
   // `schemaFingerprint` is reserved for graph-wide incremental invariants. Some
   // persisted semantics apply only to repositories containing relevant source
@@ -4220,6 +4225,9 @@ async function runFullAnalysisInner(
       // Optional grammars may be unavailable by design; omitting the receipt in
       // that case makes readers report an unverified lower bound.
       scopeExtractionReceipt: pipelineResult.unavailableScopeLanguageFiles === 0 ? 1 : undefined,
+      unityResourceFailures: pipelineResult.unityResult === undefined
+        ? existingMeta?.unityResourceFailures
+        : pipelineResult.unityResult.resourceFailures,
       // Carried forward ONLY when this run could not measure — `saveMeta` writes
       // a fresh object, so omitting the key deletes a prior record and turns a
       // hedged answer back into a confident one. A run that DID measure always

@@ -1,0 +1,32 @@
+
+ RUN  v4.1.11 /Users/nantasmac/projects/agentic/GitNexus/gitnexus
+
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > matches the committed golden snapshot across all csharp-* fixtures + DAO shape 375ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > resolveGoldenAction(true,false,true) -> 'regenerate' 0ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > resolveGoldenAction(false,false,true) -> 'fail' 0ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > resolveGoldenAction(false,false,false) -> 'regenerate' 0ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > resolveGoldenAction(false,true,true) -> 'compare' 0ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > resolveGoldenAction(false,true,false) -> 'compare' 0ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > produces a deterministic digest across repeated runs 6ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > digest is sensitive to capture-match emission order 2ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > records a capture-group count for every fixture and the DAO shape 106ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > is ON by default on a full rebuild — no opt-in needed 1ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > is turned off by an explicit falsy env value (the escape hatch) 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > is turned off by an explicit option, which beats the env 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > honors the explicit option on a full rebuild 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > honors the env toggle on a full rebuild 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > refuses an incremental run even when explicitly requested 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > refuses an incremental run even when the env toggle is set 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > buildPhaseList under streamGraphEmit > keeps every CALLS-consuming phase enabled — nothing is traded away 1ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > buildPhaseList under streamGraphEmit > keeps mro and di, whose reads are all in the retained set 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > buildPhaseList under streamGraphEmit > leaves the phase list untouched when the flag is off 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > buildPhaseList under streamGraphEmit > still honours skipGraphPhases independently of the streaming flag 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > RETAINED_REL_TYPES tracks its readers > streams Actuator relationship types that no later phase reads 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > RETAINED_REL_TYPES tracks its readers > retains every relationship type any phase reads back mid-pipeline 220ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > streamGraphEmit without a CSV dir > throws instead of silently running without streaming 1ms
+
+ Test Files  2 passed (2)
+      Tests  23 passed (23)
+   Start at  12:33:05
+   Duration  3.40s (transform 2.79s, setup 0ms, import 3.55s, tests 713ms, environment 0ms)
+

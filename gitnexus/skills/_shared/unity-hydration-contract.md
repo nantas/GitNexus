@@ -9,3 +9,8 @@ When querying Unity resource evidence via `query` or `context`:
 3. Treat `parity` as the completeness path for advanced verification only.
 
 CLI equivalents: `--unity-resources on --unity-hydration compact` (or `parity`).
+
+Build-time `unity-resource-analysis-failed` means some resource facts are incomplete.
+Inspect the metadata failure paths and repair/reindex before relying on absent facts.
+Query hydration still obeys its existing budgets and strict fallback/parity rules;
+resource parsing success alone does not establish runtime closure.

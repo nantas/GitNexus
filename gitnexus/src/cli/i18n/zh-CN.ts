@@ -20,6 +20,7 @@ export const zhCN = {
   'help.fork.14': '运行时链验证模式：off|on-demand',
   'help.fork.15': '目标编码代理：claude、opencode 或 codex',
   'help.fork.16': 'Unity 资源检索模式：off|on|auto',
+  'help.fork.17': '分析配置中的仓库名称',
 
   'common.notIndexed': '未找到已索引的仓库。',
   'common.runAnalyze': '请在 git 仓库中运行 `gitnexus analyze` 进行索引。',

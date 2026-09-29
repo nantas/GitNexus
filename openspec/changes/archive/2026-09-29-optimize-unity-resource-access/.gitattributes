@@ -1,0 +1,2 @@
+# Keep captured test output verbatim, including terminal whitespace.
+*.log -whitespace

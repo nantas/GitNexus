@@ -1,0 +1,50 @@
+{
+  "baseline": {
+    "code": 1,
+    "signal": null,
+    "elapsedMs": 960569,
+    "ended": "2026-09-29T05:05:36.627Z",
+    "phasesMs": {
+      "scan": 11135,
+      "structure": 529,
+      "springConfig": 16,
+      "markdown": 2,
+      "cobol": 24,
+      "parse": 35582,
+      "routes": 47,
+      "tools": 2,
+      "orm": 0,
+      "crossFile": 2,
+      "scopeResolution": 29147,
+      "springAutoConfiguration": 32,
+      "springAop": 0,
+      "springDestinations": 24,
+      "pruneLocalSymbols": 184,
+      "mro": 309,
+      "springAopInheritance": 76,
+      "di": 24,
+      "communities": 871,
+      "unity-resources": 655593,
+      "unity-lifecycle": 676,
+      "processes": 580,
+      "unity-processes": 227,
+      "unity-process-subtype": 126
+    },
+    "peakIsolateHeapBytes": 12669170416,
+    "peakMainHeapBytes": 12669170416,
+    "sampledPeakRssBytes": 5703843840,
+    "swapUsedMiB": {
+      "first": 30057.44,
+      "last": 42395.06,
+      "max": 42985.81
+    },
+    "pressureCounterDelta": {
+      "Swapins": 3263008,
+      "Swapouts": 4219207,
+      "Pageins": 5112106,
+      "Pageouts": 139486
+    },
+    "maxRssBytes": 5850087424,
+    "peakFootprintBytes": 22580362896
+  }
+}

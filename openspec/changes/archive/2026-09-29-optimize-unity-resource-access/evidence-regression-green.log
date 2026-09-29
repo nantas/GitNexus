@@ -1,0 +1,13 @@
+✔ each small resource component carries its own script evidence (22.176875ms)
+✔ each large resource component carries its own script evidence (9.787291ms)
+✔ parseUnityYamlObjects parses stripped MonoBehaviour and PrefabInstance blocks (0.872166ms)
+✔ parseUnityYamlObjects keeps inline list entries under their parent field (0.101583ms)
+✔ parseUnityYamlObjects supports negative object ids in headers (0.098917ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 163.994375

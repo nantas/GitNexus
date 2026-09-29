@@ -154,11 +154,11 @@ describe('RETAINED_REL_TYPES tracks its readers', () => {
     const srcDir = new URL('../../src/', import.meta.url).pathname;
 
     // Every literal `iterRelationshipsByType('X')` reachable while streaming is
-    // armed. `git grep -h` over src/ excluding tests; the sink itself is
+    // armed. Search src/ excluding tests; the sink itself is
     // excluded because its own fast-path check reads the constant, not an edge.
     const out = execFileSync(
       'grep',
-      ['-rhoE', "iterRelationshipsByType\\('[A-Z_]+'\\)", '--include=*.ts', srcDir],
+      ['-rhoE', "iterRelationshipsByType\\('[A-Z_]+'\\)", '--include=*.ts', '--exclude=*.test.ts', srcDir],
       { encoding: 'utf8' },
     );
     const readTypes = new Set(

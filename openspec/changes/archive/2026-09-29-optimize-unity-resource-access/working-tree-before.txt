@@ -1,0 +1,14 @@
+ M .pi/settings.json
+ M benchmarks/fixtures/unity-mini/.agents/skills/gitnexus/gitnexus-cli/SKILL.md
+ M benchmarks/fixtures/unity-mini/.agents/skills/gitnexus/gitnexus-debugging/SKILL.md
+ M benchmarks/fixtures/unity-mini/.agents/skills/gitnexus/gitnexus-exploring/SKILL.md
+ M benchmarks/fixtures/unity-mini/.agents/skills/gitnexus/gitnexus-guide/SKILL.md
+ M benchmarks/fixtures/unity-mini/.agents/skills/gitnexus/gitnexus-impact-analysis/SKILL.md
+ M benchmarks/fixtures/unity-mini/.agents/skills/gitnexus/gitnexus-refactoring/SKILL.md
+ M benchmarks/fixtures/unity-mini/AGENTS.md
+ M benchmarks/fixtures/unity-mini/CLAUDE.md
+?? .pi/prompts/
+?? .pi/skills/
+?? .scratch/
+?? benchmarks/fixtures/unity-mini/.agents/skills/gitnexus/_shared/
+?? openspec/changes/optimize-unity-resource-access/

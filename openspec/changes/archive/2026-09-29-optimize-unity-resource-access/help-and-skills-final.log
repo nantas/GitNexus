@@ -1,0 +1,99 @@
+
+ RUN  v4.1.11 /Users/nantasmac/projects/agentic/GitNexus/gitnexus
+
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > standard skill catalog coverage > exactly matches the independently discovered standard skills 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > standard skill catalog coverage > exactly matches the independently discovered Cursor subset 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > standard skill distribution for gitnexus-pr-review > contains every applicable canonical and shipped copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > standard skill distribution for gitnexus-exploring > contains every applicable canonical and shipped copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > standard skill distribution for gitnexus-impact-analysis > contains every applicable canonical and shipped copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > standard skill distribution for gitnexus-debugging > contains every applicable canonical and shipped copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > standard skill distribution for gitnexus-refactoring > contains every applicable canonical and shipped copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > standard skill distribution for gitnexus-guide > contains every applicable canonical and shipped copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > standard skill distribution for gitnexus-cli > contains every applicable canonical and shipped copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > documents the PDG analyze flag in every CLI copy 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > documents the AsyncAPI analyze flag in every CLI copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > documents the bunx runner and bootstrap in every CLI copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > documents CLI fallbacks in every impact-analysis copy 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > keeps the UNKNOWN-risk guidance in every impact-analysis copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > keeps the cross-surface risk-scale guidance in every impact-analysis copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > keeps the partial/truncated degradation guidance in every impact-analysis copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > keeps the partial/truncated degradation guidance in every refactoring copy 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > documents the current tools, schema, and cross-repo trace in every guide copy 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > keeps the inline-staleness-signal section in the canonical and plugin guide copies 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > keeps the repository-identity contract in every gitnexus-impact-analysis copy 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > keeps the repository-identity contract in every gitnexus-refactoring copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > keeps the repository-identity contract in every gitnexus-debugging copy 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > keeps the repository-identity contract in every gitnexus-exploring copy 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > intended standard-skill improvements stay in every applicable copy > uses the rename API's text_search vocabulary in every refactoring copy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > root AGENTS.md / CLAUDE.md managed block keeps the risk: UNKNOWN policy (#2899) > AGENTS.md managed block documents the policy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > root AGENTS.md / CLAUDE.md managed block keeps the risk: UNKNOWN policy (#2899) > CLAUDE.md managed block documents the policy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > root AGENTS.md / CLAUDE.md managed block keeps the risk: UNKNOWN policy (#2899) > AGENTS.md Always-Do pins the read-path MUST as its own bullet (#3076) 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > root AGENTS.md / CLAUDE.md managed block keeps the risk: UNKNOWN policy (#2899) > CLAUDE.md Always-Do pins the read-path MUST as its own bullet (#3076) 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > root AGENTS.md / CLAUDE.md managed block keeps the risk: UNKNOWN policy (#2899) > AGENTS.md managed block's Always Do / Never Do bullet counts do not drop below the known floor 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > root AGENTS.md / CLAUDE.md managed block keeps the risk: UNKNOWN policy (#2899) > CLAUDE.md managed block's Always Do / Never Do bullet counts do not drop below the known floor 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > root AGENTS.md / CLAUDE.md managed block keeps the degraded-detect_changes policy (#2915) > AGENTS.md managed block documents the policy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > root AGENTS.md / CLAUDE.md managed block keeps the degraded-detect_changes policy (#2915) > CLAUDE.md managed block documents the policy 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > shipped copies of gitnexus-plan stay in sync > npm package copy (gitnexus/skills/) is byte-identical 2ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > shipped copies of gitnexus-plan stay in sync > plugin copy (gitnexus-claude-plugin/skills/) is canonical + mcp.json only 4ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > shipped copies of gitnexus-work stay in sync > npm package copy (gitnexus/skills/) is byte-identical 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > shipped copies of gitnexus-work stay in sync > plugin copy (gitnexus-claude-plugin/skills/) is canonical + mcp.json only 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > shipped copies of gitnexus-review stay in sync > npm package copy (gitnexus/skills/) is byte-identical 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > shipped copies of gitnexus-review stay in sync > plugin copy (gitnexus-claude-plugin/skills/) is canonical + mcp.json only 2ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > shipped copies of gitnexus-lfg stay in sync > npm package copy (gitnexus/skills/) is byte-identical 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > shipped copies of gitnexus-lfg stay in sync > plugin copy (gitnexus-claude-plugin/skills/) is canonical + mcp.json only 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > standalone Cursor review skill stays in sync > is byte-identical to the canonical gitnexus-review skill 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > gitnexus-review target contract > documents the PR URL target mode 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > gitnexus-review target contract > documents the base...head target mode 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > gitnexus-review target contract > documents the Branch, tag, or commit target mode 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > gitnexus-review target contract > documents the Local changes target mode 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > gitnexus-review target contract > uses the generalized public skill name 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > duplicate nested standard skill gitnexus-pr-review stays deleted > has no files under .claude/skills/gitnexus/ 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > duplicate nested standard skill gitnexus-exploring stays deleted > has no files under .claude/skills/gitnexus/ 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > duplicate nested standard skill gitnexus-impact-analysis stays deleted > has no files under .claude/skills/gitnexus/ 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > duplicate nested standard skill gitnexus-debugging stays deleted > has no files under .claude/skills/gitnexus/ 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > duplicate nested standard skill gitnexus-refactoring stays deleted > has no files under .claude/skills/gitnexus/ 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > duplicate nested standard skill gitnexus-guide stays deleted > has no files under .claude/skills/gitnexus/ 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > duplicate nested standard skill gitnexus-cli stays deleted > has no files under .claude/skills/gitnexus/ 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > specialized nested skill gitnexus-pdg-query remains available > retains its SKILL.md 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > specialized nested skill gitnexus-taint-analysis remains available > retains its SKILL.md 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > skill-sync workflow contract > triggers on .claude/skills/gitnexus-*/** for both pull requests and main pushes 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > skill-sync workflow contract > triggers on .claude/skills/gitnexus/** for both pull requests and main pushes 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > skill-sync workflow contract > triggers on gitnexus/skills/** for both pull requests and main pushes 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > skill-sync workflow contract > triggers on gitnexus-claude-plugin/skills/** for both pull requests and main pushes 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > skill-sync workflow contract > triggers on gitnexus-cursor-integration/skills/** for both pull requests and main pushes 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > skill-sync workflow contract > triggers on gitnexus/test/unit/shipped-skills-sync.test.ts for both pull requests and main pushes 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > skill-sync workflow contract > triggers on gitnexus/test/unit/skills-steering.test.ts for both pull requests and main pushes 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > skill-sync workflow contract > triggers on gitnexus/test/unit/engineering-skills-contract.test.ts for both pull requests and main pushes 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > skill-sync workflow contract > triggers on gitnexus/test/unit/evidence-provenance-helper.test.ts for both pull requests and main pushes 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > skill-sync workflow contract > triggers on .github/workflows/skill-sync.yml for both pull requests and main pushes 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > skill-sync workflow contract > runs parity, steering, engineering, and provenance contracts in one blocking job 0ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > drift guard rejects symlinked shipped entries > rejects a mirror file symlinked to the canonical copy instead of passing byte-compare 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > drift guard rejects symlinked shipped entries > rejects a mirror subdirectory that is a symlink 1ms
+ ✓ |default| test/unit/shipped-skills-sync.test.ts > drift guard rejects symlinked shipped entries > still accepts a mirror made only of real byte-identical files 1ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > root help localizes commander headings, options, and command descriptions 176ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > command help localizes option descriptions and help suffix text 120ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > setup help exposes selective coding-agent configuration 110ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > localizes every registered CLI command and option description in zh-CN help 3920ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > analyze help localizes custom environment variable help text 169ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > analyze help documents the external storage root layout 133ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > query help keeps advanced search options without importing analyze deps 134ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > context help keeps optional name and disambiguation flags 133ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > impact help keeps repo, include-tests, and disambiguation flags 140ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > detect-changes help exposes compare scope and base-ref flags 142ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > query-family commands expose the --branch scope flag (#2106) 691ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > auto-sync help exposes lifecycle actions and state files 157ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > watch is reserved and does not start auto-sync or local watch 348ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > auto-sync init creates the default watch_config.yml and does not overwrite it 1757ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > auto-sync reset removes only derived auto-sync state files 764ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > auto-sync stop exits non-zero when no watch was stopped 760ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > auto-sync restart starts when the watch is not running 766ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > wiki help shows provider, review, and verbose flags 77ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > publish help names the registry, the token env var, and the opt-out behaviour 76ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > analyze help includes the FTS repair option 73ms
+ ✓ |default| test/unit/cli-index-help.test.ts > CLI help surface > localizes commander-generated option metadata labels 2ms
+
+ Test Files  2 passed (2)
+      Tests  90 passed (90)
+   Start at  12:27:16
+   Duration  10.97s (transform 257ms, setup 0ms, import 482ms, tests 10.68s, environment 0ms)
+

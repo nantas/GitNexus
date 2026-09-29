@@ -1,7 +1,9 @@
+import type { ResourceCosts } from './resource-costs.js';
+import { resourceLines } from './resource-lines.js';
+import { ResourceRecordStore, ResourceStorageError } from './resource-record-store.js';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
-import { createInterface } from 'node:readline';
 import { glob } from 'glob';
 import { buildMetaIndex } from './meta-index.js';
 import type { MergedUnityComponent, UnityObjectLayer } from './override-merger.js';
@@ -106,54 +108,17 @@ export async function resolveUnityBindings(input: ResolveInput): Promise<Resolve
   const hits = applyResourceAllowlist(rawHits, input.resourcePathAllowlist);
   const resourceBindings: ResolvedUnityBinding[] = [];
   const unityDiagnostics: string[] = [];
-  const resourceSizeCache = new Map<string, boolean>();
-
-  for (const hit of hits) {
-    const shouldUseLightweightBinding = !input.deepParseLargeResources
-      && await isLargeResourceForDeepParse(
-        input.repoRoot,
-        hit.resourcePath,
-        resourceSizeCache,
-      );
-    if (shouldUseLightweightBinding) {
-      resourceBindings.push(...await createLightweightBindings(
-        input.repoRoot,
-        hit,
-        scriptGuid,
-        input.scanContext?.assetGuidToPath,
-      ));
-      continue;
+  const uniqueHits = new Map(hits.map(hit => [normalizePath(hit.resourcePath), hit]));
+  for (const hit of uniqueHits.values()) {
+    let matched = false;
+    for await (const { binding } of resolveResourceBindings({
+      repoRoot: input.repoRoot, hit, scriptGuids: [scriptGuid],
+      scanContext: input.scanContext, deepParseLargeResources: input.deepParseLargeResources,
+    })) {
+      matched = true;
+      resourceBindings.push(binding);
     }
-
-    const blocks = await getResourceBlocks(input.repoRoot, hit.resourcePath, input.scanContext);
-    const matchedComponents = blocks.filter((block) => {
-      if (block.objectType !== 'MonoBehaviour') return false;
-      const scriptRefGuid = extractGuidFromScriptField(block.fields.m_Script || '');
-      if (!scriptRefGuid) return false;
-      return scriptRefGuid.toLowerCase() === scriptGuid.toLowerCase();
-    });
-
-    if (matchedComponents.length === 0) {
-      unityDiagnostics.push(`No MonoBehaviour block matched script guid ${scriptGuid} in ${hit.resourcePath}.`);
-      continue;
-    }
-
-    for (const block of matchedComponents) {
-      const resolved = resolveBindingForComponent(block, blocks, hit, input.scanContext);
-      resourceBindings.push({
-        resourcePath: hit.resourcePath,
-        resourceType: hit.resourceType,
-        bindingKind: resolved.bindingKind,
-        componentObjectId: block.objectId,
-        evidence: {
-          line: hit.line,
-          lineText: hit.lineText,
-        },
-        serializedFields: resolved.serializedFields,
-        resolvedReferences: resolved.resolvedReferences,
-        assetRefPaths: extractAssetRefPathReferences(resolved.serializedFields),
-      });
-    }
+    if (!matched) unityDiagnostics.push(`No MonoBehaviour block matched script guid ${scriptGuid} in ${hit.resourcePath}.`);
   }
 
   return {
@@ -164,6 +129,58 @@ export async function resolveUnityBindings(input: ResolveInput): Promise<Resolve
     serializedFields: aggregateSerializedFields(resourceBindings),
     unityDiagnostics,
   };
+}
+
+export interface ResourceBindingFact {
+  scriptGuid: string;
+  binding: ResolvedUnityBinding;
+  /** Consume before advancing the resource iterator; records belong to this component. */
+  referenceRecords?: AsyncIterable<UnityResolvedReference>;
+}
+
+/** Resource-oriented parser shared by analyze and selected query hydration. */
+export async function* resolveResourceBindings(input: {
+  repoRoot: string;
+  hit: UnityResourceGuidHit;
+  scriptGuids: readonly string[];
+  scanContext?: UnityScanContext;
+  assetGuidToPath?: Map<string, string>;
+  referenceBudgetBytes?: number;
+  costs?: ResourceCosts;
+  signal?: AbortSignal;
+  deepParseLargeResources?: boolean;
+}): AsyncGenerator<ResourceBindingFact> {
+  const { hit } = input;
+  const selected = new Set(input.scriptGuids.map(guid => guid.toLowerCase()));
+  const assetGuidToPath = input.assetGuidToPath ?? input.scanContext?.assetGuidToPath;
+  if (!input.deepParseLargeResources && await isLargeResourceForDeepParse(input.repoRoot, hit.resourcePath, new Map())) {
+    yield* createLightweightBindings(input.repoRoot, hit, selected, assetGuidToPath, input.referenceBudgetBytes, input.costs, input.signal);
+    return;
+  }
+  const boundedRead = input.referenceBudgetBytes !== undefined && !input.deepParseLargeResources;
+  if (input.costs && !input.scanContext?.resourceDocCache.has(normalizePath(hit.resourcePath))) {
+    input.costs.opens++;
+    input.costs.parses++;
+    if (!boundedRead) input.costs.bytes += (await fs.stat(path.join(input.repoRoot, hit.resourcePath))).size;
+  }
+  const blocks = await getResourceBlocks(input.repoRoot, hit.resourcePath, input.scanContext,
+    boundedRead ? { maxBytes: MAX_CACHED_RESOURCE_BYTES, signal: input.signal, costs: input.costs } : undefined);
+  for (const block of blocks) {
+    if (block.objectType !== 'MonoBehaviour') continue;
+    const scriptGuid = extractGuidFromScriptField(block.fields.m_Script || '')?.toLowerCase();
+    if (!scriptGuid || !selected.has(scriptGuid)) continue;
+    const resolved = resolveBindingForComponent(block, blocks, hit, { assetGuidToPath });
+    yield { scriptGuid, binding: {
+      resourcePath: hit.resourcePath,
+      resourceType: hit.resourceType,
+      bindingKind: resolved.bindingKind,
+      componentObjectId: block.objectId,
+      evidence: block.scriptEvidence ?? { line: hit.line, lineText: hit.lineText },
+      serializedFields: resolved.serializedFields,
+      resolvedReferences: resolved.resolvedReferences,
+      assetRefPaths: extractAssetRefPathReferences(resolved.serializedFields),
+    } };
+  }
 }
 
 function applyResourceAllowlist(
@@ -179,48 +196,78 @@ function applyResourceAllowlist(
 }
 
 /** Extract only external GUID fields from large MonoBehaviour blocks, without retaining YAML bodies. */
-async function createLightweightBindings(
+async function* createLightweightBindings(
   repoRoot: string,
   hit: UnityResourceGuidHit,
-  scriptGuid: string,
+  selectedGuids: ReadonlySet<string>,
   assetGuidToPath?: Map<string, string>,
-): Promise<ResolvedUnityBinding[]> {
-  const stream = createReadStream(path.join(repoRoot, normalizePath(hit.resourcePath)), { encoding: 'utf-8' });
-  const reader = createInterface({ input: stream, crlfDelay: Infinity });
-  const bindings: ResolvedUnityBinding[] = [];
+  referenceBudgetBytes?: number,
+  costs?: ResourceCosts,
+  signal?: AbortSignal,
+): AsyncGenerator<ResourceBindingFact> {
+  if (costs) { costs.opens++; costs.parses++; }
+  const reader = resourceLines(path.join(repoRoot, normalizePath(hit.resourcePath)), undefined,
+    bytes => { if (costs) costs.bytes += bytes; }, signal);
+  let referenceStore: ResourceRecordStore<UnityResolvedReference> | undefined;
+  const appendReference = async (reference: UnityResolvedReference) => {
+    if (referenceBudgetBytes === undefined) references.push(reference);
+    else {
+      referenceStore ??= new ResourceRecordStore<UnityResolvedReference>(referenceBudgetBytes);
+      await referenceStore.append(reference);
+      if (costs) costs.peakRecordBytes = Math.max(costs.peakRecordBytes, referenceStore.metrics.peakMemoryBytes);
+    }
+  };
+  const releaseReferences = async () => {
+    if (!referenceStore) return;
+    const store = referenceStore;
+    referenceStore = undefined;
+    if (costs) {
+      costs.spillWrittenBytes += store.metrics.writtenBytes;
+      costs.spillReadBytes += store.metrics.readBytes;
+      costs.spillWriteMs += store.metrics.writeMs;
+      costs.spillReadMs += store.metrics.readMs;
+    }
+    await store.close();
+  };
   let objectId: string | undefined;
   let stripped = false;
   let inMonoBehaviour = false;
-  let matchesScript = false;
+  let matchedGuid: string | undefined;
   let fieldName: string | undefined;
   let listIndex = 0;
   let references: UnityResolvedReference[] = [];
+  let lineNumber = 0;
+  let evidence: UnityBindingEvidence = { line: hit.line, lineText: hit.lineText };
 
   const flush = () => {
-    if (!inMonoBehaviour || !matchesScript || !objectId) return;
-    bindings.push({
+    if (!inMonoBehaviour || !matchedGuid || !objectId) return;
+    return { scriptGuid: matchedGuid, referenceRecords: referenceStore?.records(), binding: {
       resourcePath: hit.resourcePath,
       resourceType: hit.resourceType,
       bindingKind: stripped ? (hit.resourceType === 'scene' ? 'scene-override' : 'nested')
         : (hit.resourceType === 'scene' ? 'scene-override' : 'direct'),
       componentObjectId: objectId,
       lightweight: true,
-      evidence: { line: hit.line, lineText: hit.lineText },
+      evidence,
       serializedFields: { scalarFields: [], referenceFields: [] },
       resolvedReferences: references,
       assetRefPaths: [],
-    });
+    } as ResolvedUnityBinding };
   };
 
+  let failure: unknown;
   try {
     for await (const line of reader) {
+      lineNumber += 1;
       const header = line.match(/^--- !u!\d+ &(-?\d+)(?:\s+(\w+))?\s*$/);
       if (header) {
-        flush();
+        const previous = flush();
+        if (previous) yield previous;
+        await releaseReferences();
         objectId = header[1];
         stripped = header[2] === 'stripped';
         inMonoBehaviour = false;
-        matchesScript = false;
+        matchedGuid = undefined;
         fieldName = undefined;
         references = [];
         continue;
@@ -238,11 +285,13 @@ async function createLightweightBindings(
         listIndex = 0;
         const value = field[2].trim();
         if (fieldName === 'm_Script') {
-          matchesScript = extractGuidFromScriptField(value)?.toLowerCase() === scriptGuid.toLowerCase();
+          const guid = extractGuidFromScriptField(value)?.toLowerCase();
+          matchedGuid = guid && selectedGuids.has(guid) ? guid : undefined;
+          evidence = { line: lineNumber, lineText: line };
         } else if (!fieldName.startsWith('m_')) {
           const ref = parseObjectReference(value);
           if (ref?.guid) {
-            references.push(resolveReferenceCandidate({
+            await appendReference(resolveReferenceCandidate({
               fieldName, sourceLayer: baseLayerName(hit.resourceType),
               fileId: ref.fileId, guid: ref.guid, fromList: false,
             }, new Map(), hit.resourcePath, assetGuidToPath));
@@ -256,17 +305,23 @@ async function createLightweightBindings(
       if (!listRef) continue;
       const ref = parseObjectReference(listRef[1]);
       if (!ref?.guid) continue;
-      references.push(resolveReferenceCandidate({
+      await appendReference(resolveReferenceCandidate({
         fieldName, sourceLayer: baseLayerName(hit.resourceType),
         fileId: ref.fileId, guid: ref.guid, fromList: true, listIndex: listIndex++,
       }, new Map(), hit.resourcePath, assetGuidToPath));
     }
-    flush();
-  } finally {
-    reader.close();
-    stream.destroy();
+    const last = flush();
+    if (last) yield last;
+  } catch (error) { failure = error; throw error; }
+  finally {
+    const errors: unknown[] = [];
+    try { await reader.return(undefined); } catch (error) { errors.push(error); }
+    try { await releaseReferences(); } catch (error) { errors.push(error); }
+    if (errors.length) {
+      if (failure !== undefined) errors.unshift(failure);
+      throw new ResourceStorageError('Unity resolution cleanup failed.', new AggregateError(errors));
+    }
   }
-  return bindings;
 }
 
 async function isLargeResourceForDeepParse(
@@ -351,6 +406,7 @@ async function getResourceBlocks(
   repoRoot: string,
   resourcePath: string,
   scanContext?: UnityScanContext,
+  boundedRead?: { maxBytes: number; signal?: AbortSignal; costs?: ResourceCosts },
 ): Promise<UnityObjectBlock[]> {
   const normalizedResourcePath = normalizePath(resourcePath);
   const cached = scanContext?.resourceDocCache.get(normalizedResourcePath);
@@ -364,7 +420,22 @@ async function getResourceBlocks(
     const stat = await fs.stat(absoluteResourcePath);
     allowCache = stat.size <= MAX_CACHED_RESOURCE_BYTES;
   }
-  const raw = await fs.readFile(absoluteResourcePath, 'utf-8');
+  let raw: string;
+  if (boundedRead) {
+    // Enforce the small branch's bound even if the file grows after stat().
+    const stream = createReadStream(absoluteResourcePath, { highWaterMark: 64 * 1024, signal: boundedRead.signal });
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    try {
+      for await (const chunk of stream) {
+        bytes += chunk.length;
+        if (boundedRead.costs) boundedRead.costs.bytes += chunk.length;
+        if (bytes > boundedRead.maxBytes) throw new Error('Resource grew beyond the small-parser input budget.');
+        chunks.push(chunk);
+      }
+      raw = Buffer.concat(chunks).toString('utf8');
+    } finally { stream.destroy(); }
+  } else raw = await fs.readFile(absoluteResourcePath, 'utf-8');
   const blocks = parseUnityYamlObjects(raw);
   if (allowCache) {
     scanContext?.resourceDocCache.set(normalizedResourcePath, blocks);
@@ -376,7 +447,7 @@ function resolveBindingForComponent(
   componentBlock: UnityObjectBlock,
   blocks: UnityObjectBlock[],
   hit: UnityResourceGuidHit,
-  scanContext?: UnityScanContext,
+  scanContext?: Pick<UnityScanContext, 'assetGuidToPath'>,
 ): { bindingKind: UnityBindingKind; serializedFields: UnitySerializedFields; resolvedReferences: UnityResolvedReference[] } {
   const directLayer = createLayerFromFields(componentBlock.fields, baseLayerName(hit.resourceType));
   const layers: UnityObjectLayer[] = [directLayer];

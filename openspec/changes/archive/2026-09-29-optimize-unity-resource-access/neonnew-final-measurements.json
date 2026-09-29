@@ -1,0 +1,108 @@
+{
+  "baseline": {
+    "code": 0,
+    "signal": null,
+    "diskStopped": false,
+    "elapsedMs": 786176,
+    "ended": "2026-09-29T05:34:50.719Z",
+    "phasesMs": {
+      "scan": 11100,
+      "structure": 500,
+      "springConfig": 29,
+      "markdown": 3,
+      "cobol": 23,
+      "parse": 38931,
+      "routes": 43,
+      "tools": 3,
+      "orm": 0,
+      "crossFile": 3,
+      "scopeResolution": 36519,
+      "springAutoConfiguration": 29,
+      "springAop": 0,
+      "springDestinations": 25,
+      "pruneLocalSymbols": 141,
+      "mro": 301,
+      "springAopInheritance": 47,
+      "di": 18,
+      "communities": 773,
+      "unity-resources": 533882,
+      "unity-lifecycle": 337,
+      "processes": 449,
+      "unity-processes": 157,
+      "unity-process-subtype": 103
+    },
+    "peakIsolateHeapBytes": 6517413480,
+    "peakMainHeapBytes": 6517413480,
+    "sampledPeakRssBytes": 4069916672,
+    "swapUsedMiB": {
+      "first": 26548.81,
+      "last": 32717.75,
+      "max": 32928.5
+    },
+    "pressureCounterDelta": {
+      "Swapins": 3793685,
+      "Swapouts": 4785999,
+      "Pageins": 6525552,
+      "Pageouts": 172379
+    },
+    "maxRssBytes": 4097327104,
+    "peakFootprintBytes": 17598160768
+  },
+  "optimized": {
+    "code": 0,
+    "signal": null,
+    "diskStopped": false,
+    "elapsedMs": 512561,
+    "ended": "2026-09-29T05:45:13.463Z",
+    "phasesMs": {
+      "scan": 15066,
+      "structure": 586,
+      "springConfig": 17,
+      "markdown": 2,
+      "cobol": 25,
+      "parse": 67850,
+      "routes": 73,
+      "tools": 4,
+      "orm": 0,
+      "crossFile": 3,
+      "scopeResolution": 31007,
+      "springAutoConfiguration": 24,
+      "springAop": 1,
+      "springDestinations": 27,
+      "pruneLocalSymbols": 128,
+      "mro": 224,
+      "springAopInheritance": 31,
+      "di": 14,
+      "communities": 749,
+      "unity-resources": 243398,
+      "unity-lifecycle": 227,
+      "processes": 408,
+      "unity-processes": 135,
+      "unity-process-subtype": 132
+    },
+    "peakIsolateHeapBytes": 2062855328,
+    "peakMainHeapBytes": 2062855328,
+    "sampledPeakRssBytes": 3106242560,
+    "swapUsedMiB": {
+      "first": 21387.69,
+      "last": 29576.62,
+      "max": 29823.44
+    },
+    "pressureCounterDelta": {
+      "Swapins": 2044987,
+      "Swapouts": 2633063,
+      "Pageins": 2260429,
+      "Pageouts": 149495
+    },
+    "maxRssBytes": 3221929984,
+    "peakFootprintBytes": 12417653712
+  },
+  "reductionPercent": {
+    "elapsedMs": 34.803275602409634,
+    "peakIsolateHeapBytes": 68.34855829954186,
+    "peakMainHeapBytes": 68.34855829954186,
+    "maxRssBytes": 21.3650777148204,
+    "peakFootprintBytes": 29.43777548287937,
+    "unityPhase": 54.40977594299864
+  }
+}

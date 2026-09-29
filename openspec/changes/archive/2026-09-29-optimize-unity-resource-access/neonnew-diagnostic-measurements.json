@@ -1,0 +1,99 @@
+{
+  "baseline": {
+    "code": 1,
+    "signal": null,
+    "elapsedMs": 960569,
+    "ended": "2026-09-29T05:05:36.627Z",
+    "phasesMs": {
+      "scan": 11135,
+      "structure": 529,
+      "springConfig": 16,
+      "markdown": 2,
+      "cobol": 24,
+      "parse": 35582,
+      "routes": 47,
+      "tools": 2,
+      "orm": 0,
+      "crossFile": 2,
+      "scopeResolution": 29147,
+      "springAutoConfiguration": 32,
+      "springAop": 0,
+      "springDestinations": 24,
+      "pruneLocalSymbols": 184,
+      "mro": 309,
+      "springAopInheritance": 76,
+      "di": 24,
+      "communities": 871,
+      "unity-resources": 655593,
+      "unity-lifecycle": 676,
+      "processes": 580,
+      "unity-processes": 227,
+      "unity-process-subtype": 126
+    },
+    "peakIsolateHeapBytes": 12669170416,
+    "peakMainHeapBytes": 12669170416,
+    "sampledPeakRssBytes": 5703843840,
+    "swapUsedMiB": {
+      "first": 30057.44,
+      "last": 42395.06,
+      "max": 42985.81
+    },
+    "pressureCounterDelta": {
+      "Swapins": 3263008,
+      "Swapouts": 4219207,
+      "Pageins": 5112106,
+      "Pageouts": 139486
+    },
+    "maxRssBytes": 5850087424,
+    "peakFootprintBytes": 22580362896
+  },
+  "optimized": {
+    "code": 0,
+    "signal": null,
+    "diskStopped": false,
+    "elapsedMs": 601327,
+    "ended": "2026-09-29T05:19:14.119Z",
+    "phasesMs": {
+      "scan": 23494,
+      "structure": 752,
+      "springConfig": 69,
+      "markdown": 9,
+      "cobol": 120,
+      "parse": 83126,
+      "routes": 96,
+      "tools": 3,
+      "orm": 0,
+      "crossFile": 10,
+      "scopeResolution": 38206,
+      "springAutoConfiguration": 29,
+      "springAop": 0,
+      "springDestinations": 34,
+      "pruneLocalSymbols": 212,
+      "mro": 296,
+      "springAopInheritance": 45,
+      "di": 20,
+      "communities": 889,
+      "unity-resources": 234305,
+      "unity-lifecycle": 857,
+      "processes": 771,
+      "unity-processes": 219,
+      "unity-process-subtype": 170
+    },
+    "peakIsolateHeapBytes": 2275567232,
+    "peakMainHeapBytes": 2275567232,
+    "sampledPeakRssBytes": 3205562368,
+    "swapUsedMiB": {
+      "first": 25893.44,
+      "last": 32537.56,
+      "max": 33796.62
+    },
+    "pressureCounterDelta": {
+      "Swapins": 2918938,
+      "Swapouts": 3458272,
+      "Pageins": 2340133,
+      "Pageouts": 143312
+    },
+    "maxRssBytes": 3239936000,
+    "peakFootprintBytes": 12720636520
+  }
+}

@@ -1,0 +1,39 @@
+
+ RUN  v4.1.11 /Users/nantasmac/projects/agentic/GitNexus/gitnexus
+
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > first run populates fileHashes + schemaVersion and clears incrementalInProgress on success
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > second run on unchanged state takes the alreadyUpToDate fast path
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > useParseCache:false bypasses the alreadyUpToDate fast path without --force
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > rebuilds for Actuator snapshots and once more when runtime enrichment is disabled
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > a same-commit v8 index missing the global Class capability rebuilds before the fast path
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > a Java index missing enum heritage evidence rebuilds before the fast path (#2918)
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > a same-commit index with NO fingerprint (pre-#2798) rebuilds once, not grandfathered
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > a JVM index missing Bean inventory evidence rebuilds and restores the scoped stamp
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > rebuilds a JVM index when the registered Spring vendor prefixes change
+ ✓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > a config-only index missing Spring config evidence rebuilds and restores the scoped stamp 15269ms
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > persists Kotlin unresolved markers when a Spring config key is deleted incrementally
+ ✓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > adding the first JVM file re-evaluates capabilities after the pipeline and avoids a top-up 12056ms
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > replaces Spring AOP evidence across real incremental runs without duplicates
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > second run after a comment-only edit takes the incremental path, clears the dirty flag, and preserves graph stats exactly
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > skips the framework annotation drift query when no Bean source changed
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > incremental output is byte-equivalent to a full rebuild (incremental ≡ --force on the same repo state)
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > rewrites unchanged Spring bean metadata when same-package shadowing changes
+ ✓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > rewrites unchanged Kotlin Spring bean metadata when same-package shadowing changes 8760ms
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > rewrites unchanged Bean factory declarations when same-package shadowing changes
+ ✓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > a hub edit whose write set covers most of a large repo escalates to the full DB write plan (#2409) 16781ms
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > surgical incremental run keeps embedding rows in lockstep: changed restored, deleted gone, unchanged intact, legacy orphan swept (tri-review 4669518496 KTD10 + FIX 3)
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > a stale incrementalInProgress flag at startup forces a full rebuild that clears it
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > a foreign schema fingerprint forces a full rebuild on an unchanged-commit re-analyze
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > a stale cjkSegmentation stamp forces a full rebuild on an unchanged-commit re-analyze
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > first-ever analyze of a brand-new repo proceeds without a spurious CJK mode force-rebuild
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > incremental runs neither strand nor duplicate INJECTS edges (delete-all is not pdg-gated) (#2200)
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — incremental orchestration > incremental runs do not duplicate repository-wide Spring DECLARES edges (#2415)
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — escalated wipe recreates the vector index (#2409, tri-review 4669518496 P1) > recreates the HNSW index after an escalated wipe-and-restore and stamps meta honestly (tri-review 4669518496 P1)
+ ↓ |lbug-db| test/unit/incremental-orchestration.test.ts > runFullAnalysis — AsyncAPI document reading > forces a rebuild while enabled, re-reads a changed document, and cleans up once on disable
+
+ Test Files  1 passed (1)
+      Tests  4 passed | 25 skipped (29)
+   Start at  09:27:21
+   Duration  53.45s (transform 2.47s, setup 0ms, import 481ms, tests 52.87s, environment 0ms)
+
+JSON report written to /Users/nantasmac/projects/agentic/GitNexus/openspec/changes/optimize-unity-resource-access/four-failures-before.json

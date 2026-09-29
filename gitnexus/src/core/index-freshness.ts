@@ -9,6 +9,7 @@ export const INDEX_INCOMPLETE_REASONS = [
   'graph-write-collapsed',
   'scope-extraction-unverified',
   'scope-extraction-failed',
+  'unity-resource-analysis-failed',
 ] as const;
 
 export type IndexIncompleteReason = (typeof INDEX_INCOMPLETE_REASONS)[number];
@@ -140,12 +141,14 @@ export function getIndexIncompleteReasons(
         | 'graphWriteCollapsed'
         | 'scopeExtractionFailures'
         | 'scopeExtractionReceipt'
+        | 'unityResourceFailures'
       >
     | null
     | undefined,
 ): IndexIncompleteReason[] {
   const reasons: IndexIncompleteReason[] = [];
   if (meta?.incrementalInProgress) reasons.push('incremental-in-progress');
+  if (meta?.unityResourceFailures?.length) reasons.push('unity-resource-analysis-failed');
   // The run finished and wrote metadata, but far fewer edges reached the DB
   // than the pipeline produced — the "refresh reported success, the index is
   // unusable" failure. Without this the index reads as fresh and every tool

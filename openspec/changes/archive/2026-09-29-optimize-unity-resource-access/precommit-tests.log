@@ -1,0 +1,13 @@
+
+> @veewo/gitnexus@1.6.12 test
+> vitest run --maxWorkers=2 test/unit/cli-index-help.test.ts test/unit/shipped-skills-sync.test.ts test/unit/stream-graph-emit-config.test.ts test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts
+
+
+ RUN  v4.1.11 /Users/nantasmac/projects/agentic/GitNexus/gitnexus
+
+
+ Test Files  4 passed (4)
+      Tests  113 passed (113)
+   Start at  13:54:05
+   Duration  12.45s (transform 3.54s, setup 0ms, import 4.88s, tests 13.11s, environment 0ms)
+

@@ -1,0 +1,26 @@
+{
+  "factCount": 352780,
+  "counts": {
+    "STEP_IN_PROCESS": 11790,
+    "UNITY_GRAPH_NODE_SCRIPT_REF": 70704,
+    "UNITY_SERIALIZED_TYPE_IN": 5793,
+    "CALLS": 256,
+    "UNITY_RESOURCE_SUMMARY": 74134,
+    "UNITY_COMPONENT_INSTANCE": 119315,
+    "UNITY_ASSET_GUID_REF": 70788
+  },
+  "factsExactlyEqual": true,
+  "seedExactlyEqual": true,
+  "resourceFailures": [],
+  "seedEntries": {
+    "version": 1,
+    "symbolToScriptPath": 10270,
+    "scriptPathToGuid": 8523,
+    "guidToResourcePaths": 2860,
+    "assetGuidToPath": 19399,
+    "prefabSourceRefs": 0
+  },
+  "inputManifestUnchanged": true,
+  "originalIndexMetadataUnchanged": true,
+  "workingTreeUnchanged": true
+}

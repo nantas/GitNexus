@@ -1,0 +1,45 @@
+✔ processUnityResources emits schema-compatible component-instance edges and materialized resource file nodes (39.841125ms)
+✔ fixture run emits scene->prefab UNITY_ASSET_GUID_REF and keeps script ref edges (30.074334ms)
+✔ large prefab retains ordinary GUID fields without duplicating prefab-source references (23.975667ms)
+✔ processUnityResources persists UNITY_RESOURCE_SUMMARY in LadybugDB (853.25675ms)
+✔ processUnityResources builds scan context once and enriches all class nodes (1.774625ms)
+✔ processUnityResources skips resolve for symbols without guid resource hits in scan context (0.33425ms)
+✔ processUnityResources skips resolve for symbols missing canonical script mapping (0.285041ms)
+✔ processUnityResources memoizes resolve results by symbol within one run (0.304917ms)
+✔ processUnityResources writes UNITY_RESOURCE_SUMMARY only for canonical class node (0.707875ms)
+✔ processUnityResources writes UNITY_RESOURCE_SUMMARY for serializable class field matches (0.427875ms)
+✔ processUnityResources writes asset-guid and graph-node reference edges from resolved references (0.353083ms)
+✔ processUnityResources emits prefab-source edges from scanContext.prefabSourceRefs only (0.19475ms)
+✔ processUnityResources consumes prefab-source stream incrementally and emits edges (1.275708ms)
+✔ prefab-source accounting invariant closes (0.204708ms)
+✔ no cross-signal dedupe collision when same source has script-guid and prefab-source refs (0.225167ms)
+✔ scan-context does not write graph edges directly; processor remains sole writer (9.172625ms)
+✔ prefab source pass can be disabled via env toggle (0.271041ms)
+✔ prefab nested source dedupes duplicate PrefabInstance rows (0.321416ms)
+✔ drops placeholder unresolved and zero-guid prefab-source rows and reports filtered counters (0.314666ms)
+✔ per-file scan failure is isolated and does not abort subsequent file emission (5.117083ms)
+✔ extracts prefab source refs without class binding resolve (0.284958ms)
+✔ processUnityResources writes compact UNITY_RESOURCE_SUMMARY reason by default (0.204083ms)
+✔ processUnityResources keeps UNITY_RESOURCE_SUMMARY reason compact when bindings include assetRefPaths (0.185792ms)
+✔ processUnityResources summary-only persistence ignores full payload mode and keeps summary reason (0.123792ms)
+✔ processUnityResources aggregates repetitive diagnostics with capped samples (0.320541ms)
+✔ processUnityResources passes class symbol declarations to scan context builder (0.145ms)
+✔ each small resource component carries its own script evidence (70.394125ms)
+✔ each large resource component carries its own script evidence (30.240167ms)
+✔ resource parser shares one semantic read for different scripts (small) (94.589417ms)
+✔ resource parser shares one semantic read for different scripts (large) (277.3095ms)
+✔ memory and spill preserve facts and clean only owned temporary storage (29.229042ms)
+✔ spill failure is fatal and never falls back to unbounded memory (2.349041ms)
+✔ fused discovery preserves source-only resources and resolves scripts once (34.060084ms)
+✔ session isolates missing and changed resources and closes on early consumption (14.585625ms)
+✔ large single-component reference sets spill and suspend until consumed (659.964459ms)
+✔ long scalar lines remain bounded while oversized reference lines fail explicitly (1.533167ms)
+✔ resource failures reach index completeness without changing legacy metadata behavior (0.135ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1899.742042

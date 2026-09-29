@@ -1,17 +1,22 @@
+import { ResourceStorageError } from '../unity/resource-record-store.js';
 import { performance } from 'node:perf_hooks';
 import { generateId } from '../../lib/utils.js';
 import type { KnowledgeGraph, GraphNode } from '../graph/types.js';
 import type { UnityScanContext, UnitySymbolDeclaration } from '../unity/scan-context.js';
 import { buildUnityScanContext } from '../unity/scan-context.js';
 import { resolveUnityBindings } from '../unity/resolver.js';
+import { UnityResourceSession, type ResourceSelection, type ResourceFailure } from '../unity/resource-session.js';
 import { buildUnityParitySeed, type UnityParitySeed } from './unity-parity-seed.js';
 import { resolveUnityConfig } from '../config/unity-config.js';
+import { isDev } from './utils/env.js';
+import { logger } from '../logger.js';
 
 export interface UnityResourceProcessingResult {
   processedSymbols: number;
   bindingCount: number;
   componentCount: number;
   diagnostics: string[];
+  resourceFailures?: ResourceFailure[];
   prefabSourceStats: PrefabSourcePassStats;
   paritySeed?: UnityParitySeed;
   timingsMs: {
@@ -80,20 +85,24 @@ export async function processUnityResources(
   let serializedTypeEdgeCount = 0;
   let serializedTypeMissCount = 0;
   const serializedTypeSymbols = new Set<string>();
-  const resolvedBySymbol = new Map<string, Awaited<ReturnType<typeof resolveUnityBindings>>>();
-  const resolveErrorBySymbol = new Map<string, string>();
+  const resourceFailures: ResourceFailure[] = [];
+  const processedSymbolNames = new Set<string>();
   let scanContextMs = 0;
   let resolveMs = 0;
   let graphWriteMs = 0;
   let prefabSourceStats: PrefabSourcePassStats = initPrefabSourcePassStats();
+  let failure: unknown;
 
+  try {
   try {
     const tScanContextStart = performance.now();
     scanContext = await buildScanContextFn({
       repoRoot: options.repoPath,
       scopedPaths: options.scopedPaths,
       symbolDeclarations,
+      fuseResourceDiscovery: true,
     });
+    resourceFailures.push(...(scanContext.resourceFailures || []));
     scanContextMs += performance.now() - tScanContextStart;
 
     const uniqueResourcePaths = new Set<string>();
@@ -121,16 +130,21 @@ export async function processUnityResources(
       diagnostics.push(`prefab_source.rows_emitted=${prefabSourceStats.rowsEmitted}`);
       diagnostics.push(`prefab_source.file_errors=${prefabSourceStats.fileErrors}`);
     }
+    await scanContext.close?.();
     symbolsWithResourceHits = collectSymbolsWithResourceHits(scanContext);
   } catch (error) {
+    if (error instanceof ResourceStorageError || error instanceof AggregateError) throw error;
     if (scanContextMs === 0) {
       scanContextMs = performance.now() - tStart;
     }
-    diagnostics.push(error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    diagnostics.push(message);
+    resourceFailures.push({ resourcePath: '', capability: 'discovery', message });
   }
 
   const canonicalClassNodeBySymbol = buildCanonicalClassNodeIndex(classNodes, scanContext);
 
+  const selectedClasses: GraphNode[] = [];
   for (const classNode of classNodes) {
     const symbol = String(classNode.properties.name || '').trim();
     if (!symbol) continue;
@@ -155,30 +169,114 @@ export async function processUnityResources(
       }
     }
 
+    selectedClasses.push(classNode);
+  }
+
+  // Only compact routing state spans resources; full bindings are consumed immediately.
+  const workItems = async function* () {
+    if (deps?.resolveBindings) {
+      for (const classNode of selectedClasses) {
+        const symbol = String(classNode.properties.name || '').trim();
+        try {
+          const started = performance.now();
+          const resolved = await resolveBindingsFn({ repoRoot: options.repoPath, symbol, scanContext });
+          resolveMs += performance.now() - started;
+          yield { classNode, resolved };
+        } catch (error) {
+          issueDiagnostics.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+      return;
+    }
+    if (!scanContext) return;
+    const classesByGuid = new Map<string, GraphNode[]>();
+    const resources = new Map<string, ResourceSelection>();
+    for (const classNode of selectedClasses) {
+      const scriptPath = getCanonicalScriptPath(scanContext, String(classNode.properties.name || '').trim());
+      const guid = scanContext.scriptPathToGuid.get(scriptPath || '');
+      if (!guid) continue;
+      const key = guid.toLowerCase();
+      const nodes = classesByGuid.get(key) || [];
+      nodes.push(classNode);
+      classesByGuid.set(key, nodes);
+      for (const hit of scanContext.guidToResourceHits.get(guid) || []) {
+        const selection = resources.get(hit.resourcePath);
+        if (selection) {
+          if (!selection.scriptGuids.includes(key)) (selection.scriptGuids as string[]).push(key);
+        } else resources.set(hit.resourcePath, { resourcePath: hit.resourcePath, resourceType: hit.resourceType, scriptGuids: [key], fingerprint: scanContext.resourceFingerprints?.get(hit.resourcePath) });
+      }
+    }
+    const session = new UnityResourceSession({ repoRoot: options.repoPath,
+      resources: [...resources.values()].sort((a, b) => a.resourcePath.localeCompare(b.resourcePath)),
+      assetGuidToPath: scanContext.assetGuidToPath });
     try {
-      const resolveError = resolveErrorBySymbol.get(symbol);
-      if (resolveError) {
-        issueDiagnostics.push(resolveError);
-        continue;
+      const iterator = session.bindings();
+      try {
+        while (true) {
+          const started = performance.now();
+          const next = await iterator.next();
+          resolveMs += performance.now() - started;
+          if (next.done) break;
+          const { scriptGuid, binding, referenceRecords } = next.value;
+          // Materialize only the final graph payload in the consumer. Parser
+          // intermediates remain budgeted and spill independently of graph size.
+          if (referenceRecords) {
+            const replayStarted = performance.now();
+            for await (const reference of referenceRecords) binding.resolvedReferences.push(reference);
+            resolveMs += performance.now() - replayStarted;
+          }
+          for (const classNode of classesByGuid.get(scriptGuid) || []) {
+            yield { classNode, resolved: { resourceBindings: [binding], unityDiagnostics: [] as string[] } };
+          }
+        }
+      } finally { await iterator.return(undefined); }
+    } finally {
+      await session.close();
+      const costs = session.costs;
+      diagnostics.push(`resource-resolution: opens=${costs.opens}, bytes=${costs.bytes}, parses=${costs.parses}, peak-record-bytes=${costs.peakRecordBytes}, spill-write-bytes=${costs.spillWrittenBytes}, spill-read-bytes=${costs.spillReadBytes}, spill-write-ms=${roundMs(costs.spillWriteMs)}, spill-read-ms=${roundMs(costs.spillReadMs)}`);
+      resourceFailures.push(...session.failures);
+      issueDiagnostics.push(...session.failures.map(f => `${f.resourcePath}: ${f.message}`));
+    }
+  };
+  let summaryResource = '';
+  const summaryBySource = new Map<string, Map<string, { resourceType: string; bindingKinds: Set<string>; lightweight: boolean }>>();
+  const emitSummaries = () => {
+      for (const [sourceNodeId, perPath] of summaryBySource.entries()) {
+        for (const [resourcePath, summary] of perPath.entries()) {
+          const resourceFileId = generateId('File', resourcePath);
+          graph.addRelationship({
+            id: generateId('UNITY_RESOURCE_SUMMARY', `${sourceNodeId}->${resourceFileId}`),
+            type: 'UNITY_RESOURCE_SUMMARY',
+            sourceId: sourceNodeId,
+            targetId: resourceFileId,
+            confidence: 1.0,
+            reason: JSON.stringify({
+              resourceType: summary.resourceType,
+              bindingKinds: [...summary.bindingKinds.values()].sort(),
+              lightweight: true,
+            }),
+          });
+        }
       }
-
-      let resolved = resolvedBySymbol.get(symbol);
-      if (!resolved) {
-        const tResolveStart = performance.now();
-        resolved = await resolveBindingsFn({ repoRoot: options.repoPath, symbol, scanContext });
-        resolveMs += performance.now() - tResolveStart;
-        resolvedBySymbol.set(symbol, resolved);
-      }
-
+  };
+  for await (const { classNode, resolved } of workItems()) {
+    const symbol = String(classNode.properties.name || '').trim();
+    try {
       issueDiagnostics.push(...resolved.unityDiagnostics);
       if (resolved.resourceBindings.length === 0) {
         continue;
       }
 
-      processedSymbols += 1;
+      processedSymbolNames.add(symbol);
+      processedSymbols = processedSymbolNames.size;
 
       const tWriteStart = performance.now();
-      const summaryBySource = new Map<string, Map<string, { resourceType: string; bindingKinds: Set<string>; lightweight: boolean }>>();
+      const resourceKey = resolved.resourceBindings[0]?.resourcePath || '';
+      if (deps?.resolveBindings || resourceKey !== summaryResource) {
+        emitSummaries();
+        summaryBySource.clear();
+        summaryResource = resourceKey;
+      }
       const appendSummary = (
         sourceNodeId: string,
         binding: Awaited<ReturnType<typeof resolveUnityBindings>>['resourceBindings'][number],
@@ -279,30 +377,16 @@ export async function processUnityResources(
         }
       }
 
-      for (const [sourceNodeId, perPath] of summaryBySource.entries()) {
-        for (const [resourcePath, summary] of perPath.entries()) {
-          const resourceFileId = generateId('File', resourcePath);
-          graph.addRelationship({
-            id: generateId('UNITY_RESOURCE_SUMMARY', `${sourceNodeId}->${resourceFileId}`),
-            type: 'UNITY_RESOURCE_SUMMARY',
-            sourceId: sourceNodeId,
-            targetId: resourceFileId,
-            confidence: 1.0,
-            reason: JSON.stringify({
-              resourceType: summary.resourceType,
-              bindingKinds: [...summary.bindingKinds.values()].sort(),
-              lightweight: true,
-            }),
-          });
-        }
-      }
       graphWriteMs += performance.now() - tWriteStart;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      resolveErrorBySymbol.set(symbol, message);
+      resourceFailures.push({ resourcePath: resolved.resourceBindings[0]?.resourcePath || '', capability: 'resolution', message });
       issueDiagnostics.push(message);
     }
   }
+
+  emitSummaries();
+  summaryBySource.clear();
 
   if (skippedNoGuidHit > 0) {
     diagnostics.push(`prefilter: skipped ${skippedNoGuidHit} symbol(s) without guid resource hits`);
@@ -317,6 +401,13 @@ export async function processUnityResources(
     diagnostics.push(`prefilter: skipped ${skippedMissingCanonical} symbol(s) missing canonical script mapping`);
   }
   diagnostics.push(...aggregateUnityDiagnostics(issueDiagnostics));
+  if (scanContext?.resourceAccessMetrics) {
+    const costs = scanContext.resourceAccessMetrics;
+    const records = scanContext.temporaryRecordMetrics;
+    diagnostics.push(`resource-discovery: resources=${costs.resources}, opens=${costs.opens}, bytes=${costs.bytes}, ms=${roundMs(costs.durationMs)}, canonical-ms=${roundMs(costs.canonicalMs || 0)}, peak-record-bytes=${records?.peakMemoryBytes || 0}, spill-write-bytes=${records?.writtenBytes || 0}, spill-read-bytes=${records?.readBytes || 0}, spill-write-ms=${roundMs(records?.writeMs || 0)}, spill-read-ms=${roundMs(records?.readMs || 0)}`);
+  }
+  diagnostics.push(`resource-failures: ${new Set(resourceFailures.map(f => f.resourcePath)).size}`);
+  if (isDev) logger.info({ costs: diagnostics.filter(line => line.startsWith('resource-')) }, 'Unity resource access costs');
 
   return {
     processedSymbols,
@@ -324,6 +415,7 @@ export async function processUnityResources(
     componentCount,
     diagnostics,
     prefabSourceStats,
+    resourceFailures,
     paritySeed: scanContext ? buildUnityParitySeed(scanContext) : undefined,
     timingsMs: {
       scanContext: roundMs(scanContextMs),
@@ -332,6 +424,14 @@ export async function processUnityResources(
       total: roundMs(performance.now() - tStart),
     },
   };
+  } catch (error) { failure = error; throw error; }
+  finally {
+    try { await scanContext?.close?.(); }
+    catch (cleanupError) {
+      throw new ResourceStorageError('Unity discovery cleanup failed.',
+        new AggregateError(failure === undefined ? [cleanupError] : [failure, cleanupError]));
+    }
+  }
 }
 
 function collectSymbolsWithResourceHits(scanContext: UnityScanContext): Set<string> {
@@ -629,6 +729,7 @@ async function emitPrefabSourceGuidRefsFromScanContext(
 ): Promise<PrefabSourcePassStats> {
   const stats = initPrefabSourcePassStats();
   const dedupeBySource = new Map<string, Set<string>>();
+  let previousSource = '';
   const iterable: AsyncIterable<UnityScanContext['prefabSourceRefs'][number]> =
     typeof scanContext.streamPrefabSourceRefs === 'function'
       ? scanContext.streamPrefabSourceRefs({
@@ -647,6 +748,12 @@ async function emitPrefabSourceGuidRefsFromScanContext(
   for await (const row of iterable) {
     stats.rowsParsed += 1;
     const source = normalizePath(String(row.sourceResourcePath || '').trim());
+    // Fused discovery replays sorted resources. Release each completed source's
+    // consumer-side edge keys; legacy injected producers may be unordered.
+    if (scanContext.resourceFingerprints && source !== previousSource) {
+      dedupeBySource.clear();
+      previousSource = source;
+    }
     const guid = String(row.targetGuid || '').trim().toLowerCase();
     if (!guid || guid === '00000000000000000000000000000000') {
       stats.rowsFilteredZeroGuid += 1;

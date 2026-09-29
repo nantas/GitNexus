@@ -1,0 +1,296 @@
+
+ RUN  v4.1.11 /Users/nantasmac/projects/agentic/GitNexus/gitnexus
+
+ ↓ |default| test/integration/csharp-pipeline-benchmark.test.ts (3 tests | 3 skipped)
+ ↓ |default| test/integration/ruby-pipeline-benchmark.test.ts (1 test | 1 skipped)
+ ↓ |default| test/integration/cobol-pipeline-benchmark.test.ts (1 test | 1 skipped)
+ ↓ |default| test/integration/objective-c-pipeline-benchmark.test.ts (2 tests | 2 skipped)
+ ↓ |default| test/integration/rust-pipeline-benchmark.test.ts (1 test | 1 skipped)
+ ↓ |default| test/integration/cpp-pipeline-benchmark.test.ts (1 test | 1 skipped)
+ ↓ |default| test/integration/vue-pipeline-benchmark.test.ts (1 test | 1 skipped)
+ ↓ |default| test/integration/cpp-adl-benchmark.test.ts (1 test | 1 skipped)
+ ↓ |default| test/integration/cpp-captures-typeclass-benchmark.test.ts (1 test | 1 skipped)
+ ↓ |default| test/integration/php-pipeline-benchmark.test.ts (1 test | 1 skipped)
+ ↓ |default| test/integration/instance-ownership-pipeline-benchmark.test.ts (2 tests | 2 skipped)
+ ✓ |default| test/integration/resolvers/member-call-producer.test.ts (5 tests) 297ms
+ ✓ |default| test/unit/staleness-fallback.test.ts (6 tests) 2ms
+ ✓ |default| test/unit/worker-pool-stdout-forward.test.ts (2 tests) 4ms
+ ✓ |default| test/unit/lbug-readonly-error.test.ts (9 tests) 2ms
+ ✓ |default| test/unit/impact-pdg-real-code-metrics.test.ts (5 tests) 2ms
+ ✓ |default| test/integration/swift-conditional-directive.test.ts (4 tests) 1769ms
+     ✓ keeps Outer and both nested declarations in the real worker pipeline  549ms
+     ✓ keeps a column-zero directive inside a class body from discarding the class  415ms
+     ✓ keeps later top-level types out of a class whose header is split across branches  402ms
+     ✓ preserves a multiline string property while blanking a real directive between strings  402ms
+ ✓ |default| test/unit/java-runtime-symbol-strategy.test.ts (7 tests) 2ms
+ ✓ |default| test/unit/analyzer-identity-path-normalization.test.ts (5 tests) 2ms
+ ✓ |default| test/integration/resolvers/php-response-shapes.test.ts (8 tests) 287ms
+ ✓ |default| test/integration/api-query.test.ts (4 tests) 1223ms
+ ✓ |default| test/unit/group/group-path-utils.test.ts (14 tests) 2ms
+ ✓ |default| test/unit/scope-resolution/property-name-index.test.ts (4 tests) 2ms
+ ✓ |default| test/unit/runtime-chain-closure-evaluator.semantic.test.ts (3 tests) 2ms
+ ✓ |default| test/integration/swift-scope-capture-tripwire.test.ts (2 tests) 3410ms
+     ✓ per-entity cost stays roughly flat from 250 to 1000 entities  3138ms
+ ✓ |default| test/unit/scope-resolution/java/java-interpret.test.ts (12 tests) 2ms
+ ✓ |default| test/integration/run-analyze-adopt-failure.test.ts (1 test) 6975ms
+     ✓ a failed label sync warns and the run still succeeds, already registered  6974ms
+ ✓ |default| test/unit/workers/quarantine.test.ts (8 tests) 2ms
+ ✓ |default| test/integration/resolvers/java-1928.test.ts (5 tests) 534ms
+ ✓ |default| test/unit/parse-impl-heap-guard.test.ts (6 tests) 2ms
+{"level":30,"time":1790656068164,"name":"gitnexus","unityProcesses":{"added":0,"walks":2,"callbacksSeen":2,"callbacksTraced":2,"callbacksDropped":0,"branchesDropped":0,"depthCapped":0,"candidateCapped":0,"walkCapped":0,"truncated":false},"msg":"[unity-processes] bounded lifecycle supplement"}
+ ✓ |default| test/integration/doc-comment-description-e2e.test.ts (2 tests) 934ms
+     ✓ surfaces an exported function JSDoc as its node description through the pipeline  474ms
+     ✓ keeps directive lines inside a Swift doc comment in the node description  459ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-interpret.test.ts (12 tests) 2ms
+{"level":30,"time":1790656068917,"name":"gitnexus","unityProcesses":{"added":0,"walks":5,"callbacksSeen":5,"callbacksTraced":5,"callbacksDropped":0,"branchesDropped":0,"depthCapped":0,"candidateCapped":0,"walkCapped":0,"truncated":false},"msg":"[unity-processes] bounded lifecycle supplement"}
+ ✓ |default| test/integration/unity-lifecycle-synthetic-calls.test.ts (1 test) 1211ms
+     ✓ pipeline injects synthetic lifecycle edges before process detection  1207ms
+ ✓ |default| test/integration/resolvers/c-coverage.test.ts (5 tests) 2ms
+ ✓ |default| test/integration/resolvers/laravel-route-resolution.test.ts (4 tests) 269ms
+ ✓ |default| test/unit/process-identity.test.ts (4 tests) 12ms
+ ✓ |default| test/integration/context-typed-property.test.ts (1 test) 361ms
+  --wal-checkpoint-threshold must be an integer >= -1.
+  --wal-checkpoint-threshold must be an integer >= -1.
+  --wal-checkpoint-threshold must be an integer >= -1.
+  --wal-checkpoint-threshold must be an integer >= -1.
+stdout | test/unit/analyze-lbug-checkpoint-threshold.test.ts > analyzeCommand --wal-checkpoint-threshold parsing > sets GITNEXUS_WAL_CHECKPOINT_THRESHOLD=-1 during runFullAnalysis and restores afterwards
+  Already up to date
+
+
+stdout | test/unit/analyze-lbug-checkpoint-threshold.test.ts > analyzeCommand --wal-checkpoint-threshold parsing > sets GITNEXUS_WAL_CHECKPOINT_THRESHOLD=0 during runFullAnalysis and restores afterwards
+  Already up to date
+
+
+stdout | test/unit/analyze-lbug-checkpoint-threshold.test.ts > analyzeCommand --wal-checkpoint-threshold parsing > sets GITNEXUS_WAL_CHECKPOINT_THRESHOLD=1024 during runFullAnalysis and restores afterwards
+  Already up to date
+
+
+ ✓ |default| test/unit/analyze-lbug-checkpoint-threshold.test.ts (7 tests) 127ms
+Failed to remove repo: EBUSY: resource busy
+{"level":50,"time":1790656069920,"name":"gitnexus","err":{"type":"Error","message":"EBUSY: resource busy","stack":"Error: EBUSY: resource busy\n    at /Users/nantasmac/projects/agentic/GitNexus/gitnexus/test/unit/remove-command.test.ts:81:17\n    at file:///Users/nantasmac/projects/agentic/GitNexus/gitnexus/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/nantasmac/projects/agentic/GitNexus/gitnexus/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/nantasmac/projects/agentic/GitNexus/gitnexus/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/nantasmac/projects/agentic/GitNexus/gitnexus/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/nantasmac/projects/agentic/GitNexus/gitnexus/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///Users/nantasmac/projects/agentic/GitNexus/gitnexus/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)\n    at file:///Users/nantasmac/projects/agentic/GitNexus/gitnexus/node_modules/@vitest/runner/dist/chunk-artifact.js:2956:64","code":"EBUSY"},"msg":"Failed to remove repo: EBUSY: resource busy"}
+ ✓ |default| test/unit/remove-command.test.ts (2 tests) 14ms
+ ✓ |default| test/unit/grep-scan.test.ts (4 tests) 284ms
+ ✓ |default| test/integration/resolvers/shape-check.test.ts (6 tests) 655ms
+ ✓ |default| test/unit/runtime-chain-verify-equivalence.test.ts (2 tests) 2ms
+ ✓ |default| test/integration/analyze-embedding-flags-e2e.test.ts (5 tests) 550ms
+ ✓ |default| test/unit/scope-resolution/go/go-workspace-owners-warning.test.ts (4 tests) 3ms
+ ✓ |default| test/integration/go-multi-name-worker-metadata.test.ts (1 test) 220ms
+ ✓ |default| test/unit/model/field-registry.test.ts (7 tests) 2ms
+ ✓ |default| test/unit/group/sync-exact-only.test.ts (2 tests) 3ms
+fatal: not a git repository (or any of the parent directories): .git
+ ✓ |default| test/unit/wiki-db-pin.test.ts (1 test) 65ms
+{"level":40,"time":1790656072020,"name":"gitnexus","workerIndex":0,"attempt":1,"msg":"Worker 0 crashed during startup; respawning slot (self-heal attempt 1/2)."}
+{"level":40,"time":1790656072071,"name":"gitnexus","workerIndex":0,"attempt":1,"err":"Replacement worker did not report ready within 50ms — likely crashed during top-of-script init (slow host? raise GITNEXUS_WORKER_READY_TIMEOUT_MS; repeated on a large repo? likely main-thread memory pressure — see the \"Analysis runs out of memory\" README section, #2649)","deterministic":true,"msg":"Worker 0 hit a deterministic startup crash-loop; dropping slot without further retries."}
+{"level":40,"time":1790656077169,"name":"gitnexus","workerIndex":0,"attempt":1,"msg":"Worker 0 crashed during startup; respawning slot (self-heal attempt 1/2)."}
+ ✓ |default| test/integration/run-analyze-invalidates-workspace-memo.test.ts (1 test) 5328ms
+     ✓ calls invalidateNodeWorkspacePackages(repoPath) and does so before acquireIndexLock  5327ms
+ ✓ |default| test/integration/resolvers/zig-build-modules.test.ts (5 tests | 1 skipped) 343ms
+ ✓ |default| test/unit/repo-manager-registry-validation-race.test.ts (1 test) 6ms
+ ✓ |default| test/integration/orm-dataflow.test.ts (3 tests) 396ms
+ ✓ |default| test/integration/spring-interface-inheritance-pipeline.test.ts (3 tests) 227ms
+ ✓ |default| test/unit/wiki-mermaid-sanitizer.test.ts (6 tests) 2ms
+ ✓ |default| test/unit/scope-resolution/go/go-range-binding-null-guard.test.ts (5 tests) 14ms
+ ✓ |default| test/unit/impact-pdg-blast-radius-metrics.test.ts (4 tests) 2ms
+ ✓ |default| test/unit/kotlin-scope-captures.test.ts (6 tests) 65ms
+ ✓ |default| test/integration/csv-resource-content-budget.test.ts (3 tests) 11ms
+ ✓ |default| test/unit/incremental-shadow-candidates.test.ts (8 tests) 3ms
+ ✓ |default| test/unit/server-cors-stack.test.ts (3 tests) 19ms
+ ✓ |default| test/unit/detect-changes-local-id-stability.test.ts (4 tests) 2ms
+ ✓ |default| test/unit/scope-resolution/rust/rust-range-binding-order.test.ts (2 tests) 23ms
+ ✓ |default| test/integration/js-array-method-callback-attribution.test.ts (3 tests) 305ms
+ ✓ |default| test/integration/spring-config-mcp.test.ts (2 tests) 341ms
+{"level":40,"time":1790656082172,"name":"gitnexus","workerIndex":0,"attempt":1,"err":"Replacement worker did not report ready within 5000ms — likely crashed during top-of-script init (slow host? raise GITNEXUS_WORKER_READY_TIMEOUT_MS; repeated on a large repo? likely main-thread memory pressure — see the \"Analysis runs out of memory\" README section, #2649)","deterministic":true,"msg":"Worker 0 hit a deterministic startup crash-loop; dropping slot without further retries."}
+ ✓ |default| test/unit/worker-pool-ready-timeout-env.test.ts (2 tests) 10456ms
+     ✓ applies the override to the readiness deadline and its failure message  354ms
+     ✓ falls back to the 5s default when the value is not a positive integer  10101ms
+ ✓ |default| test/unit/scope-resolution/scope-id.test.ts (8 tests) 2ms
+ ✓ |default| test/integration/python-scope-capture-tripwire.test.ts (1 test) 760ms
+     ✓ parses a 400-entity file in well under the O(n^2) tripwire budget  759ms
+ ✓ |default| test/unit/scope-resolution/cpp/cpp-adl-seq-coverage.test.ts (4 tests) 1ms
+ ✓ |default| test/integration/callable-capture-options-literal-gate.test.ts (2 tests) 19ms
+ ✓ |default| test/integration/resolvers/route-mapping.test.ts (8 tests) 707ms
+ ✓ |default| test/unit/ai-context-unknown-risk-policy.test.ts (3 tests) 2ms
+ ✓ |default| test/unit/embedding-count.test.ts (8 tests) 12ms
+ ✓ |default| test/unit/write-lock-required.test.ts (3 tests) 6ms
+ ✓ |default| test/unit/scope-resolution/python/cached-tree-parity.test.ts (2 tests) 30ms
+ ✓ |default| test/unit/scope-resolution/c/c-header-scan.test.ts (11 tests) 7ms
+ ✓ |default| test/integration/resolvers/ruby-namespaced.test.ts (5 tests) 106ms
+ ✓ |default| test/integration/group/group-sync.test.ts (2 tests) 4ms
+ ✓ |default| test/unit/scope-resolution/undecided-satisfaction.test.ts (4 tests) 3ms
+ ✓ |default| test/unit/detect-changes-format.test.ts (6 tests) 2ms
+ ✓ |default| test/unit/analyzer-identity-is-inside.test.ts (6 tests) 2ms
+ ✓ |default| test/integration/resolvers/python-mcp-tools.test.ts (5 tests) 297ms
+ ✓ |default| test/unit/server-sse-payload.test.ts (2 tests) 29ms
+ ✓ |default| test/unit/spring-config-drift.test.ts (4 tests) 2ms
+ ✓ |default| test/integration/analyze-heap-oom-e2e.test.ts (1 test) 2417ms
+     ✓ prints OOM guidance with Unix and Windows commands when respawned child truly OOMs  2416ms
+ ✓ |default| test/unit/unity-process-streaming.test.ts (1 test) 3ms
+ ✓ |default| test/unit/java-description-extractor.test.ts (5 tests) 4ms
+ ✓ |default| test/integration/skill-contracts-phase5.test.ts (4 tests) 5ms
+ ✓ |default| test/unit/api-analyze-token.test.ts (9 tests) 3ms
+ ✓ |default| test/unit/cobol-copy-expander.test.ts (10 tests) 2ms
+ ✓ |default| test/unit/cli-entry.test.ts (7 tests) 2ms
+ ✓ |default| test/integration/runtime-graph-only-precision-matrix.test.ts (1 test) 2ms
+ ✓ |default| test/unit/taint/call-summary-language-and-constructor.test.ts (2 tests) 3ms
+ ✓ |default| test/unit/node-workspace-vite-entry-comments.test.ts (2 tests) 14ms
+ ✓ |default| test/unit/local-backend-semantic-warn.test.ts (2 tests) 3ms
+ ✓ |default| test/unit/scope-resolution/rust/rust-dyn-type-normalization.test.ts (6 tests) 2ms
+ ✓ |default| test/integration/cfg/cdg-snapshot.test.ts (2 tests) 17ms
+ ✓ |default| test/unit/content-language-classification.test.ts (4 tests) 17ms
+ ✓ |default| test/unit/runtime-chain-graph-candidates.bridge.test.ts (1 test) 2ms
+ ✓ |default| test/integration/resolvers/rust-f70.test.ts (5 tests) 25ms
+ ✓ |default| test/unit/cfg/harness.test.ts (2 tests) 4ms
+ ✓ |default| test/unit/scope-resolution/receiver-chain-wiring.test.ts (2 tests) 3ms
+ ✓ |default| test/unit/csharp-define-profile.test.ts (4 tests) 4ms
+ ✓ |default| test/unit/scope-resolution/resolved-callee-names.test.ts (1 test) 2ms
+ ✓ |default| test/integration/group/group-impact.test.ts (2 tests) 21ms
+ ✓ |default| test/unit/node-module-compat.test.ts (4 tests) 13ms
+ ✓ |default| test/unit/fts-schema.test.ts (5 tests) 2ms
+ ✓ |default| test/integration/csharp-scope-capture-tripwire.test.ts (1 test) 383ms
+     ✓ parses a 400-entity file in well under the O(n^2) tripwire budget  383ms
+ ✓ |default| test/integration/resolvers/barrel-named-over-star-precedence.test.ts (2 tests) 402ms
+ ✓ |default| test/integration/query-compilation.test.ts (13 tests) 456ms
+ ✓ |default| test/unit/kotlin-description-extractor.test.ts (4 tests) 4ms
+ ✓ |default| test/unit/stdout-silence.test.ts (6 tests) 2ms
+ ✓ |default| test/integration/rust-scope-capture-tripwire.test.ts (1 test) 229ms
+ ✓ |default| test/integration/resolvers/express-routes.test.ts (5 tests) 472ms
+{"level":50,"time":1790656089512,"name":"gitnexus","msg":"[gitnexus] Objective-C parsing disabled: vendored `tree-sitter-objc` (under `gitnexus/vendor/tree-sitter-objc`) could not be loaded. GitNexus ships prebuilt binaries for supported macOS/Linux runner architectures; this usually indicates a corrupted install or native ABI mismatch with the bundled tree-sitter@0.21.1 runtime. (synthetic missing objc grammar)"}
+ ✓ |default| test/unit/objective-c-parser-loader.test.ts (2 tests) 22ms
+ ✓ |default| test/unit/cpp-captures-budget.test.ts (2 tests) 473ms
+     ✓ returns partial captures with a warning on budget breach, never throws  391ms
+ ✓ |default| test/unit/group/manifest-label-drift.test.ts (5 tests) 2ms
+ ✓ |default| test/integration/php-scope-capture-tripwire.test.ts (1 test) 273ms
+ ✓ |default| test/unit/clone-safety-payloads.test.ts (1 test) 1ms
+ ✓ |default| test/unit/wal-checkpoint-driver-reentrancy.test.ts (1 test) 7ms
+ ✓ |default| test/unit/query-batch.test.ts (7 tests) 3ms
+ ✓ |default| test/integration/resolvers/rust-import-scope.test.ts (3 tests) 788ms
+     ✓ preserves method calls on the result of a function-local imported factory  322ms
+ ✓ |default| test/unit/scope-resolution/def-index.test.ts (6 tests) 3ms
+ ✓ |default| test/integration/qualified-class-lookups.test.ts (2 tests) 846ms
+     ✓ derives canonical dot-separated names from namespaces, packages, and modules  486ms
+     ✓ falls back to the simple name for top-level class-like symbols  359ms
+ ✓ |default| test/unit/scope-resolution/rust/rust-namespace-prefix.test.ts (5 tests) 22ms
+ ↓ |default| test/integration/data-route-table-benchmark.test.ts (1 test | 1 skipped)
+ ↓ |default| test/integration/resolvers/java-javac-local-types.test.ts (1 test | 1 skipped)
+ ✓ |default| test/unit/php-template-scope.test.ts (2 tests) 55ms
+ ✓ |default| test/integration/ruby-scope-capture-tripwire.test.ts (1 test) 223ms
+ ✓ |default| test/unit/lbug-delete-all-error.test.ts (13 tests) 2ms
+ ✓ |default| test/integration/route-runtime-evidence-roundtrip.test.ts (1 test) 541ms
+ ✓ |default| test/unit/phase-timer.test.ts (6 tests) 147ms
+ ✓ |default| test/integration/runtime-poc-runner.test.ts (1 test) 9ms
+ ✓ |default| test/unit/spring-bean-schema.test.ts (3 tests) 5ms
+ ✓ |default| test/unit/watch-failure-policy.test.ts (4 tests) 2ms
+ ✓ |default| test/unit/ai-context-read-path-must.test.ts (4 tests) 2ms
+ ✓ |default| test/unit/hydration-policy-repeatability-runner.test.ts (1 test) 2ms
+ ✓ |default| test/unit/spring-non-http-handlers.test.ts (2 tests) 3ms
+ ✓ |default| test/unit/scope-resolution/module-scope-index.test.ts (6 tests) 2ms
+ ✓ |default| test/unit/cli-i18n.test.ts (6 tests) 3ms
+ ✓ |default| test/unit/shard-balance.test.ts (5 tests) 4ms
+ ✓ |default| test/integration/resolvers/configurable-fetch-wrapper.test.ts (3 tests) 1446ms
+ ✓ |default| test/unit/lbug-missing-staging-csv.test.ts (6 tests) 2ms
+ ✓ |default| test/unit/incremental-escalation-gate.test.ts (6 tests) 2ms
+ ✓ |default| test/unit/scope-resolution/cpp/cpp-file-local-linkage.test.ts (3 tests) 1ms
+ ✓ |default| test/integration/resolvers/csharp-unicode-container.test.ts (1 test) 552ms
+     ✓ keeps containers, ownership and source lines past the parser string-input limit  551ms
+ ✓ |default| test/unit/cli-command-banner.test.ts (7 tests) 3ms
+ ✓ |default| test/unit/taint/source-sink-registry.test.ts (4 tests) 2ms
+ ✓ |default| test/unit/cfg-callees-of-block.test.ts (4 tests) 2ms
+ ✓ |default| test/unit/scoped-cli-commands.test.ts (2 tests) 5ms
+ ✓ |default| test/unit/analysis-inputs.test.ts (2 tests) 5ms
+ ✓ |default| test/unit/tree-sitter-audit-classify.test.ts (1 test) 2ms
+ ✓ |default| test/unit/stream-query-driver-guard.test.ts (3 tests) 2ms
+ ✓ |default| test/unit/staleness-timeout.test.ts (1 test) 18ms
+ ✓ |default| test/unit/local-backend-query-noise.test.ts (3 tests) 2ms
+ ✓ |default| test/unit/skills-steering.test.ts (3 tests) 9ms
+{"level":30,"time":1790656096524,"name":"gitnexus","unityProcesses":{"added":0,"walks":3,"callbacksSeen":3,"callbacksTraced":3,"callbacksDropped":0,"branchesDropped":0,"depthCapped":0,"candidateCapped":0,"walkCapped":0,"truncated":false},"msg":"[unity-processes] bounded lifecycle supplement"}
+ ✓ |default| test/integration/unity-lifecycle-synthetic-process-regression.test.ts (1 test) 793ms
+     ✓ keeps synthetic runtime-root traces visible and bounded while preserving non-Unity baseline  790ms
+ ✓ |default| test/unit/local-backend-maxbuffer.test.ts (1 test) 2ms
+ ✓ |default| test/unit/language-skip.test.ts (5 tests) 14ms
+ ✓ |default| test/integration/django-route-extraction-e2e.test.ts (1 test) 243ms
+ ✓ |default| test/unit/mcp-output-budget.test.ts (7 tests) 2ms
+ ✓ |default| test/unit/scope-resolution/swift/swift-qualified-base-captures.test.ts (4 tests) 154ms
+ ✓ |default| test/unit/scope-extraction-failures.test.ts (12 tests) 2ms
+{"level":40,"time":1790656097480,"name":"gitnexus","err":{"type":"Error","message":"boom from a misbehaving provider","stack":"Error: boom from a misbehaving provider\n    at Object.<anonymous> (/Users/nantasmac/projects/agentic/GitNexus/gitnexus/test/unit/cross-file-routes.test.ts:10:11)\n    at Object.Mock [as extractRoutes] (file:///Users/nantasmac/projects/agentic/GitNexus/gitnexus/node_modules/@vitest/spy/dist/index.js:332:34)\n    at Module.extractCrossFileRoutes (/Users/nantasmac/projects/agentic/GitNexus/gitnexus/src/core/ingestion/pipeline-phases/parse-impl.ts:378:33)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at /Users/nantasmac/projects/agentic/GitNexus/gitnexus/test/unit/cross-file-routes.test.ts:46:20"},"msg":"Cross-file route extraction failed for proj/urls.py"}
+ ✓ |default| test/unit/cross-file-routes.test.ts (1 test) 7ms
+ ✓ |default| test/unit/ingestion/heritage-marker.test.ts (5 tests) 2ms
+ ✓ |default| test/unit/line-base-conversion.test.ts (15 tests) 2ms
+ ✓ |default| test/unit/group/group-tools.test.ts (3 tests) 2ms
+runtime-poc provenance artifact written: /var/folders/5g/6g1kyx455ns1gcj28qg4hwlh0000gn/T/runtime-provenance-artifact-NH32Pk/reports/provenance-2026-09-29T04-28-17Z.json
+runtime-poc provenance index updated: /var/folders/5g/6g1kyx455ns1gcj28qg4hwlh0000gn/T/runtime-provenance-artifact-NH32Pk/reports/provenance-index.json
+ ✓ |default| test/integration/runtime-provenance-artifact.test.ts (1 test) 4ms
+ ✓ |default| test/unit/cfg/opt-in.test.ts (5 tests) 2ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-qualified-type-names.test.ts (3 tests) 122ms
+ ✓ |default| test/unit/scope-resolution/construction-syntax-wiring.test.ts (2 tests) 7ms
+ ✓ |default| test/unit/runtime-claim.policy.test.ts (2 tests) 1ms
+ ✓ |default| test/unit/shutdown-helpers.test.ts (3 tests) 3ms
+ ✓ |default| test/unit/lbug-query-result-utils.test.ts (4 tests) 2ms
+ ✓ |default| test/unit/cli-spec.test.ts (5 tests) 2ms
+ ✓ |default| test/integration/resolvers/typescript-namespace-const.test.ts (2 tests) 385ms
+ ✓ |default| test/integration/resolvers/typescript-esm-js-extension.test.ts (2 tests) 384ms
+ ✓ |default| test/unit/expo-routes.test.ts (11 tests) 2ms
+ ✓ |default| test/unit/definition-properties.test.ts (2 tests) 2ms
+ ✓ |default| test/integration/resolvers/fastapi-depends.test.ts (4 tests) 246ms
+ ✓ |default| test/unit/java-call-arity.test.ts (5 tests) 26ms
+{"level":30,"time":1790656099635,"name":"gitnexus","msg":"[embed] 1 nodes in legacy DB (missing chunk-aware columns) — all treated as stale"}
+ ✓ |default| test/unit/lbug-embedding-hashes.test.ts (3 tests) 3ms
+ ✓ |default| test/unit/cfg/memoized-reaching-defs.test.ts (3 tests) 3ms
+ ✓ |default| test/unit/gdscript-query.test.ts (1 test) 5ms
+ ✓ |default| test/integration/c-cpp-typedef-legacy-parse.test.ts (2 tests) 682ms
+     ✓ emits one concrete C++ symbol for anonymous typedef structs and enums  513ms
+ ✓ |default| test/unit/scope-resolution/callable-value-flow-env.test.ts (4 tests) 28ms
+ ✓ |default| test/integration/local-backend-unity-ui-trace.test.ts (1 test) 11ms
+ ✓ |default| test/unit/cypher-escape.test.ts (4 tests) 1ms
+ ✓ |default| test/unit/watch-command.test.ts (1 test) 54ms
+ ✓ |default| test/integration/object-literal-method-exports.test.ts (1 test) 331ms
+     ✓ links exported object literal shorthand methods back to the exported object  331ms
+ ✓ |default| test/unit/private-ip.test.ts (7 tests) 2ms
+ ✓ |default| test/unit/eval-server-bind-restriction.test.ts (11 tests) 2ms
+{"level":40,"time":1790656100556,"name":"gitnexus","context":"impact:convex-metadata","err":"database busy","msg":"GitNexus Convex metadata probe failed (degraded)"}
+ ✓ |default| test/unit/convex-dispatch-metadata.test.ts (3 tests) 3ms
+ ✓ |default| test/unit/runtime-chain-verify-graph-only-input.test.ts (1 test) 2ms
+ ✓ |default| test/unit/worker-pool-options.test.ts (2 tests) 1ms
+ ✓ |default| test/unit/checkpoint-busy-2599.test.ts (4 tests) 1ms
+ ✓ |default| test/integration/resolvers/gdscript.test.ts (1 test) 203ms
+ ✓ |default| test/integration/expo-routes.test.ts (4 tests) 415ms
+ ✓ |default| test/unit/scope-resolution/property-dispatch-fanout-env.test.ts (4 tests) 25ms
+ ✓ |default| test/unit/csharp-container-diagnostics.test.ts (1 test) 4ms
+ ✓ |default| test/unit/shard-arg.test.ts (7 tests) 2ms
+ ✓ |default| test/unit/scope-resolution/scope-source-content-policy.test.ts (3 tests) 2ms
+ ✓ |default| test/unit/api-query-readonly-wiring.test.ts (3 tests) 2ms
+ ✓ |default| test/unit/language-provider-route-constants.test.ts (1 test) 2ms
+ ✓ |default| test/unit/cli-group-status-format.test.ts (4 tests) 1ms
+ ✓ |default| test/unit/filesystem-walker-order.test.ts (1 test) 3ms
+ ✓ |default| test/unit/embedding-dims.test.ts (18 tests) 2ms
+ ✓ |default| test/integration/resolvers/fetch-wrapper-consumers.test.ts (4 tests) 621ms
+ ✓ |default| test/unit/scope-resolution/cpp/cpp-member-lookup-side-channel.test.ts (1 test) 1ms
+ ✓ |default| test/unit/analyze-community-skills-gate.test.ts (4 tests) 1ms
+ ✓ |default| test/unit/scope-resolution/definition-id.test.ts (7 tests) 2ms
+ ✓ |default| test/unit/query-params.test.ts (4 tests) 1ms
+ ✓ |default| test/integration/spring-constructor-bean-roundtrip.test.ts (1 test) 934ms
+   ✓ persists the constructor-to-factory-bean INJECTS edge from the real pipeline  934ms
+ ✓ |default| test/unit/http-client-safe-url.test.ts (4 tests) 2ms
+ ✓ |default| test/unit/runtime-claim-rule-registry.test.ts (1 test) 2ms
+ ✓ |default| test/unit/eval-server-tool-allowlist.test.ts (2 tests) 2ms
+ ✓ |default| test/unit/format-elapsed.test.ts (7 tests) 2ms
+ ✓ |default| test/unit/platform-capabilities.test.ts (2 tests) 2ms
+ ✓ |default| test/unit/mcp-tools.contract.test.ts (2 tests) 1ms
+ ✓ |default| test/unit/embedding-config.test.ts (2 tests) 2ms
+ ✓ |default| test/unit/env.test.ts (21 tests) 2ms
+ ✓ |default| test/unit/group/impact-by-uid.test.ts (2 tests) 232ms
+ ✓ |default| test/unit/ingestion/qualified-name-utils.test.ts (3 tests) 1ms
+ ✓ |default| test/unit/git-ref.test.ts (1 test) 1ms
+ ✓ |default| test/unit/query-fts-parameterization.test.ts (1 test) 2ms
+ ✓ |default| test/integration/typescript-async-generator-functions.test.ts (1 test) 342ms
+     ✓ indexes exported async function* declarations as Function nodes  341ms
+ ✓ |default| test/unit/local-backend-response-profile.test.ts (2 tests) 1ms
+ ✓ |default| test/unit/package-version.test.ts (1 test) 1ms
+ ✓ |default| test/unit/embedder.test.ts (2 tests) 1ms
+ ✓ |default| test/unit/pipeline-exports.test.ts (1 test) 1ms
+
+ Test Files  216 passed | 13 skipped (229)
+      Tests  854 passed | 18 skipped (872)
+   Start at  12:27:33
+   Duration  50.79s (transform 5.97s, setup 0ms, import 32.23s, tests 55.14s, environment 11ms)
+
+JSON report written to /Users/nantasmac/projects/agentic/GitNexus/openspec/changes/optimize-unity-resource-access/remaining-suite.json

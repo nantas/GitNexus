@@ -17,6 +17,7 @@ export const en = {
   'help.fork.14': 'Runtime chain verification mode: off|on-demand',
   'help.fork.15': 'Target coding agent: claude, opencode, or codex',
   'help.fork.16': 'Unity resource retrieval mode: off|on|auto',
+  'help.fork.17': 'Repository name in the analysis config',
 
   'common.notIndexed': 'No indexed repositories found.',
   'common.runAnalyze': 'Run `gitnexus analyze` in a git repo to index it.',

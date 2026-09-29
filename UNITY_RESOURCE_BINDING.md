@@ -63,7 +63,7 @@ Unity 游戏项目中，代码（C# 脚本）和资源（界面文件 UXML、样
 | 主线 | 目的 | 覆盖文件范围 | 主要关注字段/线索 | 读取方式 | 覆盖特性 |
 |------|------|--------------|-------------------|----------|----------|
 | 主线 A：脚本命中扫描（scan-context） | 先找“哪些资源里出现了脚本 GUID” | scoped 的 `.prefab/.unity/.asset`（以及相关 `.meta`） | `m_Script: { guid: ... }` | **流式逐行扫描**（line-by-line） | 全量扫资源文件，但只提取“脚本命中线索” |
-| 主线 B：组件深度解析（resolver） | 对命中的资源做组件绑定与字段解析 | 仅主线 A 命中的资源文件（不是所有资源） | `MonoBehaviour` 组件字段、引用字段、Prefab override 合并结果 | **整文件加载 + YAML 对象解析** | 按命中范围做深解析；不是 repo 全量深解析 |
+| 主线 B：组件深度解析（resolver） | 对命中的资源做组件绑定与字段解析 | 仅主线 A 命中的资源文件（不是所有资源） | `MonoBehaviour` 组件字段、引用字段、Prefab override 合并结果 | **按资源共用解析：小资源 YAML，大资源流式轻量引用** | 同一资源的全部所选脚本共用语义读取；大资源默认不深解析 |
 | 主线 C：Prefab Source 资源边（prefab-source） | 补齐 `scene/prefab -> prefab` 资源事实 | scoped 的 `.unity/.prefab` | `PrefabInstance.m_SourcePrefab` | **scan-context 流式识别 + Phase 5.5 统一消费写图** | 不再单独新增全量解析 pass；只记录轻量线索并统一消费 |
 
 补充说明：
@@ -72,8 +72,10 @@ Unity 游戏项目中，代码（C# 脚本）和资源（界面文件 UXML、样
 2. 主线 C 的目标很窄，只追 `m_SourcePrefab`，不替代主线 B。也就是说，非 prefab 引用的组件字段仍由主线 B 解析。  
 3. 你最关心的“哪些是流式、哪些是全量”可直接记为：  
    - 流式：主线 A + 主线 C 的识别阶段（`scan-context`）  
-   - 全量读取：主线 B（仅命中资源的深解析）  
-4. 主线 C 已并入 scan-context 承载器并在 `processUnityResources` 统一消费，不再保留独立 prefab-source 全量解析 pass。
+   - 小资源整文件读取：主线 B（≤512 KiB）；大资源只流式提取已有 lightweight 语义
+4. analyze 的主线 A/C 共享一次物理发现读取；canonical 归属确定后，`UnityResourceSession` 对每个命中资源再做一次语义读取，processor 统一写图。查询沿用既有路径选择和 deep 请求。
+5. 发现记录默认 4 MiB、单组件轻量引用默认 1 MiB 内存预算，超限转为本次运行专属临时记录；消费结束释放，不作为跨次缓存。最终图载荷和必要全局 GUID/canonical 索引单独计量。
+6. 每个组件使用自身 m_Script 行号。资源读取/版本一致性失败记录到 metadata，status 通过 `unity-resource-analysis-failed` 报告不完整；下一次 analyze 会完整重试。暂存损坏属于致命错误，不回退到无界内存。
 
 ### 架构演进方向：Scan-Context 承载器 + 统一消费点
 

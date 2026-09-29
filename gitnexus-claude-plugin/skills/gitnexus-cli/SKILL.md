@@ -1,6 +1,6 @@
 ---
 name: gitnexus-cli
-description: "Use when the user needs to run GitNexus CLI commands like analyze/index a repo, check status, clean the index, generate a wiki, or list indexed repos. Examples: \"Index this repo\", \"Reanalyze the codebase\", \"Generate a wiki\""
+description: "Use for GitNexus setup, CLI indexing, status, cleanup, wiki, and index upgrades. Check repository .gitnexusrc and existing index coverage before rebuilding an older index."
 ---
 
 # GitNexus CLI Commands
@@ -25,6 +25,7 @@ Rules:
 - `--scope global` does not overwrite repo-local `.agents/skills` or `.codex/config.toml`.
 - `--coding-agent <agents>` selects the upstream detected-editor installer explicitly; it is separate from fork `--scope` / `--agent` wiring.
 - Never rely on setup defaults for scope; pass `--scope` explicitly to avoid global/project mismatch.
+- Project `setup` previews a `.gitnexusrc` plan. Terminal use asks for missing scope/extensions and confirmation. In scripts, default `auto` reports `pending`; use `--rc-mode migrate --accept-rc` for a complete old receipt or `--rc-mode create --rc-scope Assets/,Packages/ --rc-extensions .cs,.meta --accept-rc` for explicit choices. Use `all` for a deliberate full selection. `--scope` still chooses installation location; `--rc-scope` chooses analysis paths. Global setup and `--coding-agent` do not create rc files.
 
 ```bash
 if command -v gitnexus >/dev/null 2>&1; then
@@ -56,6 +57,13 @@ fi
 ### analyze — Build or refresh the index
 
 Run `$GN analyze` from the repository root. Recurring defaults live in a committed `.gitnexusrc`; explicit CLI flags override them. `gitnexus.json` (with a legacy `meta.json` mirror) is index state and does not supply analyze option defaults.
+
+Before rebuilding an existing index after a CLI upgrade:
+
+1. Check `$GN --version`, `$GN status --json`, and whether `.gitnexusrc` exists. A stale runner identity means the index needs rebuilding with the current CLI; it does not identify the LadybugDB file format. `gitnexus doctor` checks the current runtime and extension, not the persisted database version.
+2. Read `.gitnexus/gitnexus.json` (or legacy `.gitnexus/meta.json`) for its last successful `indexCoverage.scopeRules` and `indexCoverage.includeExtensions`. Legacy `analyzeOptions`, when present, may provide a clue. These are records of the old run, never defaults for the next one. If neither records the old selection, do not infer scope from `fileHashes` or `analysisInputFingerprint`.
+3. If `.gitnexusrc` is absent, show the available old selection and ask the user to confirm the intended scope, extensions, repository name, and C# project before writing `.gitnexusrc` and rebuilding. If no trustworthy selection remains, ask whether to index the whole repository or a chosen subset. An unconfigured `$GN analyze --force` uses built-in defaults and may expand a formerly scoped index.
+4. Use project `setup` to preview and confirm the rc migration when MCP wiring, skills, or the CLI pin also need updating. Confirm `Analysis config: created` before rebuilding; `pending` means no new defaults were installed. Setup does not repair the database.
 
 Unity example `.gitnexusrc`:
 
@@ -92,6 +100,12 @@ $GN status
 ```
 
 Shows whether the current repo has a GitNexus index, when it was last updated, and symbol/relationship counts. Use this to check if re-indexing is needed.
+
+If `incompleteReasons` includes `unity-resource-analysis-failed`, inspect metadata's
+`unityResourceFailures` for the affected paths. Resource reads or version checks
+failed; empty resource evidence is not a complete result. Fix the file issue and
+rerun analyze; the recorded failure forces a full retry. Skipped derived phases
+retain the previous failure receipt.
 
 For working-tree freshness, run `status` without `--repo`: it compares content
 using the last successful analysis's `indexCoverage` scope/extensions and size
@@ -197,7 +211,8 @@ $GN unity-ui-trace "Assets/NEON/VeewoUI/Uxml/BarScreen/Patch/PatchItemPreview.ux
 - **"Not inside a git repository"**: Run from a directory inside a git repo
 - **Index is stale after re-analyzing**: Restart Claude Code to reload the MCP server
 - **Embeddings slow**: Omit `--embeddings` (it's off by default) or set `OPENAI_API_KEY` for faster API-based embedding
-- **`analyze --force` hangs or crashes**: Run `$GN clean --force` to remove the corrupted index, then `$GN analyze --force` (with your CLI options) to rebuild. Common corruption signatures: `.gitnexus/csv/` exists but `relations.csv` is missing; `.gitnexus/lbug.wal` exists while `lbug` is only a few KB.
+- **`analyze --force` hangs or crashes**: Preserve the complete log and inspect the first database error. Confirm `.gitnexusrc` scope before another run. Common interruption clues include `.gitnexus/csv/` without `relations.csv`, or `.gitnexus/lbug.wal` beside a tiny `lbug` file; these clues alone do not establish the cause.
+- **FTS build or `--repair-fts` fails**: Run `$GN doctor` to check FTS availability. If repair reports a missing index, inspect the complete earlier analyze log and the native error. `Table: 0_<index>_appears_info already exists` can mean an orphaned internal FTS table while the named index is absent. Do not treat this as a successful index build or edit LadybugDB internal tables by hand. After confirming `.gitnexusrc`, a fresh `analyze --force` rebuild can use a new staged database; preserve the old index and logs until the new index passes status and keyword-search checks.
 
 ## Runtime-Chain Closure Guard
 

@@ -1,3 +1,5 @@
+import { discoverUnityResources } from './resource-discovery.js';
+import type { ResourceFailure } from './resource-session.js';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
@@ -20,6 +22,8 @@ export interface BuildScanContextInput {
   repoRoot: string;
   scopedPaths?: string[];
   symbolDeclarations?: UnitySymbolDeclaration[];
+  fuseResourceDiscovery?: boolean;
+  resourceRecordBudgetBytes?: number;
 }
 
 export interface UnitySymbolDeclaration {
@@ -37,6 +41,11 @@ export interface UnityPrefabSourceRef {
 }
 
 export interface UnityScanContext {
+  resourceFingerprints?: Map<string, string>;
+  resourceFailures?: ResourceFailure[];
+  resourceAccessMetrics?: { opens: number; bytes: number; resources: number; durationMs: number; canonicalMs?: number };
+  temporaryRecordMetrics?: { peakMemoryBytes: number; writtenBytes: number; readBytes: number; writeMs?: number; readMs?: number };
+  close?: () => Promise<void>;
   symbolToScriptPaths: Map<string, string[]>;
   symbolToCanonicalScriptPath: Map<string, string>;
   symbolToScriptPath: Map<string, string>;
@@ -85,7 +94,6 @@ export async function buildUnityScanContext(input: BuildScanContextInput): Promi
   const normalizedResourceFiles = [...new Set(resourceFiles.map((resourcePath) => normalizeSlashes(resourcePath)))]
     .filter((resourcePath) => resourcePath.length > 0)
     .sort((left, right) => left.localeCompare(right));
-  const guidToResourceHits = await buildGuidHitIndex(input.repoRoot, scriptPathToGuid, normalizedResourceFiles);
   const assetMetaFiles = resolveAssetMetaFiles(
     input.repoRoot,
     input.scopedPaths,
@@ -94,14 +102,28 @@ export async function buildUnityScanContext(input: BuildScanContextInput): Promi
   );
   const assetGuidToPath = await buildAssetMetaIndex(input.repoRoot, { metaFiles: assetMetaFiles });
   const uiMetaIndex = await buildUnityUiMetaIndex(input.repoRoot, { scopedPaths: input.scopedPaths });
+  const discovery = input.fuseResourceDiscovery ? await discoverUnityResources({
+    repoRoot: input.repoRoot, resourceFiles: normalizedResourceFiles,
+    scriptGuids: scriptPathToGuid.values(), assetGuidToPath,
+    recordBudgetBytes: input.resourceRecordBudgetBytes,
+  }) : undefined;
+  const guidToResourceHits = discovery?.hits
+    ?? await buildGuidHitIndex(input.repoRoot, scriptPathToGuid, normalizedResourceFiles);
   const streamPrefabSourceRefsFn = (options?: Pick<StreamPrefabSourceRefsInput, 'queue' | 'hooks'>) =>
-    streamPrefabSourceRefs({
+    discovery ? (async function* () {
+      for (const failure of discovery.failures) options?.hooks?.onFileError?.(failure.resourcePath, new Error(failure.message));
+      for await (const row of discovery.sourceRecords.records()) {
+        options?.hooks?.onYield?.(row);
+        yield row;
+      }
+    })() : streamPrefabSourceRefs({
       repoRoot: input.repoRoot,
       resourceFiles: normalizedResourceFiles,
       assetGuidToPath,
       queue: options?.queue,
       hooks: options?.hooks,
     });
+  const canonicalStarted = performance.now();
   const symbolToCanonicalScriptPath = buildCanonicalScriptPathIndex(
     symbolToScriptPaths,
     scriptPathToGuid,
@@ -110,6 +132,13 @@ export async function buildUnityScanContext(input: BuildScanContextInput): Promi
   const symbolToScriptPath = new Map<string, string>(symbolToCanonicalScriptPath);
 
   return {
+    ...(discovery ? {
+      resourceFingerprints: discovery.fingerprints,
+      resourceFailures: discovery.failures,
+      resourceAccessMetrics: { ...discovery.metrics, canonicalMs: performance.now() - canonicalStarted },
+      temporaryRecordMetrics: discovery.sourceRecords.metrics,
+      close: () => discovery.sourceRecords.close(),
+    } : {}),
     symbolToScriptPaths,
     symbolToCanonicalScriptPath,
     symbolToScriptPath,

@@ -1,0 +1,57 @@
+✖ each small resource component carries its own script evidence (22.738875ms)
+✖ each large resource component carries its own script evidence (10.038459ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 530.280875
+
+✖ failing tests:
+
+test at src/core/unity/resource-access.test.ts:1:286
+✖ each small resource component carries its own script evidence (22.738875ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      3,
+  +   3
+  -   7
+    ]
+  
+      at TestContext.<anonymous> (/Users/nantasmac/projects/agentic/GitNexus/gitnexus/src/core/unity/resource-access.test.ts:32:14)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 3, 3 ],
+    expected: [ 3, 7 ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at src/core/unity/resource-access.test.ts:1:286
+✖ each large resource component carries its own script evidence (10.038459ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      3,
+  +   3
+  -   7
+    ]
+  
+      at TestContext.<anonymous> (/Users/nantasmac/projects/agentic/GitNexus/gitnexus/src/core/unity/resource-access.test.ts:32:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 3, 3 ],
+    expected: [ 3, 7 ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,48 @@
+✔ resolveUnityBindings matches frozen acceptance baseline for required Unity samples (73.608875ms)
+✔ resolveUnityBindings applies PrefabInstance modifications for stripped scene components (13.851542ms)
+✔ resolveUnityBindings uses provided scan context without repo re-scan (21.197709ms)
+✔ resource YAML parse is reused across symbols sharing same resource file (5.840708ms)
+✔ resolveUnityBindings emits structured local/list reference targets for agent consumption (2.580791ms)
+✔ resolveUnityBindings resolves external guid to asset path when scan context includes asset meta (1.098417ms)
+✔ resolveUnityBindings supports ScriptableObject .asset resource bindings (2.019834ms)
+✔ resolveUnityBindings keeps existing scene serializedFields stable when .asset support is enabled (1.697875ms)
+✔ resolveUnityBindings supports resourcePathAllowlist filtering (2.282625ms)
+✔ resolveUnityBindings deepParseLargeResources can override lightweight fallback (8.100167ms)
+✔ resolveUnityBindings matches MonoBehaviour script guid case-insensitively (15.312416ms)
+✔ resolveUnityBindings parses MonoBehaviour blocks with negative object ids (8.361042ms)
+✔ extractAssetRefPathReferences parses nested _relativePath rows and marks sprite assets (0.342375ms)
+✔ extractAssetRefPathReferences handles Unity Ref naming variants and stable sprite classification (0.108792ms)
+✔ each small resource component carries its own script evidence (29.282083ms)
+✔ each large resource component carries its own script evidence (28.189542ms)
+✔ resource parser shares one semantic read for different scripts (small) (12.0465ms)
+✔ resource parser shares one semantic read for different scripts (large) (22.823042ms)
+{"level":40,"time":1790655963121,"name":"gitnexus","msg":"  Skipped 1 large files (>512KB, likely generated/vendored)"}
+{"level":40,"time":1790655963122,"name":"gitnexus","msg":"  - Assets/Bad.prefab"}
+{"level":40,"time":1790655963122,"name":"gitnexus","msg":"  Set GITNEXUS_MAX_FILE_SIZE=<KB> to include files above the default cap."}
+{"level":30,"time":1790655963886,"name":"gitnexus","unityProcesses":{"added":0,"walks":0,"callbacksSeen":0,"callbacksTraced":0,"callbacksDropped":0,"branchesDropped":0,"depthCapped":0,"candidateCapped":0,"walkCapped":0,"truncated":false},"msg":"[unity-processes] bounded lifecycle supplement"}
+{"level":30,"time":1790655965782,"name":"gitnexus","unityProcesses":{"added":0,"walks":0,"callbacksSeen":0,"callbacksTraced":0,"callbacksDropped":0,"branchesDropped":0,"depthCapped":0,"candidateCapped":0,"walkCapped":0,"truncated":false},"msg":"[unity-processes] bounded lifecycle supplement"}
+✔ real publication reports resource failure and a plain analyze retries and clears it (5295.307125ms)
+✔ memory and spill preserve facts and clean only owned temporary storage (34.756166ms)
+✔ spill failure is fatal and never falls back to unbounded memory (1.614625ms)
+✔ valid-JSON temporary record corruption is detected and owned artifacts are removed (6.967ms)
+✔ pre-aborted resource sessions propagate cancellation without opening files (0.735292ms)
+✔ mid-read cancellation stops a source stream (8.060041ms)
+✔ early session close cleans spilled references and does not read the next resource (31.265042ms)
+✔ cleanup failures remain fatal with their cause (1.578458ms)
+✔ a cleanup error preserves the original resolution failure (5.66075ms)
+✔ a discovered script without a parseable component is incomplete, not empty success (4.965667ms)
+✔ small-branch reads stay bounded when the size hint becomes stale (11.550792ms)
+✔ fused discovery preserves source-only resources and resolves scripts once (13.946541ms)
+✔ session isolates missing and changed resources and closes on early consumption (3.196541ms)
+✔ large single-component reference sets spill and suspend until consumed (93.745959ms)
+✔ long scalar lines remain bounded while oversized reference lines fail explicitly (1.536666ms)
+✔ resource failures reach index completeness without changing legacy metadata behavior (0.121625ms)
+✔ processor reads one shared resource twice total and preserves component and summary facts (7.52525ms)
+ℹ tests 35
+ℹ suites 0
+ℹ pass 35
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6204.820917

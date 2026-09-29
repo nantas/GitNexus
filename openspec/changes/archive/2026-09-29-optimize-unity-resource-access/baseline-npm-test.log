@@ -1,0 +1,15 @@
+
+> @veewo/gitnexus@1.6.12 test
+> vitest run
+
+
+ RUN  v4.1.11 /Users/nantasmac/projects/agentic/GitNexus/gitnexus
+
+ ❯ |lbug-db| test/unit/incremental-orchestration.test.ts (29 tests | 4 failed) 360993ms
+     × a config-only index missing Spring config evidence rebuilds and restores the scoped stamp 14478ms
+     × adding the first JVM file re-evaluates capabilities after the pipeline and avoids a top-up 8450ms
+     × rewrites unchanged Kotlin Spring bean metadata when same-package shadowing changes 7179ms
+     × a hub edit whose write set covers most of a large repo escalates to the full DB write plan (#2409) 13684ms
+{"level":40,"time":1790591345761,"name":"gitnexus","msg":"GitNexus: FTS extension unavailable; continuing without FTS features. extension install policy is \"never\""}
+{"level":40,"time":1790591354752,"name":"gitnexus","msg":"GitNexus: VECTOR extension unavailable; continuing without VECTOR features. extension install policy is \"never\""}
+{"level":40,"time":1790591354752,"name":"gitnexus","msg":"GitNexus: FTS extension unavailable; continuing without FTS features. extension install policy is \"never\""}

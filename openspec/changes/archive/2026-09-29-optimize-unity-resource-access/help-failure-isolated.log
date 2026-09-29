@@ -1,0 +1,55 @@
+
+ RUN  v4.1.11 /Users/nantasmac/projects/agentic/GitNexus/gitnexus
+
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > root help localizes commander headings, options, and command descriptions
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > command help localizes option descriptions and help suffix text
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > setup help exposes selective coding-agent configuration
+ × |default| test/unit/cli-index-help.test.ts > CLI help surface > localizes every registered CLI command and option description in zh-CN help 3942ms
+   → expected [ Array(1) ] to deeply equal []
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > analyze help localizes custom environment variable help text
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > analyze help documents the external storage root layout
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > query help keeps advanced search options without importing analyze deps
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > context help keeps optional name and disambiguation flags
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > impact help keeps repo, include-tests, and disambiguation flags
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > detect-changes help exposes compare scope and base-ref flags
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > query-family commands expose the --branch scope flag (#2106)
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > auto-sync help exposes lifecycle actions and state files
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > watch is reserved and does not start auto-sync or local watch
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > auto-sync init creates the default watch_config.yml and does not overwrite it
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > auto-sync reset removes only derived auto-sync state files
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > auto-sync stop exits non-zero when no watch was stopped
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > auto-sync restart starts when the watch is not running
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > wiki help shows provider, review, and verbose flags
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > publish help names the registry, the token env var, and the opt-out behaviour
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > analyze help includes the FTS repair option
+ ↓ |default| test/unit/cli-index-help.test.ts > CLI help surface > localizes commander-generated option metadata labels
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |default| test/unit/cli-index-help.test.ts > CLI help surface > localizes every registered CLI command and option description in zh-CN help
+AssertionError: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "Repository name in the analysis config",
++ ]
+
+ ❯ test/unit/cli-index-help.test.ts:191:26
+    189|     );
+    190|
+    191|     expect(untranslated).toEqual([]);
+       |                          ^
+    192|   });
+    193|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 20 skipped (21)
+   Start at  12:26:03
+   Duration  4.34s (transform 112ms, setup 0ms, import 293ms, tests 3.94s, environment 0ms)
+

@@ -101,6 +101,12 @@ $GN status
 
 Shows whether the current repo has a GitNexus index, when it was last updated, and symbol/relationship counts. Use this to check if re-indexing is needed.
 
+If `incompleteReasons` includes `unity-resource-analysis-failed`, inspect metadata's
+`unityResourceFailures` for the affected paths. Resource reads or version checks
+failed; empty resource evidence is not a complete result. Fix the file issue and
+rerun analyze; the recorded failure forces a full retry. Skipped derived phases
+retain the previous failure receipt.
+
 For working-tree freshness, run `status` without `--repo`: it compares content
 using the last successful analysis's `indexCoverage` scope/extensions and size
 limit. Out-of-scope edits do not cause content drift; covered additions, edits

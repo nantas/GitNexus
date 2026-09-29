@@ -1,0 +1,20 @@
+✔ buildUnityParitySeed extracts canonical script/guid/resource indexes (1.115125ms)
+✔ memory and spill preserve facts and clean only owned temporary storage (14.639166ms)
+✔ spill failure is fatal and never falls back to unbounded memory (1.1945ms)
+✔ fused discovery preserves source-only resources and resolves scripts once (19.002125ms)
+✔ session isolates missing and changed resources and closes on early consumption (1.914083ms)
+✔ large single-component reference sets spill and suspend until consumed (68.929833ms)
+✔ long scalar lines remain bounded while oversized reference lines fail explicitly (3.463292ms)
+✔ resource failures reach index completeness without changing legacy metadata behavior (0.128791ms)
+✔ processor reads one shared resource twice total and preserves component and summary facts (7.238416ms)
+✔ hydrateUnityForSymbol(compact) marks needsParityRetry when lightweight bindings remain (0.841667ms)
+✔ hydrateUnityForSymbol(parity) sets isComplete=true on parity success (0.297791ms)
+✔ buildMissingEvidenceFromHydrationMeta maps incomplete reasons (0.647333ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 365.320708

@@ -1,0 +1,87 @@
+{
+  "node": "v24.15.0",
+  "results": [
+    {
+      "large": false,
+      "bytes": 540,
+      "discovery": {
+        "streamOpens": 1,
+        "streamBytes": 540,
+        "readFileCalls": 0
+      },
+      "resolution": {
+        "streamOpens": 0,
+        "streamBytes": 0,
+        "readFileCalls": 1
+      },
+      "identities": [
+        {
+          "symbol": "First",
+          "ids": [
+            "1",
+            "3"
+          ],
+          "evidence": [
+            3,
+            3
+          ]
+        },
+        {
+          "symbol": "Second",
+          "ids": [
+            "2"
+          ],
+          "evidence": [
+            7
+          ]
+        }
+      ],
+      "actualScriptLines": [
+        3,
+        7,
+        11
+      ]
+    },
+    {
+      "large": true,
+      "bytes": 525854,
+      "discovery": {
+        "streamOpens": 1,
+        "streamBytes": 525854,
+        "readFileCalls": 0
+      },
+      "resolution": {
+        "streamOpens": 2,
+        "streamBytes": 1051708,
+        "readFileCalls": 0
+      },
+      "identities": [
+        {
+          "symbol": "First",
+          "ids": [
+            "1",
+            "3"
+          ],
+          "evidence": [
+            3,
+            3
+          ]
+        },
+        {
+          "symbol": "Second",
+          "ids": [
+            "2"
+          ],
+          "evidence": [
+            7
+          ]
+        }
+      ],
+      "actualScriptLines": [
+        3,
+        7,
+        11
+      ]
+    }
+  ]
+}

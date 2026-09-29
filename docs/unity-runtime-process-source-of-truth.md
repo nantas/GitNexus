@@ -54,10 +54,14 @@ scan → structure → parse → scopeResolution → … → communities
 
 1. As-Built（当前事实）：
    - `scan-context` 已承担 Unity 资源扫描阶段的核心索引输入（脚本 GUID 命中、资源路径集合、GUID 映射等）。
-   - `scan-context` 在同次资源扫描中以流式方式产出 `PrefabInstance.m_SourcePrefab` 轻量线索（streaming delivery）。
+   - analyze 的 `scan-context` 让脚本 GUID 和 `PrefabInstance.m_SourcePrefab` 共享一次物理发现读取，保持独立信号和去重；轻量记录可在本次运行内暂存，不形成新跨次缓存。
    - `processUnityResources` 在 `unity-resources` 统一消费 `scanContext.streamPrefabSourceRefs(...)` 写入 `UNITY_ASSET_GUID_REF`，并统一执行 dedupe/diagnostics/reason payload。
-   - 超过 512 KiB 的资源由 `resolver` 逐行定位命中脚本的 `MonoBehaviour`，只提取普通序列化字段的外部 GUID 引用，不缓存或深解析完整 YAML。`processUnityResources` 沿原有绑定写图路径生成 `UNITY_ASSET_GUID_REF`；`m_SourcePrefab` 仍只走 scan-context 的独立扫描与去重路径。
+   - 超过 512 KiB 的资源由 `resolver` 逐行定位命中脚本的 `MonoBehaviour`，只提取普通序列化字段的外部 GUID 引用，不缓存或深解析完整 YAML。`processUnityResources` 沿原有绑定写图路径生成 `UNITY_ASSET_GUID_REF`；`m_SourcePrefab` 保留独立语义与去重规则，但与 GUID 发现共用物理读取。
    - `scan-context does not write graph edges`; 图谱写入职责仅在 `processUnityResources`。
+   - canonical 选择后，`UnityResourceSession` 逐资源解析全部相关脚本。processor 按资源消费，释放完整解析对象与已消费 binding；不再保留全阶段 resolvedBySymbol。
+   - 发现记录默认 4 MiB，轻量组件引用默认 1 MiB，超限使用独占运行期暂存；拉取式消费提供背压。最终图载荷、必要全局索引和 query deep-parser 不计入该局部预算。
+   - 组件 evidence 来自自身 m_Script 行。文件读取、无法安全处理的长行及发现/解析间版本变化都会产生明确资源失败；metadata/status 显示 `unity-resource-analysis-failed`，派生层跳过时保留旧失败记录，下一次 analyze 强制完整重试。暂存一致性错误终止构建。
+   - query/parity/lazy 共用资源解析，保持路径选择、预算、fallback 与 strict parity-rerun 语义；成功解析不证明 runtime closure。
 2. Design Direction（重构方向，待实现）：
    - `scan-context` 持续作为可扩展的“资源字段识别承载器（resource signal carrier）”。
    - 后续资源字段识别需求（新增字段）优先通过扫描期识别器挂载扩展，避免新增孤立重型 pass。

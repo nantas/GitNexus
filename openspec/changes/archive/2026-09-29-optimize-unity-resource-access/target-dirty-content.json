@@ -1,0 +1,182 @@
+[
+  {
+    "path": ".agents/skills/gitnexus/_shared/unity-runtime-process-contract.md",
+    "sha256": "63d81d897ff243db133885bc7a00119302564b24bc2befb97f7373ded6325b6e"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-cli/SKILL.md",
+    "sha256": "01650912f90165db8cf4a1652357ca2da7a36d190f4f6461156779cc33272b36"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-debugging/SKILL.md",
+    "sha256": "e37519e4e4cff6764e9f5c1120acc239474a1c0a7f9a2e7e0403628eb286ea83"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-exploring/SKILL.md",
+    "sha256": "0383f3e0a2e0a99cfe7750d3dd50f00e97afd77c79ee1748096444cf052d1b16"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-guide/SKILL.md",
+    "sha256": "0b182fdcf7ddbbdeff4799b560ea344a245d054fd2e5fef82b13d4b5f0faec46"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-impact-analysis/SKILL.md",
+    "sha256": "ac1d05f2ee7c86e6b7356b420ddf08868afa52bc63f3f1a2976330ea73b00eb1"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-lfg/README.md",
+    "sha256": "96fa31b60b0ba304f4ed3d7e5965656ef558c94f148066555456d97a6d0c61ee"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-lfg/SKILL.md",
+    "sha256": "d93fb5d5c769ff975a78c9acf9ccaec6311e9316232452d3957138822d8e476e"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-pdg-query/SKILL.md",
+    "sha256": "3e908d7e495347f8cc316566534751fecdde347f1e3402d81d170b37d3e71067"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-plan/README.md",
+    "sha256": "cf02a67b709e5879a2d1a9014b402b3b09e9099e933e666ea3b03caa4579cd69"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-plan/SKILL.md",
+    "sha256": "e63801e139c67a9c7d2fc9bc90e0b39576e4617fc281a50c291c052b2648d4d0"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-plan/references/context-ledger.md",
+    "sha256": "d1dbb8cfa35daa11ebbf37ede0d8dcb6c8787d1bdb661db549124716c8db048e"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-plan/references/context-pack.md",
+    "sha256": "210d2590ec5a0259f1958312771672a3b1f103dcf5b70655993e4a53063b4752"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-plan/references/evidence-provenance.md",
+    "sha256": "f2fe01d3572209d3f726ac8775b8ca177feb45c6ddfe28287c9af116387d9464"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-plan/references/pdg-slice.md",
+    "sha256": "1034f3637601573c7d62f844cdfc2a93e41573106e6d27eeeda756656a305566"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-plan/references/plan-template.md",
+    "sha256": "1d65a62fb93ff30e985babfa33dbd4fbadcb8d94a78ff37292fb88618b5dfcfb"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-plan/scripts/evidence-provenance.mjs",
+    "sha256": "085f7d8d83bbcf78e05d64b17c1d1bbf64850d5b29f2d40f3bc7dc044cc358a4"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-refactoring/SKILL.md",
+    "sha256": "3f6301f3aa580c2799cbb4ee99c3cf371dd57994e2c9a80ebe6a8b3123a88e15"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-review/SKILL.md",
+    "sha256": "4ef6ddeec1d312d4c64d8b4dfb4441695d275df2b1d94e95ba63e643f04936fe"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-review/ci-personas/ci-adversarial-lens.md",
+    "sha256": "310508d9e9d729ee6e689b65baf08cbe869777ff49391cb44ce5d3ac26a4de6e"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-review/ci-personas/ci-blast-radius-lens.md",
+    "sha256": "51a55e44d40b6f53f991937fd1876c68292b7a337fad220f6a0c6453469945f7"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-review/ci-personas/ci-correctness-lens.md",
+    "sha256": "037291ddfdf172b1ba47bed231cd1e7d72638aa9aa436785246846fb52bedd92"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-review/ci-personas/ci-coverage-lens.md",
+    "sha256": "e68d6e25dd7dc769a8d3e8b2c6df5b93fcd31404d483160fd4223a94d598e7e7"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-review/ci-personas/ci-critic-lens.md",
+    "sha256": "987c88c54e149d628476a1b01d7dfb09d4e917ab48d7e8f446dfa1961dd756df"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-review/ci-personas/ci-security-lens.md",
+    "sha256": "c431bb38ffd0f8d4e5ea36526d892fb0b0add77689a41b7df2b70bb662735f57"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-taint-analysis/SKILL.md",
+    "sha256": "22ad583d38451aa51af92e978be1346e2722b65cedbe6a751a74c4cf72357951"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-work/README.md",
+    "sha256": "466554ca1720828b02b693fb120adf9b0294c52fc3d5d973fee49766528737a2"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-work/SKILL.md",
+    "sha256": "aa263930c3cc0caab4a58c4fae7b4fa582fee5bb7860f17aaf7e9fd466d520b8"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-work/references/evidence-provenance.md",
+    "sha256": "f2fe01d3572209d3f726ac8775b8ca177feb45c6ddfe28287c9af116387d9464"
+  },
+  {
+    "path": ".agents/skills/gitnexus/gitnexus-work/scripts/evidence-provenance.mjs",
+    "sha256": "085f7d8d83bbcf78e05d64b17c1d1bbf64850d5b29f2d40f3bc7dc044cc358a4"
+  },
+  {
+    "path": ".gitnexusrc",
+    "sha256": "034c75cf93616340fd077240f85aa58eba778cde91f2ca8af76d24b551084307"
+  },
+  {
+    "path": "AGENTS.md",
+    "sha256": "2ed3fa86d70d7b696e256a1a95a429b1e4e828a412413cb5472e705039a76629"
+  },
+  {
+    "path": "Assets/Editor/Build/FontRuleout/ChineseEditorOnlyPreview SDF.asset",
+    "sha256": "d5cd57c02aa30840ec1d1c8b46bdcc79e4861b57c0083419f72d5ad82da49c44"
+  },
+  {
+    "path": "Assets/NEON/Art/Sprites/SceneObject/NOAtlas/door_No09_mask.png.meta",
+    "sha256": "9beb5c72305844de6b81b36f461ac578462f025162de38af550ac49f8514bebc"
+  },
+  {
+    "path": "Assets/NEON/Code/Framework/Login/DevLoginConfig.asset",
+    "sha256": "045ded22d7754baf26cb20c1b3780064e84ab72c5a3b57bc7aa319887fe82f06"
+  },
+  {
+    "path": "Assets/NEON/Settings/RoomConfigs/Saya_Config/\u5173\u5361\u914d\u7f6e/Saya_Lv5.asset.meta",
+    "sha256": "82cb2509268c1fe1758c8cff8f6d43e766da3b841ac288622d59b5b65f61f99e"
+  },
+  {
+    "path": "Assets/Resources/Fonts & Materials/MiSans-Regular SDF.asset",
+    "sha256": "945687093538d61cd836c1f12e6cff5fbbc2cdb3d7aa07b24022d6b221c06836"
+  },
+  {
+    "path": "Assets/Resources/Fonts & Materials/MiSans-Semibold SDF.asset",
+    "sha256": "9203c14aeb957c0a5c12d0abaa7e79218ec8adb48b4c9905f510f638e353c4fb"
+  },
+  {
+    "path": "Assets/Resources/Fonts & Materials/_ttf/UniNeueBold.asset",
+    "sha256": "98b97818f2f3e24f4acdc0e866c46a1a0bab941c272083ab0a26260392482db9"
+  },
+  {
+    "path": "Assets/Resources/Fonts/TMP/Normal/Num_small_outline_UniNeue_Bold.asset",
+    "sha256": "2e41c20f5510a125c729e654f49d649f1b85c1cd91eebd784ab92fe0317bd0d8"
+  },
+  {
+    "path": "Assets/Resources/Fonts/TMP/Normal/_ttf/MiSans-Regular SDF.asset",
+    "sha256": "d239d5d57c9fa252500b682b1716486e7a4e6a35212e2d0ab20f8f4edbe1c946"
+  },
+  {
+    "path": "Assets/Resources/Fonts/TMP/Normal/_ttf/MiSans-Semibold SDF.asset",
+    "sha256": "6d7fac916172dab518a7996e2d81c67d579f1198db996e6a72d6fd2e5a78e8cb"
+  },
+  {
+    "path": "Assets/StreamingAssets/BarPlayerMusic.bank",
+    "sha256": "bd55d6b233b04eeb90dd54113d8e0ce16c626544552784d2c7a0b61f2027e9cd"
+  },
+  {
+    "path": "Assets/StreamingAssets/BarPlayerMusic.bank.meta",
+    "sha256": "30acb482b8c7c370ee08518ca242411ed673037123bfa5024ce667b4c9c2dd1d"
+  },
+  {
+    "path": "Assets/UI Toolkit/PanelSettings.asset",
+    "sha256": "065d65cdee3aaf41c7411acf444ed94075b18bca978a4cef79e1b63bf5d26ce6"
+  }
+]

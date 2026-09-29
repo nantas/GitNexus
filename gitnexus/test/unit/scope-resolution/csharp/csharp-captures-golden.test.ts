@@ -86,7 +86,10 @@ function collectCsharpFixtures(): { key: string; absPath: string }[] {
       const dir = stack.pop()!;
       for (const c of fs.readdirSync(dir, { withFileTypes: true })) {
         const p = path.join(dir, c.name);
-        if (c.isDirectory()) stack.push(p);
+        // dotnet smoke tests generate assembly metadata here; it is not fixture source.
+        if (c.isDirectory()) {
+          if (c.name !== 'obj' && c.name !== 'bin') stack.push(p);
+        }
         else if (c.name.endsWith('.cs')) {
           out.push({ key: path.relative(FIXTURE_ROOT, p).split(path.sep).join('/'), absPath: p });
         }

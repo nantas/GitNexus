@@ -322,6 +322,8 @@ export interface RepoMeta {
    * were omitted.
    */
   scopeExtractionReceipt?: 1;
+  /** Resource read/consistency omissions; retained when derived phases are skipped. */
+  unityResourceFailures?: Array<{ resourcePath: string; capability: 'discovery' | 'resolution'; message: string }>;
   /**
    * Interfaces whose structural-satisfaction check this run could not COMPLETE
    * (#2873) — not interfaces found to have no implementors.

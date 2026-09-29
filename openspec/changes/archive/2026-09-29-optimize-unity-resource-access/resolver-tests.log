@@ -1,0 +1,29 @@
+✔ resolveUnityBindings matches frozen acceptance baseline for required Unity samples (19.047334ms)
+✔ resolveUnityBindings applies PrefabInstance modifications for stripped scene components (1.959708ms)
+✔ resolveUnityBindings uses provided scan context without repo re-scan (13.455917ms)
+✔ resource YAML parse is reused across symbols sharing same resource file (5.427125ms)
+✔ resolveUnityBindings emits structured local/list reference targets for agent consumption (1.550458ms)
+✔ resolveUnityBindings resolves external guid to asset path when scan context includes asset meta (0.866708ms)
+✔ resolveUnityBindings supports ScriptableObject .asset resource bindings (0.7625ms)
+✔ resolveUnityBindings keeps existing scene serializedFields stable when .asset support is enabled (1.102125ms)
+✔ resolveUnityBindings supports resourcePathAllowlist filtering (1.372958ms)
+✔ resolveUnityBindings deepParseLargeResources can override lightweight fallback (16.573541ms)
+✔ resolveUnityBindings matches MonoBehaviour script guid case-insensitively (1.864084ms)
+✔ resolveUnityBindings parses MonoBehaviour blocks with negative object ids (1.765666ms)
+✔ extractAssetRefPathReferences parses nested _relativePath rows and marks sprite assets (0.145334ms)
+✔ extractAssetRefPathReferences handles Unity Ref naming variants and stable sprite classification (0.075583ms)
+✔ each small resource component carries its own script evidence (20.416167ms)
+✔ each large resource component carries its own script evidence (27.455333ms)
+✔ resource parser shares one semantic read for different scripts (small) (14.51175ms)
+✔ resource parser shares one semantic read for different scripts (large) (22.348709ms)
+✔ parseUnityYamlObjects parses stripped MonoBehaviour and PrefabInstance blocks (0.956375ms)
+✔ parseUnityYamlObjects keeps inline list entries under their parent field (0.102209ms)
+✔ parseUnityYamlObjects supports negative object ids in headers (0.096709ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 362.137542

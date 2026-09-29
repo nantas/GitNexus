@@ -1,0 +1,376 @@
+
+ RUN  v4.1.11 /Users/nantasmac/projects/agentic/GitNexus/gitnexus
+
+ × |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > matches the committed golden snapshot across all csharp-* fixtures + DAO shape 275ms
+   → emitCsharpScopeCaptures output drifted from the committed golden. If this drift is intentional (or the digest scheme changed), regenerate with UPDATE_GOLDEN=1 npx vitest run test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts: expected { …(214) } to deeply equal { …(182) }
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > resolveGoldenAction(true,false,true) -> 'regenerate' 0ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > resolveGoldenAction(false,false,true) -> 'fail' 0ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > resolveGoldenAction(false,false,false) -> 'regenerate' 0ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > resolveGoldenAction(false,true,true) -> 'compare' 0ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > resolveGoldenAction(false,true,false) -> 'compare' 0ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > produces a deterministic digest across repeated runs 5ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > digest is sensitive to capture-match emission order 2ms
+ ✓ |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > records a capture-group count for every fixture and the DAO shape 92ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > is ON by default on a full rebuild — no opt-in needed 1ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > is turned off by an explicit falsy env value (the escape hatch) 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > is turned off by an explicit option, which beats the env 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > honors the explicit option on a full rebuild 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > honors the env toggle on a full rebuild 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > refuses an incremental run even when explicitly requested 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > resolveStreamGraphEmit > refuses an incremental run even when the env toggle is set 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > buildPhaseList under streamGraphEmit > keeps every CALLS-consuming phase enabled — nothing is traded away 1ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > buildPhaseList under streamGraphEmit > keeps mro and di, whose reads are all in the retained set 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > buildPhaseList under streamGraphEmit > leaves the phase list untouched when the flag is off 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > buildPhaseList under streamGraphEmit > still honours skipGraphPhases independently of the streaming flag 0ms
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > RETAINED_REL_TYPES tracks its readers > streams Actuator relationship types that no later phase reads 0ms
+ × |default| test/unit/stream-graph-emit-config.test.ts > RETAINED_REL_TYPES tracks its readers > retains every relationship type any phase reads back mid-pipeline 241ms
+   → expected [ 'UNITY_COMPONENT_INSTANCE', …(1) ] to deeply equal []
+ ✓ |default| test/unit/stream-graph-emit-config.test.ts > streamGraphEmit without a CSV dir > throws instead of silently running without streaming 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |default| test/unit/stream-graph-emit-config.test.ts > RETAINED_REL_TYPES tracks its readers > retains every relationship type any phase reads back mid-pipeline
+AssertionError: expected [ 'UNITY_COMPONENT_INSTANCE', …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   "UNITY_COMPONENT_INSTANCE",
++   "UNITY_RESOURCE_SUMMARY",
++ ]
+
+ ❯ test/unit/stream-graph-emit-config.test.ts:173:21
+    171|
+    172|     const missing = [...readTypes].filter((t) => !RETAINED_REL_TYPES.h…
+    173|     expect(missing).toEqual([]);
+       |                     ^
+    174|   });
+    175| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |default| test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts > C# scope captures — golden parity > matches the committed golden snapshot across all csharp-* fixtures + DAO shape
+AssertionError: emitCsharpScopeCaptures output drifted from the committed golden. If this drift is intentional (or the digest scheme changed), regenerate with UPDATE_GOLDEN=1 npx vitest run test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts: expected { …(214) } to deeply equal { …(182) }
+
+- Expected
++ Received
+
+@@ -9,10 +9,18 @@
+    },
+    "csharp-alias-imports/Services/Main.cs": {
+      "captureGroups": 18,
+      "digest": "8b570aa6e9dec38c2ec1d65800a7647cb9a92ea0c1cd6d290df47da1f945b1b5",
+    },
++   "csharp-alias-imports/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-alias-imports/obj/Debug/net8.0/CsharpAlias.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "e32deb9160107c9634fee2b971d2a907e338d90b58f7b0f7dd30191dca3d8194",
++   },
+    "csharp-ambiguous/Models/Handler.cs": {
+      "captureGroups": 8,
+      "digest": "393b6b4b531e1df7e1d365928ccb5c2c2e7959f5400743a458640845a2d823d4",
+    },
+    "csharp-ambiguous/Models/IProcessor.cs": {
+@@ -40,10 +48,18 @@
+      "digest": "064640e172244bee5078073d4eed69df177681cba8c0a8105a391a65864612f9",
+    },
+    "csharp-assignment-chain/Program.cs": {
+      "captureGroups": 32,
+      "digest": "6b8eddb5525ef0358276dc18fba264ee0443a8adf5036a3300891507b99c36ab",
++   },
++   "csharp-assignment-chain/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-assignment-chain/obj/Debug/net8.0/AssignmentChain.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "33eed010c5936694a03523228c92676998309a0b61367f4fc754c12d00e6f098",
+    },
+    "csharp-async-binding/Order.cs": {
+      "captureGroups": 9,
+      "digest": "c2d5ef9688ff2fce345fe8d8148ee0d8281032b55083f70ac925e5407b3c0d0c",
+    },
+@@ -76,10 +92,18 @@
+      "digest": "65bf57fabe6074033a64e5e5adca6aa433e5087576eac96b13172934f55f0c82",
+    },
+    "csharp-calls/Utils/ZeroArg.cs": {
+      "captureGroups": 7,
+      "digest": "d6c3365cad3d69be7d0cefbb8a237b8c719ee2e0cdd0be76968db058c93dab9d",
++   },
++   "csharp-calls/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-calls/obj/Debug/net8.0/CallProj.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "b44365e62e50ba4058f3fb77daee360899220560f665109ce04dfd77f205b692",
+    },
+    "csharp-chain-call/Models/Repo.cs": {
+      "captureGroups": 8,
+      "digest": "605d2a7cd86022789ea5282b210a58aef814608a398d4ba4b62b85a206ad530d",
+    },
+@@ -164,10 +188,18 @@
+      "digest": "064640e172244bee5078073d4eed69df177681cba8c0a8105a391a65864612f9",
+    },
+    "csharp-foreach/Program.cs": {
+      "captureGroups": 20,
+      "digest": "0f71f4a62926fb335d32b456d5778812519c0eb2bf85528e2e9073db1b976749",
++   },
++   "csharp-foreach/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-foreach/obj/Debug/net8.0/ForeachProj.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "9c26a1b9127a07f5b524c1874a346e2db82800e0430131618e01adf4d6204458",
+    },
+    "csharp-frozen-binding-collision/App/Program.cs": {
+      "captureGroups": 18,
+      "digest": "d24df73c3f38999271b8bf0a5ea262d7e9a134b28d3aa5aa3efb6d90ef9b00a3",
+    },
+@@ -200,10 +232,18 @@
+      "digest": "07fb7dfb4f6332a727a2c237a2b8ec68ef6b05edea6f71b078a9e505dd0f5e1a",
+    },
+    "csharp-generic-var-receiver/Services/App.cs": {
+      "captureGroups": 19,
+      "digest": "830a531330f0d5ce986b7e59c482ac7f1c1abb23d5dcd1c2329e8bd10d574d5a",
++   },
++   "csharp-generic-var-receiver/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-generic-var-receiver/obj/Debug/net8.0/GenericVarReceiver.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "dcb1d990bf8462929e852afdf26887e9c5994cf7a2d4368bb349add9fd94c106",
+    },
+    "csharp-grandparent-resolution/Models/A.cs": {
+      "captureGroups": 10,
+      "digest": "159a52b959e021b1a34cc0dfbf1ba1a0748a0f29c84634948e2e85afc75db003",
+    },
+@@ -296,10 +336,18 @@
+      "digest": "71b55515db9e3680e0cf9f0b4142cc71b25353047bcec25776801cc38be0cf5e",
+    },
+    "csharp-is-pattern/models/User.cs": {
+      "captureGroups": 8,
+      "digest": "2c97632b3beb8f5500e4d02b1150d2845fa6d6bc26ee1838e4e1118ec6a8e847",
++   },
++   "csharp-is-pattern/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-is-pattern/obj/Debug/net8.0/IsPatternProj.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "71ce92132c23f4c0f3d85b6c06e3ee9dbfc0623acabe34727caf7a960e52b270",
+    },
+    "csharp-is-pattern/services/App.cs": {
+      "captureGroups": 12,
+      "digest": "4ad57edbcf5462d7a254fe63f59e5e513ab4032c18d437cc1154cde5c857897d",
+    },
+@@ -329,10 +377,18 @@
+    },
+    "csharp-member-calls/Services/UserService.cs": {
+      "captureGroups": 13,
+      "digest": "662512b485c31efe8b5a37df38e31bccf130e7625c7ef7594ea44e27b0b79d2c",
+    },
++   "csharp-member-calls/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-member-calls/obj/Debug/net8.0/MemberCallProj.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "d8d6d62792645f4e07b48142ec98807daee0dcfb8523b827d89400badf9b5a02",
++   },
+    "csharp-method-chain-binding/App.cs": {
+      "captureGroups": 60,
+      "digest": "4cdccde81efbe41cac6bc82e33b365ccd79481a440e65012f78cb543421c9873",
+    },
+    "csharp-method-enrichment/Animal.cs": {
+@@ -352,10 +408,18 @@
+      "digest": "be74672b6af6192d0b7872dcad9a6ba4af08156aad5cc01c6fe3eb2ee02b4127",
+    },
+    "csharp-mixed-decl-chain/Program.cs": {
+      "captureGroups": 28,
+      "digest": "466f29bc93a0293011c8c43f4655d87a26a57166261aaf85df3d08c2d38cf10b",
++   },
++   "csharp-mixed-decl-chain/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-mixed-decl-chain/obj/Debug/net8.0/MixedDeclChain.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "6ae1de1e74fbf7210f463cbc1ab60ee20bcf2ceae4b16a9ca16bc8ecbc823f1f",
+    },
+    "csharp-namespace-as-root-no-trailing-newline/App/Program.cs": {
+      "captureGroups": 13,
+      "digest": "573014b81ec482ac5136b8587ac8773cf9a363edd2752ad7f147d2f6ee9d2b7e",
+    },
+@@ -416,10 +480,18 @@
+      "digest": "5936132d4411a2e74b40d8a5a117ed4d5af7091b2c85706ce265eb8e7c63faa2",
+    },
+    "csharp-null-conditional/Models/User.cs": {
+      "captureGroups": 8,
+      "digest": "064640e172244bee5078073d4eed69df177681cba8c0a8105a391a65864612f9",
++   },
++   "csharp-null-conditional/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-null-conditional/obj/Debug/net8.0/NullConditional.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "7731e9e3a79b03d889ea07b4ace914534349c09ed25f18f0773faacf114843b9",
+    },
+    "csharp-optional-params/Services/App.cs": {
+      "captureGroups": 17,
+      "digest": "5fb11a605cac8fe2abf017e1724bf8881eacbc147f9a29052e432bf3ca26b284",
+    },
+@@ -476,10 +548,18 @@
+      "digest": "b724c5e2a0742901a09a8c85e0fd5504905471bd8096e6541b05c2d2a1d65527",
+    },
+    "csharp-pattern-matching/Services/AnimalService.cs": {
+      "captureGroups": 13,
+      "digest": "6f308b4411f9ad397e2789d7f85eaaaed78f7879dd16f4d7b8d8e7639335d302",
++   },
++   "csharp-pattern-matching/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-pattern-matching/obj/Debug/net8.0/PatternMatchProj.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "63e729588d6c24ce38251606a03a0a745de2aa435ada0cfefd793a38bed77681",
+    },
+    "csharp-primary-ctor-heritage/src/BaseEntity.cs": {
+      "captureGroups": 6,
+      "digest": "6dd168d40d7a04e8ef5e15e615f6281d3eaf917d79918f30c2261117c2edad12",
+    },
+@@ -565,10 +645,18 @@
+    },
+    "csharp-receiver-resolution/Models/User.cs": {
+      "captureGroups": 8,
+      "digest": "064640e172244bee5078073d4eed69df177681cba8c0a8105a391a65864612f9",
+    },
++   "csharp-receiver-resolution/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-receiver-resolution/obj/Debug/net8.0/ReceiverProj.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "ed2c4b30d4db3e1ab92a26b301b38d931107876ba1bfe2183b3058206b05e225",
++   },
+    "csharp-record-base/src/Models/BaseEntity.cs": {
+      "captureGroups": 9,
+      "digest": "1a4fc04784f1de00213fedbfdf103acd095c6f9a64437951a831c5182c45d073",
+    },
+    "csharp-record-base/src/Models/UserRecord.cs": {
+@@ -584,10 +672,18 @@
+      "digest": "80b9061d53bd0ceba23699c828100ebce5af9a7c006fff7e4a99d2f8e006b92e",
+    },
+    "csharp-recursive-pattern/Program.cs": {
+      "captureGroups": 15,
+      "digest": "ef252310d50287971d87e96e72b64575b9ee691602b62c74ea5b23811d2080a6",
++   },
++   "csharp-recursive-pattern/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-recursive-pattern/obj/Debug/net8.0/RecursivePatternProj.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "821f2648de1d39a4f11efdd0b71d09ad54fcc0e39461689beb4b176a3dc2f160",
+    },
+    "csharp-return-type/Models/Repo.cs": {
+      "captureGroups": 8,
+      "digest": "4953327fdde44fada4df0c55bd1dab9c2e96b28f42a1fbfb224c374f75ce0fbb",
+    },
+@@ -597,10 +693,18 @@
+    },
+    "csharp-return-type/Services/App.cs": {
+      "captureGroups": 16,
+      "digest": "6c22fca1da52147fdbfbe48f1563e95f291ef0af8856b5c6e82ed04a110d064e",
+    },
++   "csharp-return-type/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-return-type/obj/Debug/net8.0/ReturnType.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "d9f667626d0ba7281f3c2021f6cf8ddc1af1a85fdb5636264039506799ee8c1f",
++   },
+    "csharp-same-arity-cross-file/App.cs": {
+      "captureGroups": 49,
+      "digest": "899ca0e32e844b1d347eb0e7558da99644892dc894fcf7e3f632071bbd9cfcd7",
+    },
+    "csharp-same-arity-cross-file/DbLookup.cs": {
+@@ -672,10 +776,18 @@
+      "digest": "c51e7c7e0423087ddd3a439b99c95101a3bb8611bb6677d7bd1630a464a8cacb",
+    },
+    "csharp-switch-pattern/Program.cs": {
+      "captureGroups": 14,
+      "digest": "a090eff3ff572948716c931da3d62eeb137e36f08397b60748d4177293b10dc1",
++   },
++   "csharp-switch-pattern/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-switch-pattern/obj/Debug/net8.0/SwitchPattern.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "8156509c1d06ad18b524d37823c7bbc627744f4735dcb5159e007f2e5c9f9b8a",
+    },
+    "csharp-unicode-identifiers/main.cs": {
+      "captureGroups": 27,
+      "digest": "d310f77848d59ae83aa9ae8b6b2e817079fb36554ea2cb5c1fe2be7f13f1812d",
+    },
+@@ -705,17 +817,33 @@
+    },
+    "csharp-var-foreach/Program.cs": {
+      "captureGroups": 32,
+      "digest": "58052d12af8b6e4f34924d59bd965773ce6083cb557adebe28eb1d3edcd41b7a",
+    },
++   "csharp-var-foreach/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-var-foreach/obj/Debug/net8.0/VarForeach.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "47c8a1c03a556fd049000f5518d182c793722c8308af4b54219b86f6346edf53",
++   },
+    "csharp-variadic-resolution/Services/App.cs": {
+      "captureGroups": 10,
+      "digest": "892a1570c699c625fa1be6d4c53216589622a1b7df5e297a625edffd2fc31e14",
+    },
+    "csharp-variadic-resolution/Utils/Logger.cs": {
+      "captureGroups": 10,
+      "digest": "4907421baf3bbbcb46447b57beb2b1fb29f4ecd1555e79ea08d1b653c636666e",
++   },
++   "csharp-variadic-resolution/obj/Debug/net8.0/.NETCoreApp,Version=v8.0.AssemblyAttributes.cs": {
++     "captureGroups": 3,
++     "digest": "96f9e8fddafa7c92d3dc7d5454b68af8b160408f0c7f741166b46df285584225",
++   },
++   "csharp-variadic-resolution/obj/Debug/net8.0/VariadicProj.AssemblyInfo.cs": {
++     "captureGroups": 3,
++     "digest": "6b9bab3d6f260b3aba577d7c84e185253c24e49e6dddf4e00ef0001beb231350",
+    },
+    "csharp-write-access/Models.cs": {
+      "captureGroups": 9,
+      "digest": "0d65b1d41a42a5a79eecf3a2ff2c7b3585c52dadd479770c2572a146afdc6606",
+    },
+
+ ❯ test/unit/scope-resolution/csharp/csharp-captures-golden.test.ts:193:7
+    191|         '(or the digest scheme changed), regenerate with ' +
+    192|         'UPDATE_GOLDEN=1 npx vitest run test/unit/scope-resolution/csh…
+    193|     ).toEqual(expected);
+       |       ^
+    194|   });
+    195|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 21 passed (23)
+   Start at  12:32:22
+   Duration  2.57s (transform 2.00s, setup 0ms, import 2.56s, tests 620ms, environment 0ms)
+
