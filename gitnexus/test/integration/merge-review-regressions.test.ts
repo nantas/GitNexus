@@ -132,7 +132,7 @@ describe.skipIf(process.platform === 'win32')('merge review regressions', () => 
     ).toMatchObject({ kind: 'current' });
   }, 180_000);
 
-  it('adds, retains without duplicates, and removes the Unity root on incremental writes', async () => {
+  it('adds, retains without duplicates, and removes the Unity root on safe full writes', async () => {
     await write('Assets/Plain.cs', 'public class Plain { public void Run() {} }');
     commit();
     await analyze();
@@ -148,19 +148,19 @@ describe.skipIf(process.platform === 'win32')('merge review regressions', () => 
       'public class Foo : MonoBehaviour { public void Start() { Run(); } public void Run() {} }',
     );
     commit();
-    expect((await analyze()).incremental).toBe(true);
+    expect((await analyze()).incremental).toBe(false);
     expect(await roots()).toHaveLength(1);
     expect(await calls()).toEqual([{ name: 'Start' }]);
     await write('Assets/Plain.cs', 'public class Plain { public void Run() { int x = 1; } }');
     commit();
-    expect((await analyze()).incremental).toBe(true);
+    expect((await analyze()).incremental).toBe(false);
     expect(await roots()).toHaveLength(1);
     expect(await calls()).toEqual([{ name: 'Start' }]);
     expect((await analyze()).alreadyUpToDate).toBe(true);
     expect(await roots()).toHaveLength(1);
     await fs.unlink(path.join(repo.dbPath, 'Assets/Foo.cs'));
     commit();
-    expect((await analyze()).incremental).toBe(true);
+    expect((await analyze()).incremental).toBe(false);
     expect(await roots()).toEqual([]);
     expect(await calls()).toEqual([]);
   }, 180_000);

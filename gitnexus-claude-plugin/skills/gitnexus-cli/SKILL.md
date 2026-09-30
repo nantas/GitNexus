@@ -93,6 +93,22 @@ Use `$GN analyze --help` for available flags. `--index-only` skips context and s
 
 After a failed or timed-out analyze, report the exact error and inspect the cause before another run. For Unity runtime validation, use the shared runtime-process and hydration contracts below.
 
+For Unity projects, analyze validates a separate content snapshot of source,
+resources, metadata and consumed configuration. A compatible `unityInputReceipt`
+allows unchanged content to reuse the index even when the worktree is dirty;
+parse, scope resolution, Unity enrichment, graph writes and FTS are skipped.
+Real input changes and legacy indexes without this receipt use a full staged
+rebuild, retaining parser-cache reuse and existing embedding preservation.
+`--force` and `--no-parse-cache` still force processing. Mixed source languages
+whose external input closure is not covered do not use this shortcut.
+
+`Unity inputs:` diagnostics report the decision and validation time. On
+`input-failure`, fix the unreadable/unstable input and rerun; missing hashes must
+never be treated as deletions. Staged Unity rebuilding requires a supported
+atomic-swap configuration; unsupported Windows configurations fail before DB
+mutation. This receipt governs analyze reuse; it is not a runtime-closure proof
+or a replacement for status's existing coverage checks.
+
 ### status — Check index freshness
 
 ```bash

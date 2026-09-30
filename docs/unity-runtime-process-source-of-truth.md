@@ -42,6 +42,25 @@ scan → structure → parse → scopeResolution → … → communities
 7. parity seed 在 `core/run-analyze.ts` 成功发布索引时写入 `unity-parity-seed.json`，供 MCP hydration 使用。
 8. 资源关系补建的 File 节点保留资源身份和边；CSV 导出读取全文时同样遵守 `--max-file-size` / `GITNEXUS_MAX_FILE_SIZE` 上限（默认 512 KiB），超限资源的 `File.content` 留空。该限制不影响 Unity 资源扫描、绑定提取或 lifecycle 注入，避免大 prefab 绕过扫描预算并撑爆数据库 COPY。
 
+### Unity 输入一致性与重建
+
+`run-analyze` 在重型 pipeline 前使用 `unity/analysis-input-snapshot.ts` 独立验证输入，
+不再以阶段性的 File 节点列表判定 Unity 输入删除。`unityInputReceipt`（version 1）
+覆盖内容摘要和输入数量；正常身份/配置/恢复检查仍优先执行。同一份已索引的 dirty
+内容可以复用，跳过 parse/scope/Unity/COPY/FTS。缺少兼容 receipt 的旧索引修复一次；
+真实输入变化暂时使用完整图重算和 staged full-write，保留 parser cache 与 embeddings。
+其他语言的外部输入依赖尚未覆盖的混合工程不启用此快路径。
+
+输入包含 scope 内源码和资源、实际消费的 metadata、Unity 配置、C# 工程与 namespace
+扫描输入及外部 define csproj；后者可能不受 Git ignore/source scope 限制。哈希采用有界
+流式读取，枚举/读取失败直接失败，不能生成删除计划。发布前再次核验内容，检测到变化
+就保留旧图并要求重跑；这不保证任意并发修改的跨文件 ACID。只有完整成功结果发布新
+receipt。已有索引时，新结果若报告资源/作用域遗漏或图写入塌缩，会在替换前失败并保留旧图；首次构建仍可沿用原有 incomplete 报告，但不签发可复用 receipt。输出 fileHashes 仍来自最终图，不把所有输入候选强制物化；deferred phases
+改变图后会重算输出清单及 diff。原有 seed、runtime-root、hydration 与 closure 契约不变。
+
+日志 `Unity inputs:` 区分复用、旧 receipt 修复、变更/恢复，并包含核验耗时。暂存发布不受
+当前平台支持时在数据库修改前拒绝 Unity 重建（Windows 默认配置尚不支持）。
+
 ### 2.1.0 有界 lifecycle process 补充
 
 `unity-processes` 依赖 `processes/unity-lifecycle/communities`，在通用过程完成后为每个 runtime-root callback 独立分配追踪预算，保留全部通用过程。只有真实 `Method:unity-runtime-root` 和 `unity-lifecycle-synthetic` 根边才启用。最多 256 个 callback（对应默认合成边上限），每个 callback 最多 48 条候选路径、4096 个排队/访问状态；后续每跳最多 4 分支，深度最多 10。各 callback 不共享候选预算，不再凑足总量 8 即停止。排序按文件/方法名及 ID 稳定排序，不依赖项目名评分或边插入顺序。

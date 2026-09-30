@@ -58,3 +58,12 @@ When on-demand verification is used, report `runtime_chain.status`, `evidence_le
 `unity-lifecycle` keeps the 256 synthetic-root entry cap and the per-class cap. It admits hosts by callback-count group; only the group crossing the cap is ranked by trusted CALLS value (two-hop continuations, then direct calls), with stable identity ties. Available slots first cover hosts without an existing synthetic root entry, then fill by callback value. The phase reports truncated callbacks, hosts still uncovered after injection, and selected callbacks without trusted calls across all groups. Entry value predicts useful traces but does not prove persisted Process membership.
 
 A dedicated `unity-processes` phase preserves generic processes and adds bounded traces with an independent budget per lifecycle callback (up to 256 callbacks, 48 candidates and 4096 queued states per callback, four outgoing branches per step, ten steps). It deduplicates complete ordered traces, uses real lifecycle CALLS, excludes heuristic/low-confidence calls, and reports truncation for every budget. There is no eight-process completion target. Generic `process-processor` stays upstream-compatible. Coverage regression checks compare callback, terminal, and ordered STEP_IN_PROCESS members after reconciling symbol identities; counts or surviving CALLS alone cannot establish parity. Bounded sampling is not verifier-core closure; use graph anchors and on-demand verification for closure.
+
+## Analyze freshness and resource integrity
+
+`unityInputReceipt` certifies a successful content-validated Unity analysis, not
+runtime closure. An unchanged dirty worktree may reuse that index. Changed
+inputs or a legacy missing receipt require a full staged rebuild; parser cache
+can still be reused. On `Unity input-failure`, resolve the read/version problem
+and rerun. Compare persisted resource relationships and ordered process members
+when validating a rebuild: matching counts or parity seed alone is insufficient.

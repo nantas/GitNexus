@@ -89,6 +89,8 @@ export interface AnalyzerRunnerIdentity {
 export interface RepoMeta {
   /** Effective scope/extensions/define symbols used by the published graph. */
   analysisInputFingerprint?: string;
+  /** Successful complete Unity input set; published only with its graph and seed. */
+  unityInputReceipt?: import('../core/unity/analysis-input-snapshot.js').AnalysisInputReceipt;
   /** Legacy alias metadata, read for compatibility; .gitnexusrc owns current options. */
   repoId?: string;
   analyzeOptions?: {
@@ -323,7 +325,11 @@ export interface RepoMeta {
    */
   scopeExtractionReceipt?: 1;
   /** Resource read/consistency omissions; retained when derived phases are skipped. */
-  unityResourceFailures?: Array<{ resourcePath: string; capability: 'discovery' | 'resolution'; message: string }>;
+  unityResourceFailures?: Array<{
+    resourcePath: string;
+    capability: 'discovery' | 'resolution';
+    message: string;
+  }>;
   /**
    * Interfaces whose structural-satisfaction check this run could not COMPLETE
    * (#2873) — not interfaces found to have no implementors.

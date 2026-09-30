@@ -9,7 +9,11 @@
  * wrapper or server worker) is responsible for process lifecycle.
  */
 
-import { detectGraphWriteCollapse, type GraphWriteCollapseVerdict } from './index-freshness.js';
+import {
+  detectGraphWriteCollapse,
+  getIndexIncompleteReasons,
+  type GraphWriteCollapseVerdict,
+} from './index-freshness.js';
 import {
   resolveFtsDisableReason,
   getFtsDisabledReason,
@@ -34,6 +38,7 @@ import {
 } from './ingestion/scope-resolution/name-fallback-summary.js';
 import { runPipelineFromRepo } from './ingestion/pipeline.js';
 import { resolveAnalysisInputs } from './analysis-inputs.js';
+import { captureUnityInputSnapshot } from './unity/analysis-input-snapshot.js';
 import { SYNTHETIC_RUNTIME_ROOT_ID } from './ingestion/unity-lifecycle-synthetic-calls.js';
 import {
   logUnresolvedReceiverFiles,
@@ -1926,16 +1931,54 @@ async function runFullAnalysisInner(
     options = { ...options, force: true };
   }
 
+  // Input identity is independent of the graph's phase-dependent File nodes.
+  // Settle our own ignore sidecar before validating inputs; it is not user code.
+  await ensureGitNexusIgnored(repoPath, storagePath);
+  const embeddingOptionsBeforeInputDecision = options;
+  const unityInputs = await captureUnityInputSnapshot(
+    repoPath,
+    {
+      scopeRules: options.scopeRules,
+      includeExtensions: options.includeExtensions,
+      csharpDefineCsproj: options.csharpDefineCsproj,
+    },
+    existingMeta?.unityInputReceipt !== undefined ||
+      persistedFilePaths.some((file) => /\.(prefab|unity|asset)$/.test(file)),
+  );
+  let unityInputsReusable = false;
+  if (unityInputs) {
+    const previous = existingMeta?.unityInputReceipt;
+    unityInputsReusable =
+      unityInputs.reusable &&
+      previous?.version === 1 &&
+      previous.digest === unityInputs.receipt.digest &&
+      getIndexIncompleteReasons(existingMeta).length === 0;
+    const reason = !unityInputs.reusable
+      ? 'unsupported-input-closure'
+      : !previous || previous.version !== 1
+        ? 'legacy-repair'
+        : !unityInputsReusable
+          ? 'real-change-or-incomplete'
+          : options.force || existingMeta?.embeddingCheckpoint
+            ? 'explicit-rebuild-or-recovery'
+            : 'reuse';
+    log(
+      `Unity inputs: ${reason}; validated ${unityInputs.receipt.fileCount} files in ${Math.round(unityInputs.elapsedMs)}ms`,
+    );
+    if (!unityInputsReusable || existingMeta?.embeddingCheckpoint)
+      options = { ...options, force: true };
+  }
+
   // ── Early-return: already up to date ──────────────────────────────
   if (
     existingMeta &&
     !existingMeta.embeddingCheckpoint &&
     !options.force &&
-    existingMeta.lastCommit === currentCommit &&
+    (existingMeta.lastCommit === currentCommit || unityInputsReusable) &&
     !ftsModeChanged
   ) {
-    // Non-git folders have currentCommit = '' — always rebuild since we can't detect changes
-    if (currentCommit !== '') {
+    // A complete content receipt also permits reuse without Git history.
+    if (currentCommit !== '' || unityInputsReusable) {
       // For git repos, even if HEAD matches lastCommit, the working tree
       // may have uncommitted changes. Only short-circuit when the working
       // tree is also clean — otherwise fall through to the incremental
@@ -1948,7 +1991,7 @@ async function runFullAnalysisInner(
       // Counting them as dirty would perpetually defeat the up-to-date
       // fast path because the previous analyze just wrote them
       // (regression vs PR #1233 behavior).
-      const dirty = isWorkingTreeDirty(repoPath);
+      const dirty = unityInputsReusable ? false : isWorkingTreeDirty(repoPath);
       // Registration wrinkle around the fast path (#2264). A prior
       // `analyze --name X` that hit a name collision writes meta.json (meta-save
       // runs before registerRepo) then fails before registering, leaving the
@@ -1979,6 +2022,10 @@ async function runFullAnalysisInner(
       // later read on a host where it loads — which is a legitimate, common
       // state, and the invariant `analyzer-identity-cli.test.ts` pins.
       if (!dirty && !healUnregistered) {
+        if (unityInputsReusable && existingMeta.lastCommit !== currentCommit) {
+          existingMeta.lastCommit = currentCommit;
+          await saveMeta(metaDir, existingMeta);
+        }
         if (options.registryName) {
           await registerRepo(repoPath, existingMeta, {
             name: options.registryName,
@@ -2096,7 +2143,7 @@ async function runFullAnalysisInner(
     preserveExistingEmbeddings,
     shouldGenerateEmbeddings: derivedShouldGenerateEmbeddings,
     shouldLoadCache: derivedShouldLoadCache,
-  } = _deriveEmbeddingMode(options, existingEmbeddingCount);
+  } = _deriveEmbeddingMode(embeddingOptionsBeforeInputDecision, existingEmbeddingCount);
   const shouldGenerateEmbeddings = derivedShouldGenerateEmbeddings || resumeEmbeddingCheckpoint;
   const shouldLoadCache = derivedShouldLoadCache || resumeEmbeddingCheckpoint;
 
@@ -2200,6 +2247,8 @@ async function runFullAnalysisInner(
   // `runDeferredDerivedPhases` once the write plan is known. Excluded on the
   // streaming path because that is a full rebuild by construction, and the
   // deferred phases must not write into a finalized emit sink.
+  if (unityInputs) options = { ...options, force: true };
+
   const skipDerivedGraphPhases =
     !streamGraphEmitActive &&
     !options.force &&
@@ -2301,7 +2350,18 @@ async function runFullAnalysisInner(
       if (fp) allFilePaths.push(fp);
     }
   });
-  const newFileHashes = await computeFileHashes(repoPath, allFilePaths);
+  let newFileHashes: Map<string, string>;
+  if (unityInputs) {
+    newFileHashes = new Map();
+    for (const file of allFilePaths) {
+      const hash = unityInputs.hashes.get(file);
+      if (!hash)
+        throw new Error(`Unity input-failure: final graph file was not validated: ${file}`);
+      newFileHashes.set(file, hash);
+    }
+  } else {
+    newFileHashes = await computeFileHashes(repoPath, allFilePaths);
+  }
   const currentAnalysisFeatures = resolveAnalysisFeatureVersions(ANALYSIS_FEATURES, allFilePaths);
   const currentAnalysisFeatureMismatches = existingMeta
     ? findAnalysisFeatureMismatches(existingMeta.analysisFeatures, currentAnalysisFeatures)
@@ -2340,7 +2400,7 @@ async function runFullAnalysisInner(
     repoHasGit &&
     allFilePaths.length > 0;
 
-  const hashDiff = isIncremental
+  let hashDiff = isIncremental
     ? diffFileHashes(newFileHashes, existingMeta!.fileHashes)
     : undefined;
 
@@ -2364,6 +2424,16 @@ async function runFullAnalysisInner(
   if (skipDerivedGraphPhases && !preserveDerivedLayer) {
     progress('communities', 58, 'Detecting code communities and flows...');
     await pipelineResult.runDeferredDerivedPhases?.();
+    // Deferred enrichment can add File nodes. The provisional comparison must
+    // never survive into deletion planning or metadata publication.
+    allFilePaths.length = 0;
+    pipelineResult.graph.forEachNode((node) => {
+      if (node.label === 'File' && node.properties.filePath)
+        allFilePaths.push(node.properties.filePath);
+    });
+    newFileHashes = await computeFileHashes(repoPath, allFilePaths);
+    hashDiff = isIncremental ? diffFileHashes(newFileHashes, existingMeta!.fileHashes) : undefined;
+    applyContentRetention(pipelineResult.graph, contentRetention);
   }
 
   // #2 atomic index publish: on a full rebuild, build the fresh DB at a temp
@@ -2421,6 +2491,11 @@ async function runFullAnalysisInner(
   // valve. Nothing between here and there reads either binding except
   // `initLbug(buildPath)`, which the upgrade re-runs against the staging path.
   let useAtomicSwap = (isFullRebuild || atomicIncremental) && (posixSwap || windowsSwapOk);
+  if (unityInputs && !useAtomicSwap) {
+    throw new Error(
+      'Unity safe rebuild requires staged publication, which is unavailable on this platform/configuration.',
+    );
+  }
   // Set only at the first operation that can mutate the live graph store.
   // Pre-write failures (config, lock, parsing, metadata, importer expansion)
   // remain retryable even when this platform cannot use an atomic swap.
@@ -4225,9 +4300,10 @@ async function runFullAnalysisInner(
       // Optional grammars may be unavailable by design; omitting the receipt in
       // that case makes readers report an unverified lower bound.
       scopeExtractionReceipt: pipelineResult.unavailableScopeLanguageFiles === 0 ? 1 : undefined,
-      unityResourceFailures: pipelineResult.unityResult === undefined
-        ? existingMeta?.unityResourceFailures
-        : pipelineResult.unityResult.resourceFailures,
+      unityResourceFailures:
+        pipelineResult.unityResult === undefined
+          ? existingMeta?.unityResourceFailures
+          : pipelineResult.unityResult.resourceFailures,
       // Carried forward ONLY when this run could not measure — `saveMeta` writes
       // a fresh object, so omitting the key deletes a prior record and turns a
       // hedged answer back into a confident one. A run that DID measure always
@@ -4286,6 +4362,41 @@ async function runFullAnalysisInner(
     // inside the resolver, and a mismatch leaves the dirty flag intact so the
     // next run takes the established full-recovery path.
     meta.runnerIdentity = finalizeAnalyzerRunnerIdentity(import.meta.url, runnerIdentity);
+    if (unityInputs) {
+      const incomplete = getIndexIncompleteReasons(meta);
+      if (
+        existingMeta &&
+        incomplete.some(
+          (reason) =>
+            reason === 'unity-resource-analysis-failed' ||
+            reason === 'graph-write-collapsed' ||
+            reason === 'scope-extraction-failed' ||
+            reason === 'scope-extraction-unverified',
+        )
+      ) {
+        throw new Error(
+          `Unity input-failure: replacement graph is incomplete (${incomplete.join(', ')}); previous index retained.`,
+        );
+      }
+      const finalInputs = await captureUnityInputSnapshot(
+        repoPath,
+        {
+          scopeRules: options.scopeRules,
+          includeExtensions: options.includeExtensions,
+          csharpDefineCsproj: options.csharpDefineCsproj,
+        },
+        true,
+      );
+      if (finalInputs?.receipt.digest !== unityInputs.receipt.digest) {
+        throw new Error(
+          'Unity input-failure: inputs changed during analysis; previous index retained. Rerun analyze.',
+        );
+      }
+      if (unityInputs.reusable && getIndexIncompleteReasons(meta).length === 0) {
+        meta.unityInputReceipt = unityInputs.receipt;
+      }
+      log(`Unity inputs: publication revalidated in ${Math.round(finalInputs.elapsedMs)}ms`);
+    }
     // #2614 F1: the freshness stamp (saveMeta) is written AFTER the atomic swap
     // below — never here — so a concurrent MCP reader can't observe
     // meta.indexedAt = T_new while lbugPath still resolves to the pre-swap
@@ -4419,6 +4530,11 @@ async function runFullAnalysisInner(
           () => false,
         )
       : false;
+    if (unityInputs && !builtDbExists) {
+      throw new Error(
+        'Unity input-failure: staged database missing; refusing receipt publication.',
+      );
+    }
     if (useAtomicSwap && builtDbExists) {
       await retryRename(buildPath, lbugPath);
       liveIndexMutationStarted = true;
