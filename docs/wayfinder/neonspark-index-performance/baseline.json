@@ -260,5 +260,6 @@
     "Installed 1.6.12 differs from sourceBaseCommit.",
     "Warm sample includes one-second macOS sample during initial validation.",
     "436177ms is a baseline measurement, not a stable latency guarantee."
-  ]
+  ],
+  "baselineCommit": "bbf05f4eeb9630fecd531010edab9f1e7f674500"
 }
