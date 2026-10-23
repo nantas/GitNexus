@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 1,
+  "id": "neonspark-full-2026-10-23",
+  "status": "target-not-met",
+  "sourceBaseCommit": "22b2584947cc38250b1488ccfefe53e9e9be9431",
+  "targetCommit": "7062ac342f835bf67943922441554abe27f45d45",
+  "targetWorkingTree": "Existing font edits retained; receipt pins actual input contents.",
+  "targetMs": 180000,
+  "coldDefinition": "Empty index and parser cache; OS cache not cleared.",
+  "node": "24.15.0",
+  "memoryGiB": 24,
+  "logicalCpus": 10,
+  "contentRetention": "full",
+  "ftsProfile": "full",
+  "embeddings": false,
+  "selection": {
+    "scopeRules": [
+      "Assets/",
+      "Packages/"
+    ],
+    "includeExtensions": [
+      ".cs",
+      ".meta"
+    ],
+    "csharpDefineCsproj": "Assembly-CSharp.csproj"
+  },
+  "measurements": {
+    "baseline": {
+      "elapsedMs": 812039,
+      "phases": {
+        "scan": 13664,
+        "structure": 817,
+        "springConfig": 22,
+        "markdown": 6,
+        "cobol": 29,
+        "parse": 98744,
+        "routes": 53,
+        "tools": 3,
+        "orm": 1,
+        "crossFile": 3,
+        "scopeResolution": 44833,
+        "springAutoConfiguration": 7,
+        "springAop": 1,
+        "springDestinations": 25,
+        "pruneLocalSymbols": 295,
+        "mro": 323,
+        "springAopInheritance": 72,
+        "di": 24,
+        "communities": 1235,
+        "unity-resources": 480952,
+        "unity-lifecycle": 892,
+        "processes": 1091,
+        "unity-processes": 351,
+        "unity-process-subtype": 246
+      },
+      "inputs": [],
+      "load": [
+        "[lbug-load prof] mode=overlap csv-emit=37330.5ms copy-nodes=9740.5ms copy-rels=8665.3ms fallback=0.0ms total=55795.9ms (278531 nodes, 842448 rels)\"}"
+      ],
+      "cpuProfile": false
+    },
+    "source": {
+      "elapsedMs": 859688,
+      "phases": {
+        "scan": 16761,
+        "structure": 969,
+        "springConfig": 24,
+        "markdown": 9,
+        "cobol": 32,
+        "parse": 112039,
+        "routes": 110,
+        "tools": 7,
+        "orm": 0,
+        "crossFile": 5,
+        "scopeResolution": 63338,
+        "springAutoConfiguration": 37,
+        "springAop": 1,
+        "springDestinations": 29,
+        "pruneLocalSymbols": 321,
+        "mro": 397,
+        "springAopInheritance": 90,
+        "di": 50,
+        "communities": 1683,
+        "unity-resources": 331618,
+        "unity-lifecycle": 332,
+        "processes": 563,
+        "unity-processes": 222,
+        "unity-process-subtype": 215
+      },
+      "inputs": [
+        "Unity inputs: legacy-repair; validated 164024 files in 44711ms",
+        "Unity inputs: publication revalidated in 117314ms"
+      ],
+      "load": [
+        "[lbug-load prof] mode=overlap csv-emit=46620.0ms copy-nodes=9251.4ms copy-rels=7749.2ms fallback=0.0ms total=63699.1ms (278531 nodes, 842448 rels)\"}"
+      ],
+      "cpuProfile": true
+    },
+    "optimized": {
+      "elapsedMs": 477934,
+      "phases": {
+        "scan": 10773,
+        "structure": 588,
+        "springConfig": 43,
+        "markdown": 6,
+        "cobol": 25,
+        "parse": 42667,
+        "routes": 45,
+        "tools": 2,
+        "orm": 1,
+        "crossFile": 4,
+        "scopeResolution": 36554,
+        "springAutoConfiguration": 5,
+        "springAop": 1,
+        "springDestinations": 23,
+        "pruneLocalSymbols": 186,
+        "mro": 245,
+        "springAopInheritance": 38,
+        "di": 16,
+        "communities": 1000,
+        "unity-resources": 123378,
+        "unity-lifecycle": 335,
+        "processes": 524,
+        "unity-processes": 193,
+        "unity-process-subtype": 148
+      },
+      "inputs": [
+        "Unity inputs: legacy-repair; validated 164024 files in 33301ms",
+        "Unity inputs: publication revalidated in 73396ms"
+      ],
+      "load": [
+        "[lbug-load prof] mode=overlap csv-emit=38279.5ms copy-nodes=9808.5ms copy-rels=9254.5ms fallback=0.0ms total=57432.6ms (278531 nodes, 842448 rels)\"}"
+      ],
+      "cpuProfile": false
+    },
+    "optimized2": {
+      "elapsedMs": 436177,
+      "phases": {
+        "scan": 13501,
+        "structure": 598,
+        "springConfig": 17,
+        "markdown": 2,
+        "cobol": 24,
+        "parse": 66887,
+        "routes": 55,
+        "tools": 4,
+        "orm": 0,
+        "crossFile": 2,
+        "scopeResolution": 48102,
+        "springAutoConfiguration": 26,
+        "springAop": 1,
+        "springDestinations": 25,
+        "pruneLocalSymbols": 178,
+        "mro": 232,
+        "springAopInheritance": 38,
+        "di": 16,
+        "communities": 954,
+        "unity-resources": 85152,
+        "unity-lifecycle": 327,
+        "processes": 460,
+        "unity-processes": 190,
+        "unity-process-subtype": 154
+      },
+      "inputs": [
+        "Unity inputs: legacy-repair; validated 164024 files in 33044ms",
+        "Unity inputs: publication revalidated in 72868ms"
+      ],
+      "load": [
+        "[lbug-load prof] mode=overlap csv-emit=18836.7ms copy-nodes=8428.3ms copy-rels=7264.7ms fallback=0.0ms total=34586.5ms (278531 nodes, 842448 rels)\"}"
+      ],
+      "cpuProfile": false
+    },
+    "warm": {
+      "elapsedMs": 620707,
+      "phases": {
+        "scan": 18904,
+        "structure": 1235,
+        "springConfig": 21,
+        "markdown": 6,
+        "cobol": 28,
+        "parse": 12166,
+        "routes": 82,
+        "tools": 3,
+        "orm": 0,
+        "crossFile": 2,
+        "scopeResolution": 54220,
+        "springAutoConfiguration": 40,
+        "springAop": 0,
+        "springDestinations": 60,
+        "pruneLocalSymbols": 311,
+        "mro": 378,
+        "springAopInheritance": 85,
+        "di": 41,
+        "communities": 1471,
+        "unity-resources": 200539,
+        "unity-lifecycle": 684,
+        "processes": 990,
+        "unity-processes": 211,
+        "unity-process-subtype": 181
+      },
+      "inputs": [
+        "Unity inputs: explicit-rebuild-or-recovery; validated 164024 files in 139765ms",
+        "Unity inputs: publication revalidated in 51711ms"
+      ],
+      "load": [
+        "[lbug-load prof] mode=overlap csv-emit=37045.3ms copy-nodes=9370.9ms copy-rels=8093.5ms fallback=0.0ms total=54584.9ms (278531 nodes, 842448 rels)\"}"
+      ],
+      "cpuProfile": false
+    },
+    "noop": {
+      "elapsedMs": 115326,
+      "phases": {},
+      "inputs": [
+        "Unity inputs: reuse; validated 164024 files in 111661ms"
+      ],
+      "load": [],
+      "cpuProfile": false
+    }
+  },
+  "inputReceipt": {
+    "version": 1,
+    "digest": "33042ff2174db8011fd7501cb2c907405cbdb6181d7e3607ac18fe5d7037e1db",
+    "fileCount": 164024
+  },
+  "graphStats": {
+    "files": 137313,
+    "nodes": 278531,
+    "edges": 841741,
+    "communities": 7700,
+    "processes": 2400,
+    "embeddings": 0
+  },
+  "semanticComparison": {
+    "baseline": "source",
+    "variants": [
+      "optimized",
+      "optimized2",
+      "warm"
+    ],
+    "factCount": 361857,
+    "fileNodeCount": 155806,
+    "paritySeedEqual": true,
+    "fileHashesEqual": true,
+    "receiptEqual": true
+  },
+  "csvFileExport": {
+    "csv-before": {
+      "elapsedMs": 33714.9885,
+      "rows": 155806,
+      "sha256": "4eca53ee82e2e075f2ab9f7dba2766cba58c3ce109eaebdaee6218a4f896f8e8"
+    },
+    "csv-after": {
+      "elapsedMs": 15387.236834,
+      "rows": 155806,
+      "sha256": "4eca53ee82e2e075f2ab9f7dba2766cba58c3ce109eaebdaee6218a4f896f8e8"
+    }
+  },
+  "limitations": [
+    "Single samples; background applications and OS cache uncontrolled.",
+    "Installed 1.6.12 differs from sourceBaseCommit.",
+    "Warm sample includes one-second macOS sample during initial validation.",
+    "436177ms is a baseline measurement, not a stable latency guarantee."
+  ]
+}

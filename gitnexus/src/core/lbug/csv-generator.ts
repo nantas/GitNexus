@@ -644,257 +644,281 @@ export const streamAllCSVsToDisk = async (
     // A single Set covering every label prevents PK violations on COPY.
     const seenNodeIds = new Set<string>();
 
-    // --- SINGLE PASS over all nodes ---
-    for (const node of orderedNodes(graph, sortOutput)) {
-      if (seenNodeIds.has(node.id)) continue;
-      seenNodeIds.add(node.id);
-
-      // addRow returns a promise only when it flushes; awaiting it once after the
-      // switch (instead of `await`-ing every addRow) skips a per-row microtask
-      // tick on the rows buffered between byte-bounded flushes (#2203 U3).
-      let pending: Promise<void> | undefined;
-      switch (node.label) {
-        case 'File': {
-          const content = await extractContent(node, contentCache, contentRetention);
-          pending = fileWriter.addRow(
-            [
-              escapeCSVField(node.id),
-              escapeCSVField(node.properties.name || ''),
-              escapeCSVField(node.properties.filePath || ''),
-              escapeCSVField(content),
-            ].join(','),
-          );
-          break;
-        }
-        case 'Folder':
-          pending = folderWriter.addRow(
-            [
-              escapeCSVField(node.id),
-              escapeCSVField(node.properties.name || ''),
-              escapeCSVField(node.properties.filePath || ''),
-            ].join(','),
-          );
-          break;
-        case 'Community': {
-          const keywords = node.properties.keywords || [];
-          const keywordsStr = `[${keywords.map((k: string) => `'${k.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/,/g, '\\,')}'`).join(',')}]`;
-          pending = communityWriter.addRow(
-            [
-              escapeCSVField(node.id),
-              escapeCSVField(node.properties.name || ''),
-              escapeCSVField(node.properties.heuristicLabel || ''),
-              keywordsStr,
-              escapeCSVField(formatFtsDescription(node.properties.description || '')),
-              escapeCSVField(node.properties.enrichedBy || 'heuristic'),
-              escapeCSVNumber(node.properties.cohesion, 0),
-              escapeCSVNumber(node.properties.symbolCount, 0),
-            ].join(','),
-          );
-          break;
-        }
-        case 'Process': {
-          const communities = node.properties.communities || [];
-          const communitiesStr = `[${communities.map((c: string) => `'${c.replace(/'/g, "''")}'`).join(',')}]`;
-          pending = processWriter.addRow(
-            [
-              escapeCSVField(node.id),
-              escapeCSVField(node.properties.name || ''),
-              escapeCSVField(node.properties.heuristicLabel || ''),
-              escapeCSVField(node.properties.processType || ''),
-              escapeCSVField(node.properties.processSubtype || ''),
-              escapeCSVField(node.properties.runtimeChainConfidence || ''),
-              escapeCSVField(formatCSVStringArray(node.properties.sourceReasons ?? [])),
-              escapeCSVField(
-                `[${(node.properties.sourceConfidences ?? []).filter(Number.isFinite).join(',')}]`,
-              ),
-              escapeCSVNumber(node.properties.stepCount, 0),
-              escapeCSVField(communitiesStr),
-              escapeCSVField(node.properties.entryPointId || ''),
-              escapeCSVField(node.properties.terminalId || ''),
-            ].join(','),
-          );
-          break;
-        }
-        case 'Method': {
-          const content = await extractContent(node, contentCache, contentRetention);
-          pending = methodWriter.addRow(
-            [
-              escapeCSVField(node.id),
-              escapeCSVField(node.properties.name || ''),
-              escapeCSVField(node.properties.filePath || ''),
-              escapeCSVNumber(node.properties.startLine, -1),
-              escapeCSVNumber(node.properties.endLine, -1),
-              node.properties.isExported ? 'true' : 'false',
-              escapeCSVField(content),
-              escapeCSVField(formatFtsDescription(node.properties.description || '')),
-              escapeCSVNumber(node.properties.parameterCount, 0),
-              escapeCSVField(node.properties.returnType || ''),
-            ].join(','),
-          );
-          break;
-        }
-        case 'Section': {
-          const content = await extractContent(node, contentCache, contentRetention);
-          pending = sectionWriter.addRow(
-            [
-              escapeCSVField(node.id),
-              escapeCSVField(node.properties.name || ''),
-              escapeCSVField(node.properties.filePath || ''),
-              escapeCSVNumber(node.properties.startLine, -1),
-              escapeCSVNumber(node.properties.endLine, -1),
-              escapeCSVNumber(node.properties.level, 1),
-              escapeCSVField(content),
-              escapeCSVField(formatFtsDescription(node.properties.description || '')),
-            ].join(','),
-          );
-          break;
-        }
-        case 'Route': {
-          const responseKeys = node.properties.responseKeys || [];
-          // LadybugDB array literal inside a quoted CSV field: escapeCSVField wraps in "..."
-          // and the array uses single-quoted elements
-          const keysStr = `[${responseKeys.map((k: string) => `'${k.replace(/'/g, "''")}'`).join(',')}]`;
-          const errorKeys = node.properties.errorKeys || [];
-          const errorKeysStr = `[${errorKeys.map((k: string) => `'${k.replace(/'/g, "''")}'`).join(',')}]`;
-          const middleware = node.properties.middleware || [];
-          const middlewareStr = `[${middleware.map((m: string) => `'${m.replace(/'/g, "''")}'`).join(',')}]`;
-          pending = routeWriter.addRow(
-            [
-              escapeCSVField(node.id),
-              escapeCSVField(node.properties.name || ''),
-              escapeCSVField(node.properties.filePath || ''),
-              escapeCSVField(keysStr),
-              escapeCSVField(errorKeysStr),
-              escapeCSVField(middlewareStr),
-              escapeCSVField(String(node.properties.method ?? '')),
-              escapeCSVField(String(node.properties.handlerSymbolId ?? '')),
-              node.properties.runtimeConfirmed === true ? 'true' : 'false',
-              escapeCSVField(String(node.properties.runtimeSource ?? '')),
-              escapeCSVField(String(node.properties.runtimeStatus ?? '')),
-            ].join(','),
-          );
-          break;
-        }
-        case 'Tool':
-          pending = toolWriter.addRow(
-            [
-              escapeCSVField(node.id),
-              escapeCSVField(node.properties.name || ''),
-              escapeCSVField(node.properties.filePath || ''),
-              escapeCSVField(formatFtsDescription(node.properties.description || '')),
-            ].join(','),
-          );
-          break;
-        case 'Destination':
-          // `address` is the cross-service join key and is written as an EMPTY
-          // field for an unresolved destination, which COPY loads as NULL —
-          // mirroring the in-memory rule that the property is absent there, and
-          // measured on a real index (`spring-destinations-lbug.test.ts` asserts
-          // both the NULL and the zero-false-join it buys). Writing the
-          // placeholder text into this column instead would make two services
-          // that merely both wrote `${app.topic}` join on it, reintroducing
-          // below the database line the exact false connection the
-          // location-based node id prevents above it. The placeholder is
-          // carried by `name`, which nothing joins on.
-          //
-          // The line columns are written EMPTY (→ NULL) rather than defaulted
-          // to -1 when the node carries none. A resolved destination has no
-          // location at all — that is the point of the `filePath` rule two
-          // fields to the left — and a row saying `filePath` NULL but
-          // `startLine` -1 makes the two columns disagree about one fact and
-          // renders as "line -1" in the UI.
-          //
-          // `broker` is written for every destination, resolved or not. It is
-          // part of the resolved node's IDENTITY — the id is minted from
-          // `(broker, address)` — so a reader who joins on `address` alone and
-          // sees two rows needs this column to tell them apart, not merely to
-          // decorate them. Every column named in this row list must also be
-          // named in DESTINATION_SCHEMA and in the COPY statement in
-          // `lbug-adapter.ts`; a property the phase writes but those two omit is
-          // dropped at the database boundary without a warning, and the query
-          // that reads it back raises a binder error instead.
-          pending = destinationWriter.addRow(
-            [
-              escapeCSVField(node.id),
-              escapeCSVField(node.properties.name || ''),
-              escapeCSVField(node.properties.filePath || ''),
-              escapeCSVNullableNumber(node.properties.startLine),
-              escapeCSVNullableNumber(node.properties.endLine),
-              escapeCSVField(String(node.properties.address ?? '')),
-              escapeCSVField(String(node.properties.broker ?? '')),
-              escapeCSVField(String(node.properties.resolution ?? '')),
-              escapeCSVField(String(node.properties.configKey ?? '')),
-              escapeCSVField(String(node.properties.configDefault ?? '')),
-              escapeCSVField(formatFtsDescription(node.properties.description || '')),
-            ].join(','),
-          );
-          break;
-        case 'BasicBlock':
-          pending = basicBlockWriter.addRow(buildBasicBlockRow(node));
-          break;
-        case 'CodeElement':
-          pending = codeElemWriter.addRow(await toCodeElementCsvRow(node));
-          break;
-        default: {
-          // Code element nodes (Function, Class, Interface, CodeElement)
-          const writer = codeWriterMap[node.label];
-          if (writer) {
-            const content = await extractContent(node, contentCache, contentRetention);
-            const row = [
-              escapeCSVField(node.id),
-              escapeCSVField(node.properties.name || ''),
-              escapeCSVField(node.properties.filePath || ''),
-              escapeCSVNumber(node.properties.startLine, -1),
-              escapeCSVNumber(node.properties.endLine, -1),
-              node.properties.isExported ? 'true' : 'false',
-              escapeCSVField(content),
-              escapeCSVField(formatFtsDescription(node.properties.description || '')),
-            ];
-            if (node.label === 'Class') {
-              row.push(escapeCSVField(formatCSVStringArray(node.properties.frameworkAnnotations)));
-            } else if (node.label === 'Function') {
-              row.push(escapeCSVField(String(node.properties.convexEndpointFactory ?? '')));
-            }
-            pending = writer.addRow(row.join(','));
-          } else {
-            // Multi-language node types (Struct, Impl, Trait, Macro, etc.)
-            const mlWriter = multiLangWriters.get(node.label);
-            if (mlWriter) {
-              const content = await extractContent(node, contentCache, contentRetention);
-              pending = mlWriter.addRow(
-                [
-                  escapeCSVField(node.id),
-                  escapeCSVField(node.properties.name || ''),
-                  escapeCSVField(node.properties.filePath || ''),
-                  escapeCSVNumber(node.properties.startLine, -1),
-                  escapeCSVNumber(node.properties.endLine, -1),
-                  escapeCSVField(content),
-                  escapeCSVField(formatFtsDescription(node.properties.description || '')),
-                  ...(node.label === 'Property'
-                    ? [
-                        escapeCSVField(node.properties.declaredType || ''),
-                        // R3-4 detail symbols — see PROPERTY_SCHEMA. Written as
-                        // an explicit boolean so the column is never empty; an
-                        // empty BOOLEAN cell fails the COPY.
-                        node.properties.isDetail === true ? 'true' : 'false',
-                      ]
-                    : node.label === 'Const'
-                      ? [escapeCSVField(String(node.properties.convexEndpointFactory ?? ''))]
-                      : []),
-                ].join(','),
-              );
-            } else {
-              // Unknown label: not in codeWriterMap or multiLangWriters, so there
-              // is no CSV table for it and it is intentionally NOT persisted —
-              // `pending` stays undefined, so the loop awaits nothing. Made
-              // explicit so a future node type isn't silently dropped here: wire
-              // it into one of the writer maps above (or this branch).
-            }
-          }
-          break;
-        }
+    // Bound read-ahead by both file count and accepted input bytes; emit in graph order.
+    const nodes = orderedNodes(graph, sortOutput)[Symbol.iterator]();
+    const batchSize = Math.max(
+      1,
+      Math.min(32, Math.floor((8 * 1024 * 1024) / getMaxFileSizeBytes())),
+    );
+    while (true) {
+      const batch: GraphNode[] = [];
+      for (let i = 0; i < batchSize; i++) {
+        const next = nodes.next();
+        if (next.done) break;
+        batch.push(next.value);
       }
-      if (pending) await pending;
+      if (batch.length === 0) break;
+      if (contentRetention === 'full') {
+        const paths = new Set(
+          batch
+            .filter((node) => node.label === 'File' && !seenNodeIds.has(node.id))
+            .map((node) => node.properties.filePath || ''),
+        );
+        await Promise.all([...paths].map((filePath) => contentCache.get(filePath)));
+      }
+      for (const node of batch) {
+        if (seenNodeIds.has(node.id)) continue;
+        seenNodeIds.add(node.id);
+
+        // addRow returns a promise only when it flushes; awaiting it once after the
+        // switch (instead of `await`-ing every addRow) skips a per-row microtask
+        // tick on the rows buffered between byte-bounded flushes (#2203 U3).
+        let pending: Promise<void> | undefined;
+        switch (node.label) {
+          case 'File': {
+            const content = await extractContent(node, contentCache, contentRetention);
+            pending = fileWriter.addRow(
+              [
+                escapeCSVField(node.id),
+                escapeCSVField(node.properties.name || ''),
+                escapeCSVField(node.properties.filePath || ''),
+                escapeCSVField(content),
+              ].join(','),
+            );
+            break;
+          }
+          case 'Folder':
+            pending = folderWriter.addRow(
+              [
+                escapeCSVField(node.id),
+                escapeCSVField(node.properties.name || ''),
+                escapeCSVField(node.properties.filePath || ''),
+              ].join(','),
+            );
+            break;
+          case 'Community': {
+            const keywords = node.properties.keywords || [];
+            const keywordsStr = `[${keywords.map((k: string) => `'${k.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/,/g, '\\,')}'`).join(',')}]`;
+            pending = communityWriter.addRow(
+              [
+                escapeCSVField(node.id),
+                escapeCSVField(node.properties.name || ''),
+                escapeCSVField(node.properties.heuristicLabel || ''),
+                keywordsStr,
+                escapeCSVField(formatFtsDescription(node.properties.description || '')),
+                escapeCSVField(node.properties.enrichedBy || 'heuristic'),
+                escapeCSVNumber(node.properties.cohesion, 0),
+                escapeCSVNumber(node.properties.symbolCount, 0),
+              ].join(','),
+            );
+            break;
+          }
+          case 'Process': {
+            const communities = node.properties.communities || [];
+            const communitiesStr = `[${communities.map((c: string) => `'${c.replace(/'/g, "''")}'`).join(',')}]`;
+            pending = processWriter.addRow(
+              [
+                escapeCSVField(node.id),
+                escapeCSVField(node.properties.name || ''),
+                escapeCSVField(node.properties.heuristicLabel || ''),
+                escapeCSVField(node.properties.processType || ''),
+                escapeCSVField(node.properties.processSubtype || ''),
+                escapeCSVField(node.properties.runtimeChainConfidence || ''),
+                escapeCSVField(formatCSVStringArray(node.properties.sourceReasons ?? [])),
+                escapeCSVField(
+                  `[${(node.properties.sourceConfidences ?? []).filter(Number.isFinite).join(',')}]`,
+                ),
+                escapeCSVNumber(node.properties.stepCount, 0),
+                escapeCSVField(communitiesStr),
+                escapeCSVField(node.properties.entryPointId || ''),
+                escapeCSVField(node.properties.terminalId || ''),
+              ].join(','),
+            );
+            break;
+          }
+          case 'Method': {
+            const content = await extractContent(node, contentCache, contentRetention);
+            pending = methodWriter.addRow(
+              [
+                escapeCSVField(node.id),
+                escapeCSVField(node.properties.name || ''),
+                escapeCSVField(node.properties.filePath || ''),
+                escapeCSVNumber(node.properties.startLine, -1),
+                escapeCSVNumber(node.properties.endLine, -1),
+                node.properties.isExported ? 'true' : 'false',
+                escapeCSVField(content),
+                escapeCSVField(formatFtsDescription(node.properties.description || '')),
+                escapeCSVNumber(node.properties.parameterCount, 0),
+                escapeCSVField(node.properties.returnType || ''),
+              ].join(','),
+            );
+            break;
+          }
+          case 'Section': {
+            const content = await extractContent(node, contentCache, contentRetention);
+            pending = sectionWriter.addRow(
+              [
+                escapeCSVField(node.id),
+                escapeCSVField(node.properties.name || ''),
+                escapeCSVField(node.properties.filePath || ''),
+                escapeCSVNumber(node.properties.startLine, -1),
+                escapeCSVNumber(node.properties.endLine, -1),
+                escapeCSVNumber(node.properties.level, 1),
+                escapeCSVField(content),
+                escapeCSVField(formatFtsDescription(node.properties.description || '')),
+              ].join(','),
+            );
+            break;
+          }
+          case 'Route': {
+            const responseKeys = node.properties.responseKeys || [];
+            // LadybugDB array literal inside a quoted CSV field: escapeCSVField wraps in "..."
+            // and the array uses single-quoted elements
+            const keysStr = `[${responseKeys.map((k: string) => `'${k.replace(/'/g, "''")}'`).join(',')}]`;
+            const errorKeys = node.properties.errorKeys || [];
+            const errorKeysStr = `[${errorKeys.map((k: string) => `'${k.replace(/'/g, "''")}'`).join(',')}]`;
+            const middleware = node.properties.middleware || [];
+            const middlewareStr = `[${middleware.map((m: string) => `'${m.replace(/'/g, "''")}'`).join(',')}]`;
+            pending = routeWriter.addRow(
+              [
+                escapeCSVField(node.id),
+                escapeCSVField(node.properties.name || ''),
+                escapeCSVField(node.properties.filePath || ''),
+                escapeCSVField(keysStr),
+                escapeCSVField(errorKeysStr),
+                escapeCSVField(middlewareStr),
+                escapeCSVField(String(node.properties.method ?? '')),
+                escapeCSVField(String(node.properties.handlerSymbolId ?? '')),
+                node.properties.runtimeConfirmed === true ? 'true' : 'false',
+                escapeCSVField(String(node.properties.runtimeSource ?? '')),
+                escapeCSVField(String(node.properties.runtimeStatus ?? '')),
+              ].join(','),
+            );
+            break;
+          }
+          case 'Tool':
+            pending = toolWriter.addRow(
+              [
+                escapeCSVField(node.id),
+                escapeCSVField(node.properties.name || ''),
+                escapeCSVField(node.properties.filePath || ''),
+                escapeCSVField(formatFtsDescription(node.properties.description || '')),
+              ].join(','),
+            );
+            break;
+          case 'Destination':
+            // `address` is the cross-service join key and is written as an EMPTY
+            // field for an unresolved destination, which COPY loads as NULL —
+            // mirroring the in-memory rule that the property is absent there, and
+            // measured on a real index (`spring-destinations-lbug.test.ts` asserts
+            // both the NULL and the zero-false-join it buys). Writing the
+            // placeholder text into this column instead would make two services
+            // that merely both wrote `${app.topic}` join on it, reintroducing
+            // below the database line the exact false connection the
+            // location-based node id prevents above it. The placeholder is
+            // carried by `name`, which nothing joins on.
+            //
+            // The line columns are written EMPTY (→ NULL) rather than defaulted
+            // to -1 when the node carries none. A resolved destination has no
+            // location at all — that is the point of the `filePath` rule two
+            // fields to the left — and a row saying `filePath` NULL but
+            // `startLine` -1 makes the two columns disagree about one fact and
+            // renders as "line -1" in the UI.
+            //
+            // `broker` is written for every destination, resolved or not. It is
+            // part of the resolved node's IDENTITY — the id is minted from
+            // `(broker, address)` — so a reader who joins on `address` alone and
+            // sees two rows needs this column to tell them apart, not merely to
+            // decorate them. Every column named in this row list must also be
+            // named in DESTINATION_SCHEMA and in the COPY statement in
+            // `lbug-adapter.ts`; a property the phase writes but those two omit is
+            // dropped at the database boundary without a warning, and the query
+            // that reads it back raises a binder error instead.
+            pending = destinationWriter.addRow(
+              [
+                escapeCSVField(node.id),
+                escapeCSVField(node.properties.name || ''),
+                escapeCSVField(node.properties.filePath || ''),
+                escapeCSVNullableNumber(node.properties.startLine),
+                escapeCSVNullableNumber(node.properties.endLine),
+                escapeCSVField(String(node.properties.address ?? '')),
+                escapeCSVField(String(node.properties.broker ?? '')),
+                escapeCSVField(String(node.properties.resolution ?? '')),
+                escapeCSVField(String(node.properties.configKey ?? '')),
+                escapeCSVField(String(node.properties.configDefault ?? '')),
+                escapeCSVField(formatFtsDescription(node.properties.description || '')),
+              ].join(','),
+            );
+            break;
+          case 'BasicBlock':
+            pending = basicBlockWriter.addRow(buildBasicBlockRow(node));
+            break;
+          case 'CodeElement':
+            pending = codeElemWriter.addRow(await toCodeElementCsvRow(node));
+            break;
+          default: {
+            // Code element nodes (Function, Class, Interface, CodeElement)
+            const writer = codeWriterMap[node.label];
+            if (writer) {
+              const content = await extractContent(node, contentCache, contentRetention);
+              const row = [
+                escapeCSVField(node.id),
+                escapeCSVField(node.properties.name || ''),
+                escapeCSVField(node.properties.filePath || ''),
+                escapeCSVNumber(node.properties.startLine, -1),
+                escapeCSVNumber(node.properties.endLine, -1),
+                node.properties.isExported ? 'true' : 'false',
+                escapeCSVField(content),
+                escapeCSVField(formatFtsDescription(node.properties.description || '')),
+              ];
+              if (node.label === 'Class') {
+                row.push(
+                  escapeCSVField(formatCSVStringArray(node.properties.frameworkAnnotations)),
+                );
+              } else if (node.label === 'Function') {
+                row.push(escapeCSVField(String(node.properties.convexEndpointFactory ?? '')));
+              }
+              pending = writer.addRow(row.join(','));
+            } else {
+              // Multi-language node types (Struct, Impl, Trait, Macro, etc.)
+              const mlWriter = multiLangWriters.get(node.label);
+              if (mlWriter) {
+                const content = await extractContent(node, contentCache, contentRetention);
+                pending = mlWriter.addRow(
+                  [
+                    escapeCSVField(node.id),
+                    escapeCSVField(node.properties.name || ''),
+                    escapeCSVField(node.properties.filePath || ''),
+                    escapeCSVNumber(node.properties.startLine, -1),
+                    escapeCSVNumber(node.properties.endLine, -1),
+                    escapeCSVField(content),
+                    escapeCSVField(formatFtsDescription(node.properties.description || '')),
+                    ...(node.label === 'Property'
+                      ? [
+                          escapeCSVField(node.properties.declaredType || ''),
+                          // R3-4 detail symbols — see PROPERTY_SCHEMA. Written as
+                          // an explicit boolean so the column is never empty; an
+                          // empty BOOLEAN cell fails the COPY.
+                          node.properties.isDetail === true ? 'true' : 'false',
+                        ]
+                      : node.label === 'Const'
+                        ? [escapeCSVField(String(node.properties.convexEndpointFactory ?? ''))]
+                        : []),
+                  ].join(','),
+                );
+              } else {
+                // Unknown label: not in codeWriterMap or multiLangWriters, so there
+                // is no CSV table for it and it is intentionally NOT persisted —
+                // `pending` stays undefined, so the loop awaits nothing. Made
+                // explicit so a future node type isn't silently dropped here: wire
+                // it into one of the writer maps above (or this branch).
+              }
+            }
+            break;
+          }
+        }
+        if (pending) await pending;
+      }
     }
 
     // Finish all node writers

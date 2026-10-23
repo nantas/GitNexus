@@ -1,5 +1,5 @@
 import type { ResourceCosts } from './resource-costs.js';
-import { resourceLines } from './resource-lines.js';
+import { resourceLineChunks } from './resource-lines.js';
 import { ResourceRecordStore, ResourceStorageError } from './resource-record-store.js';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -10,9 +10,18 @@ import type { MergedUnityComponent, UnityObjectLayer } from './override-merger.j
 import { mergeOverrideChain } from './override-merger.js';
 import { findGuidHits, type UnityResourceGuidHit } from './resource-hit-scanner.js';
 import type { UnityScanContext } from './scan-context.js';
-import { parseUnityYamlObjects, type UnityObjectBlock, type UnityObjectType } from './yaml-object-graph.js';
+import {
+  parseUnityYamlObjects,
+  type UnityObjectBlock,
+  type UnityObjectType,
+} from './yaml-object-graph.js';
 
-export type UnityBindingKind = 'direct' | 'prefab-instance' | 'nested' | 'variant' | 'scene-override';
+export type UnityBindingKind =
+  | 'direct'
+  | 'prefab-instance'
+  | 'nested'
+  | 'variant'
+  | 'scene-override';
 const MAX_CACHED_RESOURCE_BYTES = 512 * 1024;
 
 export interface ResolveInput {
@@ -108,17 +117,23 @@ export async function resolveUnityBindings(input: ResolveInput): Promise<Resolve
   const hits = applyResourceAllowlist(rawHits, input.resourcePathAllowlist);
   const resourceBindings: ResolvedUnityBinding[] = [];
   const unityDiagnostics: string[] = [];
-  const uniqueHits = new Map(hits.map(hit => [normalizePath(hit.resourcePath), hit]));
+  const uniqueHits = new Map(hits.map((hit) => [normalizePath(hit.resourcePath), hit]));
   for (const hit of uniqueHits.values()) {
     let matched = false;
     for await (const { binding } of resolveResourceBindings({
-      repoRoot: input.repoRoot, hit, scriptGuids: [scriptGuid],
-      scanContext: input.scanContext, deepParseLargeResources: input.deepParseLargeResources,
+      repoRoot: input.repoRoot,
+      hit,
+      scriptGuids: [scriptGuid],
+      scanContext: input.scanContext,
+      deepParseLargeResources: input.deepParseLargeResources,
     })) {
       matched = true;
       resourceBindings.push(binding);
     }
-    if (!matched) unityDiagnostics.push(`No MonoBehaviour block matched script guid ${scriptGuid} in ${hit.resourcePath}.`);
+    if (!matched)
+      unityDiagnostics.push(
+        `No MonoBehaviour block matched script guid ${scriptGuid} in ${hit.resourcePath}.`,
+      );
   }
 
   return {
@@ -151,35 +166,56 @@ export async function* resolveResourceBindings(input: {
   deepParseLargeResources?: boolean;
 }): AsyncGenerator<ResourceBindingFact> {
   const { hit } = input;
-  const selected = new Set(input.scriptGuids.map(guid => guid.toLowerCase()));
+  const selected = new Set(input.scriptGuids.map((guid) => guid.toLowerCase()));
   const assetGuidToPath = input.assetGuidToPath ?? input.scanContext?.assetGuidToPath;
-  if (!input.deepParseLargeResources && await isLargeResourceForDeepParse(input.repoRoot, hit.resourcePath, new Map())) {
-    yield* createLightweightBindings(input.repoRoot, hit, selected, assetGuidToPath, input.referenceBudgetBytes, input.costs, input.signal);
+  if (
+    !input.deepParseLargeResources &&
+    (await isLargeResourceForDeepParse(input.repoRoot, hit.resourcePath, new Map()))
+  ) {
+    yield* createLightweightBindings(
+      input.repoRoot,
+      hit,
+      selected,
+      assetGuidToPath,
+      input.referenceBudgetBytes,
+      input.costs,
+      input.signal,
+    );
     return;
   }
   const boundedRead = input.referenceBudgetBytes !== undefined && !input.deepParseLargeResources;
   if (input.costs && !input.scanContext?.resourceDocCache.has(normalizePath(hit.resourcePath))) {
     input.costs.opens++;
     input.costs.parses++;
-    if (!boundedRead) input.costs.bytes += (await fs.stat(path.join(input.repoRoot, hit.resourcePath))).size;
+    if (!boundedRead)
+      input.costs.bytes += (await fs.stat(path.join(input.repoRoot, hit.resourcePath))).size;
   }
-  const blocks = await getResourceBlocks(input.repoRoot, hit.resourcePath, input.scanContext,
-    boundedRead ? { maxBytes: MAX_CACHED_RESOURCE_BYTES, signal: input.signal, costs: input.costs } : undefined);
+  const blocks = await getResourceBlocks(
+    input.repoRoot,
+    hit.resourcePath,
+    input.scanContext,
+    boundedRead
+      ? { maxBytes: MAX_CACHED_RESOURCE_BYTES, signal: input.signal, costs: input.costs }
+      : undefined,
+  );
   for (const block of blocks) {
     if (block.objectType !== 'MonoBehaviour') continue;
     const scriptGuid = extractGuidFromScriptField(block.fields.m_Script || '')?.toLowerCase();
     if (!scriptGuid || !selected.has(scriptGuid)) continue;
     const resolved = resolveBindingForComponent(block, blocks, hit, { assetGuidToPath });
-    yield { scriptGuid, binding: {
-      resourcePath: hit.resourcePath,
-      resourceType: hit.resourceType,
-      bindingKind: resolved.bindingKind,
-      componentObjectId: block.objectId,
-      evidence: block.scriptEvidence ?? { line: hit.line, lineText: hit.lineText },
-      serializedFields: resolved.serializedFields,
-      resolvedReferences: resolved.resolvedReferences,
-      assetRefPaths: extractAssetRefPathReferences(resolved.serializedFields),
-    } };
+    yield {
+      scriptGuid,
+      binding: {
+        resourcePath: hit.resourcePath,
+        resourceType: hit.resourceType,
+        bindingKind: resolved.bindingKind,
+        componentObjectId: block.objectId,
+        evidence: block.scriptEvidence ?? { line: hit.line, lineText: hit.lineText },
+        serializedFields: resolved.serializedFields,
+        resolvedReferences: resolved.resolvedReferences,
+        assetRefPaths: extractAssetRefPathReferences(resolved.serializedFields),
+      },
+    };
   }
 }
 
@@ -205,16 +241,29 @@ async function* createLightweightBindings(
   costs?: ResourceCosts,
   signal?: AbortSignal,
 ): AsyncGenerator<ResourceBindingFact> {
-  if (costs) { costs.opens++; costs.parses++; }
-  const reader = resourceLines(path.join(repoRoot, normalizePath(hit.resourcePath)), undefined,
-    bytes => { if (costs) costs.bytes += bytes; }, signal);
+  if (costs) {
+    costs.opens++;
+    costs.parses++;
+  }
+  const reader = resourceLineChunks(
+    path.join(repoRoot, normalizePath(hit.resourcePath)),
+    undefined,
+    (bytes) => {
+      if (costs) costs.bytes += bytes;
+    },
+    signal,
+  );
   let referenceStore: ResourceRecordStore<UnityResolvedReference> | undefined;
   const appendReference = async (reference: UnityResolvedReference) => {
     if (referenceBudgetBytes === undefined) references.push(reference);
     else {
       referenceStore ??= new ResourceRecordStore<UnityResolvedReference>(referenceBudgetBytes);
       await referenceStore.append(reference);
-      if (costs) costs.peakRecordBytes = Math.max(costs.peakRecordBytes, referenceStore.metrics.peakMemoryBytes);
+      if (costs)
+        costs.peakRecordBytes = Math.max(
+          costs.peakRecordBytes,
+          referenceStore.metrics.peakMemoryBytes,
+        );
     }
   };
   const releaseReferences = async () => {
@@ -241,85 +290,130 @@ async function* createLightweightBindings(
 
   const flush = () => {
     if (!inMonoBehaviour || !matchedGuid || !objectId) return;
-    return { scriptGuid: matchedGuid, referenceRecords: referenceStore?.records(), binding: {
-      resourcePath: hit.resourcePath,
-      resourceType: hit.resourceType,
-      bindingKind: stripped ? (hit.resourceType === 'scene' ? 'scene-override' : 'nested')
-        : (hit.resourceType === 'scene' ? 'scene-override' : 'direct'),
-      componentObjectId: objectId,
-      lightweight: true,
-      evidence,
-      serializedFields: { scalarFields: [], referenceFields: [] },
-      resolvedReferences: references,
-      assetRefPaths: [],
-    } as ResolvedUnityBinding };
+    return {
+      scriptGuid: matchedGuid,
+      referenceRecords: referenceStore?.records(),
+      binding: {
+        resourcePath: hit.resourcePath,
+        resourceType: hit.resourceType,
+        bindingKind: stripped
+          ? hit.resourceType === 'scene'
+            ? 'scene-override'
+            : 'nested'
+          : hit.resourceType === 'scene'
+            ? 'scene-override'
+            : 'direct',
+        componentObjectId: objectId,
+        lightweight: true,
+        evidence,
+        serializedFields: { scalarFields: [], referenceFields: [] },
+        resolvedReferences: references,
+        assetRefPaths: [],
+      } as ResolvedUnityBinding,
+    };
   };
 
   let failure: unknown;
   try {
-    for await (const line of reader) {
-      lineNumber += 1;
-      const header = line.match(/^--- !u!\d+ &(-?\d+)(?:\s+(\w+))?\s*$/);
-      if (header) {
-        const previous = flush();
-        if (previous) yield previous;
-        await releaseReferences();
-        objectId = header[1];
-        stripped = header[2] === 'stripped';
-        inMonoBehaviour = false;
-        matchedGuid = undefined;
-        fieldName = undefined;
-        references = [];
-        continue;
-      }
-      if (!objectId) continue;
-      if (/^MonoBehaviour:\s*$/.test(line)) {
-        inMonoBehaviour = true;
-        continue;
-      }
-      if (!inMonoBehaviour) continue;
-
-      const field = line.match(/^ {2}(?!-)([^ ][^:]*):(.*)$/);
-      if (field) {
-        fieldName = field[1].trim();
-        listIndex = 0;
-        const value = field[2].trim();
-        if (fieldName === 'm_Script') {
-          const guid = extractGuidFromScriptField(value)?.toLowerCase();
-          matchedGuid = guid && selectedGuids.has(guid) ? guid : undefined;
-          evidence = { line: lineNumber, lineText: line };
-        } else if (!fieldName.startsWith('m_')) {
-          const ref = parseObjectReference(value);
-          if (ref?.guid) {
-            await appendReference(resolveReferenceCandidate({
-              fieldName, sourceLayer: baseLayerName(hit.resourceType),
-              fileId: ref.fileId, guid: ref.guid, fromList: false,
-            }, new Map(), hit.resourcePath, assetGuidToPath));
-          }
+    for await (const lines of reader) {
+      for (const line of lines) {
+        lineNumber += 1;
+        const header = line.match(/^--- !u!\d+ &(-?\d+)(?:\s+(\w+))?\s*$/);
+        if (header) {
+          const previous = flush();
+          if (previous) yield previous;
+          await releaseReferences();
+          objectId = header[1];
+          stripped = header[2] === 'stripped';
+          inMonoBehaviour = false;
+          matchedGuid = undefined;
+          fieldName = undefined;
+          references = [];
+          continue;
         }
-        continue;
-      }
+        if (!objectId) continue;
+        if (/^MonoBehaviour:\s*$/.test(line)) {
+          inMonoBehaviour = true;
+          continue;
+        }
+        if (!inMonoBehaviour) continue;
 
-      if (!fieldName || fieldName.startsWith('m_')) continue;
-      const listRef = line.match(/^ {4}-\s*(\{[^\n]*\})\s*$/);
-      if (!listRef) continue;
-      const ref = parseObjectReference(listRef[1]);
-      if (!ref?.guid) continue;
-      await appendReference(resolveReferenceCandidate({
-        fieldName, sourceLayer: baseLayerName(hit.resourceType),
-        fileId: ref.fileId, guid: ref.guid, fromList: true, listIndex: listIndex++,
-      }, new Map(), hit.resourcePath, assetGuidToPath));
+        const field = line.match(/^ {2}(?!-)([^ ][^:]*):(.*)$/);
+        if (field) {
+          fieldName = field[1].trim();
+          listIndex = 0;
+          const value = field[2].trim();
+          if (fieldName === 'm_Script') {
+            const guid = extractGuidFromScriptField(value)?.toLowerCase();
+            matchedGuid = guid && selectedGuids.has(guid) ? guid : undefined;
+            evidence = { line: lineNumber, lineText: line };
+          } else if (!fieldName.startsWith('m_')) {
+            const ref = parseObjectReference(value);
+            if (ref?.guid) {
+              await appendReference(
+                resolveReferenceCandidate(
+                  {
+                    fieldName,
+                    sourceLayer: baseLayerName(hit.resourceType),
+                    fileId: ref.fileId,
+                    guid: ref.guid,
+                    fromList: false,
+                  },
+                  new Map(),
+                  hit.resourcePath,
+                  assetGuidToPath,
+                ),
+              );
+            }
+          }
+          continue;
+        }
+
+        if (!fieldName || fieldName.startsWith('m_')) continue;
+        const listRef = line.match(/^ {4}-\s*(\{[^\n]*\})\s*$/);
+        if (!listRef) continue;
+        const ref = parseObjectReference(listRef[1]);
+        if (!ref?.guid) continue;
+        await appendReference(
+          resolveReferenceCandidate(
+            {
+              fieldName,
+              sourceLayer: baseLayerName(hit.resourceType),
+              fileId: ref.fileId,
+              guid: ref.guid,
+              fromList: true,
+              listIndex: listIndex++,
+            },
+            new Map(),
+            hit.resourcePath,
+            assetGuidToPath,
+          ),
+        );
+      }
     }
     const last = flush();
     if (last) yield last;
-  } catch (error) { failure = error; throw error; }
-  finally {
+  } catch (error) {
+    failure = error;
+    throw error;
+  } finally {
     const errors: unknown[] = [];
-    try { await reader.return(undefined); } catch (error) { errors.push(error); }
-    try { await releaseReferences(); } catch (error) { errors.push(error); }
+    try {
+      await reader.return(undefined);
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      await releaseReferences();
+    } catch (error) {
+      errors.push(error);
+    }
     if (errors.length) {
       if (failure !== undefined) errors.unshift(failure);
-      throw new ResourceStorageError('Unity resolution cleanup failed.', new AggregateError(errors));
+      throw new ResourceStorageError(
+        'Unity resolution cleanup failed.',
+        new AggregateError(errors),
+      );
     }
   }
 }
@@ -342,26 +436,37 @@ async function isLargeResourceForDeepParse(
   return isLarge;
 }
 
-export function hasCoverage(resultSet: ResolveOutput[]): { hasScalar: boolean; hasReference: boolean } {
+export function hasCoverage(resultSet: ResolveOutput[]): {
+  hasScalar: boolean;
+  hasReference: boolean;
+} {
   return {
     hasScalar: resultSet.some((result) => result.serializedFields.scalarFields.length > 0),
     hasReference: resultSet.some((result) => result.serializedFields.referenceFields.length > 0),
   };
 }
 
-async function resolveSymbolScriptPath(repoRoot: string, symbol: string, scanContext?: UnityScanContext): Promise<string> {
+async function resolveSymbolScriptPath(
+  repoRoot: string,
+  symbol: string,
+  scanContext?: UnityScanContext,
+): Promise<string> {
   const contextHit = scanContext?.symbolToScriptPath.get(symbol);
   if (contextHit) {
     return normalizePath(contextHit);
   }
 
-  const scriptFiles = (await glob('**/*.cs', {
-    cwd: repoRoot,
-    nodir: true,
-    dot: false,
-  })).sort((left, right) => left.localeCompare(right));
+  const scriptFiles = (
+    await glob('**/*.cs', {
+      cwd: repoRoot,
+      nodir: true,
+      dot: false,
+    })
+  ).sort((left, right) => left.localeCompare(right));
 
-  const basenameMatches = scriptFiles.filter((filePath) => path.basename(filePath, '.cs') === symbol);
+  const basenameMatches = scriptFiles.filter(
+    (filePath) => path.basename(filePath, '.cs') === symbol,
+  );
   if (basenameMatches.length === 1) {
     return normalizePath(basenameMatches[0]);
   }
@@ -386,7 +491,11 @@ async function resolveSymbolScriptPath(repoRoot: string, symbol: string, scanCon
   throw new Error(`Unity symbol "${symbol}" was not found under ${repoRoot}.`);
 }
 
-async function resolveScriptGuid(repoRoot: string, scriptPath: string, scanContext?: UnityScanContext): Promise<string> {
+async function resolveScriptGuid(
+  repoRoot: string,
+  scriptPath: string,
+  scanContext?: UnityScanContext,
+): Promise<string> {
   const contextGuid = scanContext?.scriptPathToGuid.get(normalizePath(scriptPath));
   if (contextGuid) {
     return contextGuid;
@@ -423,18 +532,24 @@ async function getResourceBlocks(
   let raw: string;
   if (boundedRead) {
     // Enforce the small branch's bound even if the file grows after stat().
-    const stream = createReadStream(absoluteResourcePath, { highWaterMark: 64 * 1024, signal: boundedRead.signal });
+    const stream = createReadStream(absoluteResourcePath, {
+      highWaterMark: 64 * 1024,
+      signal: boundedRead.signal,
+    });
     const chunks: Buffer[] = [];
     let bytes = 0;
     try {
       for await (const chunk of stream) {
         bytes += chunk.length;
         if (boundedRead.costs) boundedRead.costs.bytes += chunk.length;
-        if (bytes > boundedRead.maxBytes) throw new Error('Resource grew beyond the small-parser input budget.');
+        if (bytes > boundedRead.maxBytes)
+          throw new Error('Resource grew beyond the small-parser input budget.');
         chunks.push(chunk);
       }
       raw = Buffer.concat(chunks).toString('utf8');
-    } finally { stream.destroy(); }
+    } finally {
+      stream.destroy();
+    }
   } else raw = await fs.readFile(absoluteResourcePath, 'utf-8');
   const blocks = parseUnityYamlObjects(raw);
   if (allowCache) {
@@ -448,7 +563,11 @@ function resolveBindingForComponent(
   blocks: UnityObjectBlock[],
   hit: UnityResourceGuidHit,
   scanContext?: Pick<UnityScanContext, 'assetGuidToPath'>,
-): { bindingKind: UnityBindingKind; serializedFields: UnitySerializedFields; resolvedReferences: UnityResolvedReference[] } {
+): {
+  bindingKind: UnityBindingKind;
+  serializedFields: UnitySerializedFields;
+  resolvedReferences: UnityResolvedReference[];
+} {
   const directLayer = createLayerFromFields(componentBlock.fields, baseLayerName(hit.resourceType));
   const layers: UnityObjectLayer[] = [directLayer];
   let bindingKind: UnityBindingKind = inferBindingKind(componentBlock, hit.resourceType);
@@ -479,11 +598,19 @@ function resolveBindingForComponent(
   return {
     bindingKind,
     serializedFields: toSerializedFields(merged),
-    resolvedReferences: toResolvedReferences(merged, blocks, hit.resourcePath, scanContext?.assetGuidToPath),
+    resolvedReferences: toResolvedReferences(
+      merged,
+      blocks,
+      hit.resourcePath,
+      scanContext?.assetGuidToPath,
+    ),
   };
 }
 
-function createLayerFromFields(fields: Record<string, string>, sourceLayer: string): UnityObjectLayer {
+function createLayerFromFields(
+  fields: Record<string, string>,
+  sourceLayer: string,
+): UnityObjectLayer {
   const scalarFields: NonNullable<UnityObjectLayer['scalarFields']> = {};
   const referenceFields: NonNullable<UnityObjectLayer['referenceFields']> = {};
 
@@ -545,8 +672,12 @@ function createLayerFromModification(
 
 function toSerializedFields(merged: MergedUnityComponent): UnitySerializedFields {
   return {
-    scalarFields: Object.values(merged.scalarFields).sort((left, right) => left.name.localeCompare(right.name)),
-    referenceFields: Object.values(merged.referenceFields).sort((left, right) => left.name.localeCompare(right.name)),
+    scalarFields: Object.values(merged.scalarFields).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    ),
+    referenceFields: Object.values(merged.referenceFields).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    ),
   };
 }
 
@@ -564,7 +695,9 @@ function isSpriteRelativePath(value: string): boolean {
   return /\.(png|jpg|jpeg|tga|psd|webp|spriteatlas|spriteatlasv2)$/.test(normalized);
 }
 
-export function extractAssetRefPathReferences(serializedFields: UnitySerializedFields): UnityAssetRefPathReference[] {
+export function extractAssetRefPathReferences(
+  serializedFields: UnitySerializedFields,
+): UnityAssetRefPathReference[] {
   const refs: UnityAssetRefPathReference[] = [];
   for (const scalarField of serializedFields.scalarFields) {
     const text = String(scalarField.value || '');
@@ -597,10 +730,14 @@ export function extractAssetRefPathReferences(serializedFields: UnitySerializedF
   return refs;
 }
 
-function aggregateSerializedFields(resourceBindings: ResolvedUnityBinding[]): UnitySerializedFields {
+function aggregateSerializedFields(
+  resourceBindings: ResolvedUnityBinding[],
+): UnitySerializedFields {
   return {
     scalarFields: resourceBindings.flatMap((binding) => binding.serializedFields.scalarFields),
-    referenceFields: resourceBindings.flatMap((binding) => binding.serializedFields.referenceFields),
+    referenceFields: resourceBindings.flatMap(
+      (binding) => binding.serializedFields.referenceFields,
+    ),
   };
 }
 
@@ -645,9 +782,16 @@ function toResolvedReferences(
   return references;
 }
 
-type UnityReferenceCandidate = Pick<UnityResolvedReference, 'fieldName' | 'sourceLayer' | 'fileId' | 'guid' | 'fromList' | 'listIndex'>;
+type UnityReferenceCandidate = Pick<
+  UnityResolvedReference,
+  'fieldName' | 'sourceLayer' | 'fileId' | 'guid' | 'fromList' | 'listIndex'
+>;
 
-function parseListReferenceCandidates(fieldName: string, sourceLayer: string, rawValue: string): UnityReferenceCandidate[] {
+function parseListReferenceCandidates(
+  fieldName: string,
+  sourceLayer: string,
+  rawValue: string,
+): UnityReferenceCandidate[] {
   const trimmed = rawValue.trim();
   if (!trimmed.startsWith('-')) return [];
 
@@ -723,7 +867,10 @@ function resolveReferenceCandidate(
   };
 }
 
-function resolveGameObjectName(block: UnityObjectBlock, blocksById: Map<string, UnityObjectBlock>): string | undefined {
+function resolveGameObjectName(
+  block: UnityObjectBlock,
+  blocksById: Map<string, UnityObjectBlock>,
+): string | undefined {
   if (block.objectType === 'GameObject') {
     return block.fields.m_Name?.trim() || undefined;
   }
@@ -740,7 +887,10 @@ function isBuiltInGuid(guid: string): boolean {
   return /^0+$/.test(guid);
 }
 
-function inferBindingKind(componentBlock: UnityObjectBlock, resourceType: 'prefab' | 'scene' | 'asset'): UnityBindingKind {
+function inferBindingKind(
+  componentBlock: UnityObjectBlock,
+  resourceType: 'prefab' | 'scene' | 'asset',
+): UnityBindingKind {
   if (componentBlock.stripped && resourceType === 'scene') return 'scene-override';
   if (componentBlock.stripped) return 'nested';
   if (componentBlock.fields.m_PrefabInstance) return 'prefab-instance';
@@ -762,7 +912,9 @@ function extractGuidFromScriptField(rawValue: string): string | undefined {
   return rawValue.match(/guid:\s*([0-9a-f]{32})/i)?.[1];
 }
 
-function parseObjectReference(rawValue: string): { fileId?: string; guid?: string; resolvedAssetPath?: string } | null {
+function parseObjectReference(
+  rawValue: string,
+): { fileId?: string; guid?: string; resolvedAssetPath?: string } | null {
   const trimmed = rawValue.trim();
   if (!trimmed.startsWith('{') || !trimmed.includes('fileID:')) {
     return null;

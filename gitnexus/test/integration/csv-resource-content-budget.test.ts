@@ -14,6 +14,44 @@ afterEach(async () => {
 });
 
 describe('resource File content respects the scan size budget', () => {
+  it('overlaps bounded file reads while preserving CSV row order and content', async () => {
+    vi.stubEnv('GITNEXUS_MAX_FILE_SIZE', '512');
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'gn-content-prefetch-'));
+    const nodes = Array.from({ length: 40 }, (_, i) => ({
+      id: `File:${i}.cs`,
+      label: 'File' as const,
+      name: `${i}.cs`,
+      filePath: `${i}.cs`,
+    }));
+    await Promise.all(
+      nodes.map((node, i) => fs.writeFile(path.join(root!, node.filePath), `class C${i} {}`)),
+    );
+    const readFile = fs.readFile.bind(fs);
+    let active = 0;
+    let peak = 0;
+    vi.spyOn(fs, 'readFile').mockImplementation((async (
+      ...args: Parameters<typeof fs.readFile>
+    ) => {
+      peak = Math.max(peak, ++active);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        return await readFile(...args);
+      } finally {
+        active--;
+      }
+    }) as typeof fs.readFile);
+    const result = await streamAllCSVsToDisk(buildTestGraph(nodes), root, path.join(root, 'csv'));
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(16);
+    const csv = await readFile(result.nodeFiles.get('File')!.csvPath, 'utf8');
+    const rows = csv.trim().split('\n').slice(1);
+    expect(rows).toHaveLength(nodes.length);
+    nodes.forEach((node, i) => {
+      expect(rows[i]).toContain(`"${node.id}"`);
+      expect(rows[i]).toContain(`class C${i} {}`);
+    });
+  });
+
   it('keeps supplemental resource nodes and edges without reading oversized text', async () => {
     vi.stubEnv('GITNEXUS_MAX_FILE_SIZE', '512');
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'gn-resource-content-'));

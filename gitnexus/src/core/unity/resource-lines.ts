@@ -1,8 +1,22 @@
 import { createReadStream } from 'node:fs';
 
 /** Bound retained line buffers, including Unity's enormous serialized scalar lines. */
-export async function* resourceLines(file: string, maxLineBytes = 256 * 1024,
-  onRead?: (bytes: number) => void, signal?: AbortSignal): AsyncGenerator<string> {
+export async function* resourceLines(
+  file: string,
+  maxLineBytes = 256 * 1024,
+  onRead?: (bytes: number) => void,
+  signal?: AbortSignal,
+): AsyncGenerator<string> {
+  for await (const lines of resourceLineChunks(file, maxLineBytes, onRead, signal)) yield* lines;
+}
+
+/** Consume each chunk before advancing: line decoding stays synchronous without buffering a line array. */
+export async function* resourceLineChunks(
+  file: string,
+  maxLineBytes = 256 * 1024,
+  onRead?: (bytes: number) => void,
+  signal?: AbortSignal,
+): AsyncGenerator<Iterable<string>> {
   signal?.throwIfAborted();
   const stream = createReadStream(file, { highWaterMark: 64 * 1024, signal });
   let parts: Buffer[] = [];
@@ -17,30 +31,49 @@ export async function* resourceLines(file: string, maxLineBytes = 256 * 1024,
       const prefix = Buffer.concat(parts).toString('utf8');
       // Default lightweight semantics do not consume scalar bodies. Keep only
       // their prefix; script/source and object-reference lines must never truncate.
-      if (/^\s*#/.test(prefix) || /^\s*[^:{}]+:\s*[^\s{[]/.test(prefix)
-        && !/\bm_(?:Script|SourcePrefab)\s*:/.test(prefix)) {
+      if (
+        /^\s*#/.test(prefix) ||
+        (/^\s*[^:{}]+:\s*[^\s{[]/.test(prefix) && !/\bm_(?:Script|SourcePrefab)\s*:/.test(prefix))
+      ) {
         discardedScalar = true;
         return;
       }
-      throw new Error(`Unity resource line exceeds ${maxLineBytes} bytes and cannot be safely skipped.`);
+      throw new Error(
+        `Unity resource line exceeds ${maxLineBytes} bytes and cannot be safely skipped.`,
+      );
     }
     // Copy the slice so a tiny tail does not retain an entire stream chunk.
-    parts.push(Buffer.from(part)); retained += part.length;
+    parts.push(Buffer.from(part));
+    retained += part.length;
   };
+  function* lines(buffer: Buffer): Generator<string> {
+    let start = 0;
+    for (let end = buffer.indexOf(10, start); end >= 0; end = buffer.indexOf(10, start)) {
+      signal?.throwIfAborted();
+      // Most lines fit in this chunk; only split/oversized lines need a retained copy.
+      if (parts.length === 0 && !discardedScalar && end - start <= maxLineBytes) {
+        yield buffer.toString('utf8', start, end > start && buffer[end - 1] === 13 ? end - 1 : end);
+        start = end + 1;
+        continue;
+      }
+      take(buffer.subarray(start, end));
+      yield Buffer.concat(parts).toString('utf8').replace(/\r$/, '');
+      parts = [];
+      retained = 0;
+      discardedScalar = false;
+      start = end + 1;
+    }
+    if (start < buffer.length) take(buffer.subarray(start));
+  }
   try {
     for await (const chunk of stream) {
       const buffer = chunk as Buffer;
       onRead?.(buffer.length);
-      let start = 0;
-      for (let end = buffer.indexOf(10, start); end >= 0; end = buffer.indexOf(10, start)) {
-        signal?.throwIfAborted();
-        take(buffer.subarray(start, end));
-        yield Buffer.concat(parts).toString('utf8').replace(/\r$/, '');
-        parts = []; retained = 0; discardedScalar = false;
-        start = end + 1;
-      }
-      if (start < buffer.length) take(buffer.subarray(start));
+      yield lines(buffer);
     }
-    if (retained || discardedScalar) yield Buffer.concat(parts).toString('utf8').replace(/\r$/, '');
-  } finally { stream.destroy(); }
+    if (retained || discardedScalar)
+      yield [Buffer.concat(parts).toString('utf8').replace(/\r$/, '')];
+  } finally {
+    stream.destroy();
+  }
 }

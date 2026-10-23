@@ -79,6 +79,7 @@ receipt。已有索引时，新结果若报告资源/作用域遗漏或图写入
    - `scan-context does not write graph edges`; 图谱写入职责仅在 `processUnityResources`。
    - canonical 选择后，`UnityResourceSession` 逐资源解析全部相关脚本。processor 按资源消费，释放完整解析对象与已消费 binding；不再保留全阶段 resolvedBySymbol。
    - 发现记录默认 4 MiB，轻量组件引用默认 1 MiB，超限使用独占运行期暂存；拉取式消费提供背压。最终图载荷、必要全局索引和 query deep-parser 不计入该局部预算。
+   - 资源发现和大资源轻量解析以 64 KiB 读取块作为异步边界，块内按行同步迭代；完整短行直接解码，只有跨块或超长行保留拼接缓冲。不会积累整块行数组，保留原有行号、256 KiB 长行限制、取消及读取失败语义。
    - 组件 evidence 来自自身 m_Script 行。文件读取、无法安全处理的长行及发现/解析间版本变化都会产生明确资源失败；metadata/status 显示 `unity-resource-analysis-failed`，派生层跳过时保留旧失败记录，下一次 analyze 强制完整重试。暂存一致性错误终止构建。
    - query/parity/lazy 共用资源解析，保持路径选择、预算、fallback 与 strict parity-rerun 语义；成功解析不证明 runtime closure。
 2. Design Direction（重构方向，待实现）：
