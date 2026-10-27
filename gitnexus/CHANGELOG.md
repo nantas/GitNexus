@@ -2,7 +2,7 @@
 
 All notable changes to GitNexus will be documented in this file.
 
-## [1.6.13] - Unreleased
+## [1.6.13] - 2026-10-27
 
 ### Fixed
 - Require indexed C# declaration evidence before linking an import candidate. External namespaces and incomplete repository scans no longer authorize links to unrelated same-name files.

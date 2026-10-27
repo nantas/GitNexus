@@ -1,6 +1,6 @@
 {
   "version": "1.6.13",
-  "status": "locally-validated-not-published",
+  "status": "npm-published",
   "performanceReference": "../wayfinder/neonspark-index-performance/baseline-current.json",
   "performanceRemeasured": false,
   "sourceFilesSha256": {
@@ -100,9 +100,19 @@
     }
   },
   "limitations": [
-    "Automatic publish workflow still uses Node 20; package requires ^22.18.0 || >=24.11.0.",
     "Repository graph is stale; detect-changes did not cover edited symbols.",
-    "No new full neonspark performance measurement for the version bump."
+    "No new full neonspark performance measurement for the version bump.",
+    "Published locally; the legacy tag-triggered npm workflow is intentionally unused and unchanged."
   ],
-  "sourceCommit": "5c9adf9d1bb5474eac5d8fa99de386f72f2fd3b2"
+  "sourceCommit": "5c9adf9d1bb5474eac5d8fa99de386f72f2fd3b2",
+  "publication": {
+    "version": "1.6.13",
+    "publishedAt": "2026-10-27T09:07:59.600Z",
+    "latest": "1.6.13",
+    "integrity": "sha512-hdjzDWeJaxMrW9808gV9FGfPJc7cEKqKUVCyiv3m3y9AXBhHAGYVnsquc9r5CRGkdgFpNfYN5s9m8j7fTQ8S9w==",
+    "sha256": "0764f743c44cdf801f2ac72a619bdb10d8aee228ad5ac71d7e439312a06af557",
+    "downloadBytes": 21416965,
+    "downloadVerified": true,
+    "releaseUrl": "https://github.com/nantas/GitNexus/releases/tag/v1.6.13"
+  }
 }
