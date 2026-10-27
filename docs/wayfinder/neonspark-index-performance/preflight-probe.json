@@ -1,0 +1,34 @@
+{
+  "node": "v24.15.0",
+  "results": [
+    {
+      "round": 1,
+      "kind": "optional-grammar-glob",
+      "wallMs": 2025.8253750000001,
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "round": 1,
+      "kind": "git-dirty-paths",
+      "wallMs": 1624.0536669999997,
+      "count": 18,
+      "sha256": "923fb9a90e76e50004edebc52ab689d3c1158e87a31dfbdeb4696c6d85663bba"
+    },
+    {
+      "round": 2,
+      "kind": "git-dirty-paths",
+      "wallMs": 1810.8710409999994,
+      "count": 18,
+      "sha256": "923fb9a90e76e50004edebc52ab689d3c1158e87a31dfbdeb4696c6d85663bba"
+    },
+    {
+      "round": 2,
+      "kind": "optional-grammar-glob",
+      "wallMs": 2073.7285839999995,
+      "count": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  ],
+  "note": "Read-only direct original operations; no DB, not full-build timing; reverse order, OS cache uncontrolled"
+}

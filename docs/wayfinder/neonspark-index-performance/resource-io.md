@@ -2,11 +2,14 @@
 id: neonspark-perf-resource-io
 parent: neonspark-index-performance
 labels: ["wayfinder:task"]
-status: open
+status: closed
 assignee: null
 blocked_by: [neonspark-perf-measurement]
 ---
 # 定位资源扫描剩余 I/O
+
+
+已于 2026-10-26 按现有候选决策收口：资源大小分布及 discovery/resolution 重复读取已测；没有等价复用证明，不实施缓存/合并，错误/取消/预算回归通过。 完整证据见[现有验证项收口与候选否决](resolution.md#现有验证项收口与候选否决2026-10-26)。下文为历史调查顺序；关闭本票不表示 180 秒目标已达成。
 
 ## Question
 
@@ -21,7 +24,7 @@ blocked_by: [neonspark-perf-measurement]
 
 ## Acceptance
 
-与源码基线比较完整 parity seed 和 361,857 条相关事实的多重集，包含 reason/confidence/step；增加错误/取消/预算边界验证，整轮 A/B 有稳定收益。
+与同输入参考比较完整 parity seed 和相关事实多重集，包含 reason/confidence/step（历史输入 361,857 条；当前输入 361,665 条，并补全 841,653 条全部关系比较）；增加错误/取消/预算边界验证，整轮 A/B 有稳定收益。
 
 ## Assets
 

@@ -1,0 +1,415 @@
+{
+  "schemaVersion": 3,
+  "id": "neonspark-default-after-frontier-validation-20261026",
+  "status": "frozen-reference-target-not-met",
+  "purpose": "Latest fresh uninstrumented default run plus three default observations; both new candidates rejected",
+  "acceptedProductCommit": "bbf05f4eeb9630fecd531010edab9f1e7f674500",
+  "repositoryHead": "1c9138747f2533b1a2463a6128f0736aa5660807",
+  "sourceTree": "07b2d5ad8324f7fb5545f4494e3e61ff24584c95",
+  "trackedProductSourceClean": true,
+  "acceptedChanges": [
+    "Decode complete lines directly from resource chunks",
+    "Await per chunk and iterate resource lines synchronously within each chunk",
+    "Bounded File content prefetch preserving CSV semantics"
+  ],
+  "sourceFilesSha256": {
+    "gitnexus/src/core/unity/resource-lines.ts": "514e66104374a6282461276d4cfd85e7c09e9779b7ba8cf6d8503b1951e81f7f",
+    "gitnexus/src/core/unity/resource-discovery.ts": "b2a61a0c0db34ad1ef297cb7ad789b8e37641cbce325efc04f39ec0f922c2773",
+    "gitnexus/src/core/unity/resolver.ts": "a5e2e1f8444dd424ba2869366cc9c5c5799d8d6a2dc6d90b03a8423dab9d95e9",
+    "gitnexus/src/core/lbug/csv-generator.ts": "0eec5a40e40f837d4373d6a9019abc6bf939e4833cddb4f334ebbdf57127c8c3"
+  },
+  "distFilesSha256": {
+    "core/unity/resource-lines.js": "9290320c168e0324019306da7b4ab1f289fa35585dc87462d58b2de973d9e07b",
+    "core/unity/resource-discovery.js": "5f990531b7ae3b6efe0805ca5de3623d13da2c35d1eccced58caf2639b67c104",
+    "core/unity/resolver.js": "9996e7a62fd0ee8273731dbacea4fc80b2c1a201f5d84ecd5d883c693cdcd819",
+    "core/lbug/csv-generator.js": "e3a8d31db6d9bde970000b5a12de5f232baf92b19ffd4db57079090e646074b7",
+    "core/unity/analysis-input-snapshot.js": "b53effe304db9be9249907fc18e99b74bfa87696a0925fe084de4a912a12ebb4",
+    "core/run-analyze.js": "5ded43d69676370eb84f11807b8693e5748697322297cf41dc4572e3b1738458"
+  },
+  "referenceRun": ".scratch/neonspark-frontier-20261026/control-a3",
+  "referenceRunDate": "2026-10-26T11:00:49.368Z",
+  "targetCommit": "8a1af468545bddfe695b01d6a29b9142a06d26bd",
+  "inputReceipt": {
+    "version": 1,
+    "digest": "fca2212ac78e9879e5f93624259c77830f2dc1020f5c75c3079bff61caf9df7f",
+    "fileCount": 164026
+  },
+  "selection": {
+    "name": "neonspark42-core",
+    "includeExtensions": [
+      ".cs",
+      ".meta"
+    ],
+    "scopeRules": [
+      "Assets/",
+      "Packages/"
+    ],
+    "csharpDefineCsproj": "Assembly-CSharp.csproj"
+  },
+  "node": "v24.15.0",
+  "uvThreadpoolSize": "default",
+  "contentRetention": "full",
+  "ftsProfile": "full",
+  "coldDefinition": "Empty index and parser cache; OS cache not cleared",
+  "measurements": {
+    "elapsedMs": 373027,
+    "cpu": 833.28,
+    "peakGiB": 13.409526966512203,
+    "firstSnapshotMs": 34976,
+    "finalSnapshotMs": 54759,
+    "phases": [
+      {
+        "name": "scan",
+        "ms": 11903
+      },
+      {
+        "name": "structure",
+        "ms": 671
+      },
+      {
+        "name": "springConfig",
+        "ms": 18
+      },
+      {
+        "name": "markdown",
+        "ms": 3
+      },
+      {
+        "name": "cobol",
+        "ms": 42
+      },
+      {
+        "name": "parse",
+        "ms": 38362
+      },
+      {
+        "name": "routes",
+        "ms": 44
+      },
+      {
+        "name": "tools",
+        "ms": 3
+      },
+      {
+        "name": "orm",
+        "ms": 0
+      },
+      {
+        "name": "crossFile",
+        "ms": 2
+      },
+      {
+        "name": "scopeResolution",
+        "ms": 39589
+      },
+      {
+        "name": "springAutoConfiguration",
+        "ms": 31
+      },
+      {
+        "name": "springAop",
+        "ms": 0
+      },
+      {
+        "name": "springDestinations",
+        "ms": 26
+      },
+      {
+        "name": "pruneLocalSymbols",
+        "ms": 233
+      },
+      {
+        "name": "mro",
+        "ms": 296
+      },
+      {
+        "name": "springAopInheritance",
+        "ms": 63
+      },
+      {
+        "name": "di",
+        "ms": 22
+      },
+      {
+        "name": "communities",
+        "ms": 1092
+      },
+      {
+        "name": "unity-resources",
+        "ms": 85692
+      },
+      {
+        "name": "unity-lifecycle",
+        "ms": 279
+      },
+      {
+        "name": "processes",
+        "ms": 480
+      },
+      {
+        "name": "unity-processes",
+        "ms": 178
+      },
+      {
+        "name": "unity-process-subtype",
+        "ms": 144
+      }
+    ]
+  },
+  "wallLedgerMs": {
+    "startup_before_first_snapshot_inferred": 77780,
+    "first_snapshot": 117548,
+    "snapshot_to_pipeline": 4,
+    "pipeline": 218344,
+    "pipeline_end_to_fts_start": 35996,
+    "fts_log_window": 64973,
+    "fts_end_to_final_snapshot_inferred": 2566,
+    "final_snapshot": 48340,
+    "post_revalidation_to_exit": 1611
+  },
+  "wallLedgerMethod": "Timestamped output-chunk boundaries; inferred residuals are not function attribution; pipeline includes minor phases",
+  "graphStats": {
+    "files": 137315,
+    "nodes": 278539,
+    "edges": 841653,
+    "communities": 7707,
+    "processes": 2378,
+    "embeddings": 0
+  },
+  "verification": {
+    "fileNodes": 155808,
+    "allCodeRelations": 841653,
+    "relatedUnityFacts": 361665,
+    "ftsReady": 22,
+    "actualFtsRecall": [
+      "English",
+      "Chinese",
+      "token at stored content offset 37870"
+    ],
+    "historicalTestsPerEnvironment": 140,
+    "currentCandidateNativeTests": 51,
+    "currentCandidateExtraChecks": [
+      "binding equality for 3059 large resources / 60023 bindings",
+      "spill checksum",
+      "input mutation",
+      "abort",
+      "CRLF/Unicode",
+      "Unicode collation fallback",
+      "owned cleanup"
+    ],
+    "currentSuccessfulFullRuns": 5
+  },
+  "evidenceSha256": {
+    "invocation.json": "f5388d2d0031b945a8c20176eaf4243fa725d75cd54a6214ba711c5d263a05b6",
+    "result.json": "23e3a90c9bdee264a20d0e04735163f12be4678398fce883c207531bf8f3efef",
+    "verified.json": "c20252b5490b65beabee19823583b5fc18fe6664e7f1b99a058cf187a7bb1482",
+    "file-content-hashes.json": "057f3856d7eddf5a50d40bc558361f762c0b4ea11f2b35116c62b763e70eddd2",
+    "all-relation-hashes.json": "04af3240f2dc139c391c24e068457ee41f80da5a20dbb7c81f1fb3c8796dcd12",
+    "unity-parity-seed.json.gz": "2067c3a410c67973ad93a1c792e092897f44ce99ec8fb507abf39c5ec4345870",
+    "fts-recall.json": "53f3991ef8757f76760398b8249e9e946ac5f4c829519010a2fe86edbc83254a",
+    "semantic-comparison.json": "248e13ab4551f78753a183a91e63920e2c6dcb9c50085748b78b50076ab9ed13",
+    "cleanup.json": "f3cd460f73994aee24e131ebc9c62a93f41c3b310434de49167a5771f071eb9d"
+  },
+  "databaseRetained": false,
+  "targetMs": 180000,
+  "limitations": [
+    "Background load and OS cache uncontrolled; large wall variation persists",
+    "No new product optimization adopted; previous bbf05f4e changes remain the baseline",
+    "Do not attribute faster repeated default observations to code changes",
+    "Target HEAD advanced through an external documentation-only commit; input receipt remained identical",
+    "6 GiB standalone FTS passed, but full build failed with rollback errors and SIGSEGV; second run cancelled",
+    "Projection reduced source reads but did not pass paired phase/peak gates",
+    "No new commit/tag/global CLI publication; no new full-suite or cross-platform test run"
+  ],
+  "invocation": {
+    "args": [
+      "-l",
+      "$NODE24",
+      "--max-old-space-size=18432",
+      "--max-semi-space-size=128",
+      "--stack-size=4096",
+      "$GITNEXUS_REPO/.scratch/neonspark-frontier-20261026/control/dist/cli/index.js",
+      "analyze",
+      "--force",
+      "--index-only",
+      "--verbose",
+      "--name",
+      "neonspark-performance"
+    ],
+    "env": {
+      "NODE_ENV": "development",
+      "VALIDATE_SEMANTIC_MODEL": "0",
+      "PROF_LBUG_LOAD": "0",
+      "PROF_SCOPE_RESOLUTION": "0",
+      "GITNEXUS_STORAGE_PATH": "$GITNEXUS_REPO/.scratch/neonspark-frontier-20261026/control-a3/index",
+      "GITNEXUS_HOME": "$GITNEXUS_REPO/.scratch/neonspark-frontier-20261026/control-a3/home"
+    }
+  },
+  "analysisInputFingerprint": "ade0229b325356c192a32ad8c85f900b85d4b8cdde20d5f80a912026ba6a8c82",
+  "indexCoverageSelection": {
+    "maxFileSizeBytes": 524288,
+    "scopeRules": [
+      "Assets/",
+      "Packages/"
+    ],
+    "includeExtensions": [
+      ".cs",
+      ".meta"
+    ]
+  },
+  "previousBaseline": "baseline-pre-frontier-20261026.json",
+  "repeatedDefaultRuns": [
+    {
+      "id": "control-a1",
+      "wallMs": 452759,
+      "cpuSec": 946.45,
+      "peakBytes": 13957583872,
+      "phases": {
+        "scan": 13140,
+        "structure": 722,
+        "springConfig": 19,
+        "markdown": 4,
+        "cobol": 32,
+        "parse": 50868,
+        "routes": 51,
+        "tools": 4,
+        "orm": 0,
+        "crossFile": 3,
+        "scopeResolution": 48391,
+        "springAutoConfiguration": 31,
+        "springAop": 0,
+        "springDestinations": 35,
+        "pruneLocalSymbols": 290,
+        "mro": 347,
+        "springAopInheritance": 74,
+        "di": 23,
+        "communities": 1356,
+        "unity-resources": 107703,
+        "unity-lifecycle": 351,
+        "processes": 675,
+        "unity-processes": 253,
+        "unity-process-subtype": 218
+      },
+      "headAtVerification": "8a1af468545bddfe695b01d6a29b9142a06d26bd",
+      "fullRelations": true,
+      "fullContents": true,
+      "fts": true,
+      "originalIndexPreserved": true
+    },
+    {
+      "id": "control-a2",
+      "wallMs": 830656,
+      "cpuSec": 915.76,
+      "peakBytes": 11698989032,
+      "phases": {
+        "scan": 15634,
+        "structure": 685,
+        "springConfig": 18,
+        "markdown": 3,
+        "cobol": 26,
+        "parse": 45769,
+        "routes": 52,
+        "tools": 4,
+        "orm": 0,
+        "crossFile": 2,
+        "scopeResolution": 97156,
+        "springAutoConfiguration": 29,
+        "springAop": 0,
+        "springDestinations": 26,
+        "pruneLocalSymbols": 219,
+        "mro": 288,
+        "springAopInheritance": 54,
+        "di": 17,
+        "communities": 1059,
+        "unity-resources": 159066,
+        "unity-lifecycle": 306,
+        "processes": 499,
+        "unity-processes": 216,
+        "unity-process-subtype": 154
+      },
+      "headAtVerification": "8a1af468545bddfe695b01d6a29b9142a06d26bd",
+      "fullRelations": true,
+      "fullContents": true,
+      "fts": true,
+      "originalIndexPreserved": true
+    },
+    {
+      "id": "control-a3",
+      "wallMs": 373027,
+      "cpuSec": 833.28,
+      "peakBytes": 14398369944,
+      "phases": {
+        "scan": 11903,
+        "structure": 671,
+        "springConfig": 18,
+        "markdown": 3,
+        "cobol": 42,
+        "parse": 38362,
+        "routes": 44,
+        "tools": 3,
+        "orm": 0,
+        "crossFile": 2,
+        "scopeResolution": 39589,
+        "springAutoConfiguration": 31,
+        "springAop": 0,
+        "springDestinations": 26,
+        "pruneLocalSymbols": 233,
+        "mro": 296,
+        "springAopInheritance": 63,
+        "di": 22,
+        "communities": 1092,
+        "unity-resources": 85692,
+        "unity-lifecycle": 279,
+        "processes": 480,
+        "unity-processes": 178,
+        "unity-process-subtype": 144
+      },
+      "headAtVerification": "8a1af468545bddfe695b01d6a29b9142a06d26bd",
+      "fullRelations": true,
+      "fullContents": true,
+      "fts": true,
+      "originalIndexPreserved": true
+    }
+  ],
+  "defaultRunSummary": {
+    "count": 3,
+    "medianMs": 452759,
+    "minMs": 373027,
+    "maxMs": 830656,
+    "allWithinTarget": false
+  },
+  "candidateDecisions": {
+    "pool6": {
+      "accepted": false,
+      "ratios": [],
+      "meanWallRatio": null,
+      "meanCpuRatio": null,
+      "gate": "Both paired wall times lower, mean wall improvement >=5%, each CPU <=+10% and mean CPU <=+5%, each peak <=+5%; projection must also improve both resource phase times and their mean >=5%; complete semantic and FTS proof required. This is an empirical gate, not statistical significance."
+    },
+    "projection": {
+      "accepted": false,
+      "ratios": [
+        {
+          "control": "control-a2",
+          "candidate": "projection-b1",
+          "wall": 0.7403305339394406,
+          "cpu": 0.9936992225037128,
+          "peak": 1.076960347046849,
+          "resources": 1.4560434033671559
+        },
+        {
+          "control": "control-a3",
+          "candidate": "projection-b2",
+          "wall": 0.98219163760264,
+          "cpu": 0.9722902265745008,
+          "peak": 1.078369105696594,
+          "resources": 0.8127479811417635
+        }
+      ],
+      "meanWallRatio": 0.8612610857710403,
+      "meanCpuRatio": 0.9829947245391069,
+      "gate": "Both paired wall times lower, mean wall improvement >=5%, each CPU <=+10% and mean CPU <=+5%, each peak <=+5%; projection must also improve both resource phase times and their mean >=5%; complete semantic and FTS proof required. This is an empirical gate, not statistical significance."
+    }
+  },
+  "bufferPoolOverride": null
+}

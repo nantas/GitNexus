@@ -1,0 +1,170 @@
+{
+  "source": ".scratch/neonspark-accounting-20261026/identity-probe.mjs",
+  "rows": [
+    {
+      "label": "cold-isolated",
+      "wallMs": 6904.28575,
+      "parentCpuMs": 4810.242,
+      "counters": {
+        "hashedFiles": 15190,
+        "hashedBytes": 1059057119,
+        "walks": 3944,
+        "manifests": 528,
+        "passes": [
+          19947
+        ],
+        "failures": []
+      },
+      "launches": [
+        {
+          "ms": 412.88416700000016,
+          "command": "node",
+          "inputBytes": 2870914,
+          "outputBytes": 5365443,
+          "status": 0,
+          "signal": null
+        }
+      ],
+      "identity": {
+        "schemaVersion": 4,
+        "runtime": {
+          "executablePath": "$NODE24",
+          "version": "v24.15.0",
+          "platform": "darwin",
+          "architecture": "arm64",
+          "modulesAbi": "137",
+          "libc": "not-applicable"
+        },
+        "cliVersion": "1.6.12",
+        "invokedArtifact": {
+          "path": "$GITNEXUS_REPO/gitnexus/dist/core/run-analyze.js",
+          "digest": "sha256:5ded43d69676370eb84f11807b8693e5748697322297cf41dc4572e3b1738458"
+        },
+        "build": {
+          "kind": "distribution",
+          "rootPath": "$GITNEXUS_REPO/gitnexus/dist",
+          "canonicalization": "gitnexus-analyzer-build-v2",
+          "digest": "sha256:050053f91c053b0b8055056312516247d9f6c551b323bb7f005c6261bb7dc692"
+        },
+        "dependencyRuntime": {
+          "manifestPath": "$GITNEXUS_REPO/gitnexus/package.json",
+          "lockfilePath": "$GITNEXUS_REPO/gitnexus/package-lock.json",
+          "canonicalization": "gitnexus-analyzer-dependency-runtime-v4",
+          "packageCount": 255,
+          "artifactCount": 12672,
+          "digest": "sha256:6bc4f00752bb1e8ef052980e3e441986c9c36d44561d81fa7bd59c5fbc108037"
+        }
+      }
+    },
+    {
+      "label": "warm-process",
+      "wallMs": 486.126792,
+      "parentCpuMs": 110.21,
+      "counters": {
+        "hashedFiles": 0,
+        "hashedBytes": 0,
+        "walks": 0,
+        "manifests": 0,
+        "passes": [
+          19947
+        ],
+        "failures": []
+      },
+      "launches": [
+        {
+          "ms": 384.2250409999997,
+          "command": "node",
+          "inputBytes": 2870914,
+          "outputBytes": 5365443,
+          "status": 0,
+          "signal": null
+        }
+      ],
+      "identity": {
+        "schemaVersion": 4,
+        "runtime": {
+          "executablePath": "$NODE24",
+          "version": "v24.15.0",
+          "platform": "darwin",
+          "architecture": "arm64",
+          "modulesAbi": "137",
+          "libc": "not-applicable"
+        },
+        "cliVersion": "1.6.12",
+        "invokedArtifact": {
+          "path": "$GITNEXUS_REPO/gitnexus/dist/core/run-analyze.js",
+          "digest": "sha256:5ded43d69676370eb84f11807b8693e5748697322297cf41dc4572e3b1738458"
+        },
+        "build": {
+          "kind": "distribution",
+          "rootPath": "$GITNEXUS_REPO/gitnexus/dist",
+          "canonicalization": "gitnexus-analyzer-build-v2",
+          "digest": "sha256:050053f91c053b0b8055056312516247d9f6c551b323bb7f005c6261bb7dc692"
+        },
+        "dependencyRuntime": {
+          "manifestPath": "$GITNEXUS_REPO/gitnexus/package.json",
+          "lockfilePath": "$GITNEXUS_REPO/gitnexus/package-lock.json",
+          "canonicalization": "gitnexus-analyzer-dependency-runtime-v4",
+          "packageCount": 255,
+          "artifactCount": 12672,
+          "digest": "sha256:6bc4f00752bb1e8ef052980e3e441986c9c36d44561d81fa7bd59c5fbc108037"
+        }
+      }
+    },
+    {
+      "label": "warm-persisted",
+      "wallMs": 649.6740829999999,
+      "parentCpuMs": 192.092,
+      "counters": {
+        "hashedFiles": 0,
+        "hashedBytes": 0,
+        "walks": 0,
+        "manifests": 0,
+        "passes": [
+          19947
+        ],
+        "failures": []
+      },
+      "launches": [
+        {
+          "ms": 430.0403329999999,
+          "command": "node",
+          "inputBytes": 2870914,
+          "outputBytes": 5365443,
+          "status": 0,
+          "signal": null
+        }
+      ],
+      "identity": {
+        "schemaVersion": 4,
+        "runtime": {
+          "executablePath": "$NODE24",
+          "version": "v24.15.0",
+          "platform": "darwin",
+          "architecture": "arm64",
+          "modulesAbi": "137",
+          "libc": "not-applicable"
+        },
+        "cliVersion": "1.6.12",
+        "invokedArtifact": {
+          "path": "$GITNEXUS_REPO/gitnexus/dist/core/run-analyze.js",
+          "digest": "sha256:5ded43d69676370eb84f11807b8693e5748697322297cf41dc4572e3b1738458"
+        },
+        "build": {
+          "kind": "distribution",
+          "rootPath": "$GITNEXUS_REPO/gitnexus/dist",
+          "canonicalization": "gitnexus-analyzer-build-v2",
+          "digest": "sha256:050053f91c053b0b8055056312516247d9f6c551b323bb7f005c6261bb7dc692"
+        },
+        "dependencyRuntime": {
+          "manifestPath": "$GITNEXUS_REPO/gitnexus/package.json",
+          "lockfilePath": "$GITNEXUS_REPO/gitnexus/package-lock.json",
+          "canonicalization": "gitnexus-analyzer-dependency-runtime-v4",
+          "packageCount": 255,
+          "artifactCount": 12672,
+          "digest": "sha256:6bc4f00752bb1e8ef052980e3e441986c9c36d44561d81fa7bd59c5fbc108037"
+        }
+      }
+    }
+  ]
+}

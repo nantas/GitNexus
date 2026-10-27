@@ -1,0 +1,767 @@
+{
+  "wallMs": 785574,
+  "totals": {
+    "unattributed": 10871,
+    "captureAnalyzerIdentityBeforeLoad": 5675,
+    "glob": 3042,
+    "saveMeta": 217,
+    "resolveAnalysisInputs": 3,
+    "captureUnityInputSnapshot": 108111,
+    "runPipelineFromRepo": 405715,
+    "closeLbug": 1,
+    "loadGraphToLbug": 172265,
+    "buildSearchIndexesOrDegrade": 74315,
+    "listWorkingTreeDirtyPaths": 4236,
+    "finalizeAnalyzerRunnerIdentity": 1089,
+    "registerRepo": 16,
+    "closeLbugBeforeExit": 18
+  },
+  "bins": [
+    {
+      "name": "unattributed",
+      "start": 1793007617433,
+      "end": 1793007617577,
+      "wallMs": 144
+    },
+    {
+      "name": "captureAnalyzerIdentityBeforeLoad",
+      "start": 1793007617577,
+      "end": 1793007623252,
+      "wallMs": 5675
+    },
+    {
+      "name": "unattributed",
+      "start": 1793007623252,
+      "end": 1793007623254,
+      "wallMs": 2
+    },
+    {
+      "name": "glob",
+      "start": 1793007623254,
+      "end": 1793007626296,
+      "wallMs": 3042
+    },
+    {
+      "name": "unattributed",
+      "start": 1793007626296,
+      "end": 1793007626369,
+      "wallMs": 73
+    },
+    {
+      "name": "saveMeta",
+      "start": 1793007626369,
+      "end": 1793007626370,
+      "wallMs": 1
+    },
+    {
+      "name": "resolveAnalysisInputs",
+      "start": 1793007626370,
+      "end": 1793007626373,
+      "wallMs": 3
+    },
+    {
+      "name": "unattributed",
+      "start": 1793007626373,
+      "end": 1793007626374,
+      "wallMs": 1
+    },
+    {
+      "name": "captureUnityInputSnapshot",
+      "start": 1793007626374,
+      "end": 1793007668856,
+      "wallMs": 42482
+    },
+    {
+      "name": "unattributed",
+      "start": 1793007668856,
+      "end": 1793007668859,
+      "wallMs": 3
+    },
+    {
+      "name": "runPipelineFromRepo",
+      "start": 1793007668859,
+      "end": 1793008074574,
+      "wallMs": 405715
+    },
+    {
+      "name": "unattributed",
+      "start": 1793008074574,
+      "end": 1793008075309,
+      "wallMs": 735
+    },
+    {
+      "name": "closeLbug",
+      "start": 1793008075309,
+      "end": 1793008075310,
+      "wallMs": 1
+    },
+    {
+      "name": "unattributed",
+      "start": 1793008075310,
+      "end": 1793008075628,
+      "wallMs": 318
+    },
+    {
+      "name": "loadGraphToLbug",
+      "start": 1793008075628,
+      "end": 1793008247893,
+      "wallMs": 172265
+    },
+    {
+      "name": "unattributed",
+      "start": 1793008247893,
+      "end": 1793008247894,
+      "wallMs": 1
+    },
+    {
+      "name": "buildSearchIndexesOrDegrade",
+      "start": 1793008247894,
+      "end": 1793008322209,
+      "wallMs": 74315
+    },
+    {
+      "name": "unattributed",
+      "start": 1793008322209,
+      "end": 1793008329743,
+      "wallMs": 7534
+    },
+    {
+      "name": "listWorkingTreeDirtyPaths",
+      "start": 1793008329743,
+      "end": 1793008333979,
+      "wallMs": 4236
+    },
+    {
+      "name": "finalizeAnalyzerRunnerIdentity",
+      "start": 1793008333979,
+      "end": 1793008335068,
+      "wallMs": 1089
+    },
+    {
+      "name": "captureUnityInputSnapshot",
+      "start": 1793008335068,
+      "end": 1793008400697,
+      "wallMs": 65629
+    },
+    {
+      "name": "unattributed",
+      "start": 1793008400697,
+      "end": 1793008400699,
+      "wallMs": 2
+    },
+    {
+      "name": "registerRepo",
+      "start": 1793008400699,
+      "end": 1793008400715,
+      "wallMs": 16
+    },
+    {
+      "name": "unattributed",
+      "start": 1793008400715,
+      "end": 1793008400727,
+      "wallMs": 12
+    },
+    {
+      "name": "closeLbugBeforeExit",
+      "start": 1793008400727,
+      "end": 1793008400745,
+      "wallMs": 18
+    },
+    {
+      "name": "unattributed",
+      "start": 1793008400745,
+      "end": 1793008400793,
+      "wallMs": 48
+    },
+    {
+      "name": "saveMeta",
+      "start": 1793008400793,
+      "end": 1793008401009,
+      "wallMs": 216
+    },
+    {
+      "name": "unattributed",
+      "start": 1793008401009,
+      "end": 1793008403007,
+      "wallMs": 1998
+    }
+  ],
+  "spans": [
+    {
+      "name": "spawnSync",
+      "id": 4,
+      "start": 1793007622504,
+      "end": 1793007622792,
+      "wallMs": 287.9676249999993,
+      "parentCpuMs": 7.447,
+      "beginMemory": {
+        "rss": 279412736,
+        "heapTotal": 189939712,
+        "heapUsed": 68588536,
+        "external": 17711838,
+        "arrayBuffers": 3703265
+      },
+      "endMemory": {
+        "rss": 296321024,
+        "heapTotal": 192872448,
+        "heapUsed": 71643000,
+        "external": 19607810,
+        "arrayBuffers": 11921455
+      },
+      "status": "end"
+    },
+    {
+      "name": "snapshotCacheGuards",
+      "id": 3,
+      "start": 1793007622502,
+      "end": 1793007622816,
+      "wallMs": 312.74020799999926,
+      "parentCpuMs": 29.242,
+      "beginMemory": {
+        "rss": 279396352,
+        "heapTotal": 189939712,
+        "heapUsed": 68577768,
+        "external": 17711838,
+        "arrayBuffers": 3703265
+      },
+      "endMemory": {
+        "rss": 297271296,
+        "heapTotal": 193822720,
+        "heapUsed": 79161536,
+        "external": 19607810,
+        "arrayBuffers": 11921455
+      },
+      "status": "end"
+    },
+    {
+      "name": "resolveAnalyzerRunnerIdentity",
+      "id": 2,
+      "start": 1793007617577,
+      "end": 1793007622862,
+      "wallMs": 5285.215333,
+      "parentCpuMs": 3602.661,
+      "beginMemory": {
+        "rss": 68288512,
+        "heapTotal": 17760256,
+        "heapUsed": 8430504,
+        "external": 2412864,
+        "arrayBuffers": 37163
+      },
+      "endMemory": {
+        "rss": 362872832,
+        "heapTotal": 224067584,
+        "heapUsed": 123390360,
+        "external": 19607816,
+        "arrayBuffers": 11921461
+      },
+      "status": "end"
+    },
+    {
+      "name": "checkLbugNative",
+      "id": 6,
+      "start": 1793007622864,
+      "end": 1793007622931,
+      "wallMs": 67.64095799999996,
+      "parentCpuMs": 1.394,
+      "beginMemory": {
+        "rss": 362905600,
+        "heapTotal": 224067584,
+        "heapUsed": 123395296,
+        "external": 19607816,
+        "arrayBuffers": 11921461
+      },
+      "endMemory": {
+        "rss": 363134976,
+        "heapTotal": 224067584,
+        "heapUsed": 123512616,
+        "external": 19607816,
+        "arrayBuffers": 11921461
+      },
+      "status": "end"
+    },
+    {
+      "name": "loader",
+      "id": 7,
+      "start": 1793007622931,
+      "end": 1793007623251,
+      "wallMs": 320.1884579999996,
+      "parentCpuMs": 230.592,
+      "beginMemory": {
+        "rss": 363134976,
+        "heapTotal": 224067584,
+        "heapUsed": 123515344,
+        "external": 19607816,
+        "arrayBuffers": 11921461
+      },
+      "endMemory": {
+        "rss": 359251968,
+        "heapTotal": 182009856,
+        "heapUsed": 83010856,
+        "external": 8127996,
+        "arrayBuffers": 5654438
+      },
+      "status": "end"
+    },
+    {
+      "name": "loader",
+      "id": 5,
+      "start": 1793007622863,
+      "end": 1793007623252,
+      "wallMs": 389.04720799999996,
+      "parentCpuMs": 232.303,
+      "beginMemory": {
+        "rss": 362872832,
+        "heapTotal": 224067584,
+        "heapUsed": 123392144,
+        "external": 19607816,
+        "arrayBuffers": 11921461
+      },
+      "endMemory": {
+        "rss": 359251968,
+        "heapTotal": 182009856,
+        "heapUsed": 83015152,
+        "external": 8127996,
+        "arrayBuffers": 5654438
+      },
+      "status": "end"
+    },
+    {
+      "name": "captureAnalyzerIdentityBeforeLoad",
+      "id": 1,
+      "start": 1793007617577,
+      "end": 1793007623252,
+      "wallMs": 5674.562833,
+      "parentCpuMs": 3835.261,
+      "beginMemory": {
+        "rss": 68288512,
+        "heapTotal": 17760256,
+        "heapUsed": 8425928,
+        "external": 2412864,
+        "arrayBuffers": 37163
+      },
+      "endMemory": {
+        "rss": 359251968,
+        "heapTotal": 182009856,
+        "heapUsed": 83019488,
+        "external": 8127996,
+        "arrayBuffers": 5654438
+      },
+      "status": "end"
+    },
+    {
+      "name": "glob",
+      "id": 8,
+      "start": 1793007623254,
+      "end": 1793007626296,
+      "wallMs": 3041.3597919999993,
+      "parentCpuMs": 3048.308,
+      "beginMemory": {
+        "rss": 359333888,
+        "heapTotal": 182009856,
+        "heapUsed": 83163696,
+        "external": 8127996,
+        "arrayBuffers": 5654438
+      },
+      "endMemory": {
+        "rss": 915570688,
+        "heapTotal": 770621440,
+        "heapUsed": 519116752,
+        "external": 2553389,
+        "arrayBuffers": 79831
+      },
+      "status": "end"
+    },
+    {
+      "name": "saveMeta",
+      "id": 10,
+      "start": 1793007626369,
+      "end": 1793007626370,
+      "wallMs": 0.9782500000001164,
+      "parentCpuMs": 1.092,
+      "beginMemory": {
+        "rss": 916652032,
+        "heapTotal": 770621440,
+        "heapUsed": 519853920,
+        "external": 2558373,
+        "arrayBuffers": 82767
+      },
+      "endMemory": {
+        "rss": 916652032,
+        "heapTotal": 770621440,
+        "heapUsed": 519917048,
+        "external": 2559789,
+        "arrayBuffers": 84183
+      },
+      "status": "end"
+    },
+    {
+      "name": "resolveAnalysisInputs",
+      "id": 11,
+      "start": 1793007626370,
+      "end": 1793007626373,
+      "wallMs": 2.597458000000188,
+      "parentCpuMs": 1.789,
+      "beginMemory": {
+        "rss": 916652032,
+        "heapTotal": 770621440,
+        "heapUsed": 519931808,
+        "external": 2559789,
+        "arrayBuffers": 84183
+      },
+      "endMemory": {
+        "rss": 919060480,
+        "heapTotal": 772931584,
+        "heapUsed": 522391928,
+        "external": 3084884,
+        "arrayBuffers": 609278
+      },
+      "status": "end"
+    },
+    {
+      "name": "captureUnityInputSnapshot",
+      "id": 12,
+      "start": 1793007626374,
+      "end": 1793007668856,
+      "wallMs": 42481.393375,
+      "parentCpuMs": 66693.899,
+      "beginMemory": {
+        "rss": 919060480,
+        "heapTotal": 772931584,
+        "heapUsed": 522433528,
+        "external": 3086776,
+        "arrayBuffers": 611170
+      },
+      "endMemory": {
+        "rss": 468025344,
+        "heapTotal": 396492800,
+        "heapUsed": 235726104,
+        "external": 28463674,
+        "arrayBuffers": 25989781
+      },
+      "status": "end"
+    },
+    {
+      "name": "runPipelineFromRepo",
+      "id": 13,
+      "start": 1793007668859,
+      "end": 1793008074574,
+      "wallMs": 405711.202458,
+      "parentCpuMs": 679350.95,
+      "beginMemory": {
+        "rss": 468303872,
+        "heapTotal": 396492800,
+        "heapUsed": 109686792,
+        "external": 19340194,
+        "arrayBuffers": 16866301
+      },
+      "endMemory": {
+        "rss": 1460551680,
+        "heapTotal": 1812840448,
+        "heapUsed": 1569830880,
+        "external": 23014859,
+        "arrayBuffers": 18787040
+      },
+      "status": "end"
+    },
+    {
+      "name": "closeLbug",
+      "id": 14,
+      "start": 1793008075309,
+      "end": 1793008075310,
+      "wallMs": 1.3896250000107102,
+      "parentCpuMs": 0.636,
+      "beginMemory": {
+        "rss": 1607401472,
+        "heapTotal": 1872887808,
+        "heapUsed": 1596974792,
+        "external": 21264975,
+        "arrayBuffers": 18787040
+      },
+      "endMemory": {
+        "rss": 1607483392,
+        "heapTotal": 1872887808,
+        "heapUsed": 1596981152,
+        "external": 21264975,
+        "arrayBuffers": 18787040
+      },
+      "status": "end"
+    },
+    {
+      "name": "loadGraphToLbug",
+      "id": 15,
+      "start": 1793008075628,
+      "end": 1793008247893,
+      "wallMs": 172263.51716700004,
+      "parentCpuMs": 45869.889,
+      "beginMemory": {
+        "rss": 1774026752,
+        "heapTotal": 1873149952,
+        "heapUsed": 1597643456,
+        "external": 21272646,
+        "arrayBuffers": 18794711
+      },
+      "endMemory": {
+        "rss": 1955774464,
+        "heapTotal": 1484406784,
+        "heapUsed": 956205728,
+        "external": 3141951,
+        "arrayBuffers": 664016
+      },
+      "status": "end"
+    },
+    {
+      "name": "buildSearchIndexesOrDegrade",
+      "id": 16,
+      "start": 1793008247894,
+      "end": 1793008322209,
+      "wallMs": 74314.44095800002,
+      "parentCpuMs": 113434.021,
+      "beginMemory": {
+        "rss": 1957085184,
+        "heapTotal": 1484406784,
+        "heapUsed": 956208864,
+        "external": 3141951,
+        "arrayBuffers": 664016
+      },
+      "endMemory": {
+        "rss": 956956672,
+        "heapTotal": 1484406784,
+        "heapUsed": 956882168,
+        "external": 3141951,
+        "arrayBuffers": 664016
+      },
+      "status": "end"
+    },
+    {
+      "name": "listWorkingTreeDirtyPaths",
+      "id": 17,
+      "start": 1793008329743,
+      "end": 1793008333979,
+      "wallMs": 4235.243416000041,
+      "parentCpuMs": 1082.329,
+      "beginMemory": {
+        "rss": 630128640,
+        "heapTotal": 1497137152,
+        "heapUsed": 1014234904,
+        "external": 3141990,
+        "arrayBuffers": 664055
+      },
+      "endMemory": {
+        "rss": 1176125440,
+        "heapTotal": 1303429120,
+        "heapUsed": 608145048,
+        "external": 72894161,
+        "arrayBuffers": 94679
+      },
+      "status": "end"
+    },
+    {
+      "name": "spawnSync",
+      "id": 21,
+      "start": 1793008334090,
+      "end": 1793008334596,
+      "wallMs": 506.69858300010674,
+      "parentCpuMs": 11.333,
+      "beginMemory": {
+        "rss": 1204699136,
+        "heapTotal": 1305591808,
+        "heapUsed": 638281848,
+        "external": 48824878,
+        "arrayBuffers": 102871
+      },
+      "endMemory": {
+        "rss": 1170833408,
+        "heapTotal": 1308524544,
+        "heapUsed": 641310432,
+        "external": 62328914,
+        "arrayBuffers": 8321061
+      },
+      "status": "end"
+    },
+    {
+      "name": "snapshotCacheGuards",
+      "id": 20,
+      "start": 1793008334089,
+      "end": 1793008334695,
+      "wallMs": 606.0295829999959,
+      "parentCpuMs": 53.53,
+      "beginMemory": {
+        "rss": 1204682752,
+        "heapTotal": 1305591808,
+        "heapUsed": 638277776,
+        "external": 48824878,
+        "arrayBuffers": 102871
+      },
+      "endMemory": {
+        "rss": 1174896640,
+        "heapTotal": 1308688384,
+        "heapUsed": 648833344,
+        "external": 62328914,
+        "arrayBuffers": 8321061
+      },
+      "status": "end"
+    },
+    {
+      "name": "resolveAnalyzerRunnerIdentity",
+      "id": 19,
+      "start": 1793008333980,
+      "end": 1793008335067,
+      "wallMs": 1087.377332999953,
+      "parentCpuMs": 120.882,
+      "beginMemory": {
+        "rss": 1176272896,
+        "heapTotal": 1303429120,
+        "heapUsed": 608157416,
+        "external": 72894161,
+        "arrayBuffers": 94679
+      },
+      "endMemory": {
+        "rss": 1180663808,
+        "heapTotal": 1308688384,
+        "heapUsed": 665358984,
+        "external": 62328914,
+        "arrayBuffers": 8321061
+      },
+      "status": "end"
+    },
+    {
+      "name": "finalizeAnalyzerRunnerIdentity",
+      "id": 18,
+      "start": 1793008333979,
+      "end": 1793008335068,
+      "wallMs": 1088.7345839999616,
+      "parentCpuMs": 121.456,
+      "beginMemory": {
+        "rss": 1176207360,
+        "heapTotal": 1303429120,
+        "heapUsed": 608152120,
+        "external": 72894161,
+        "arrayBuffers": 94679
+      },
+      "endMemory": {
+        "rss": 1180516352,
+        "heapTotal": 1308688384,
+        "heapUsed": 665364816,
+        "external": 62328914,
+        "arrayBuffers": 8321061
+      },
+      "status": "end"
+    },
+    {
+      "name": "captureUnityInputSnapshot",
+      "id": 22,
+      "start": 1793008335068,
+      "end": 1793008400697,
+      "wallMs": 65630.06191699998,
+      "parentCpuMs": 170398.613,
+      "beginMemory": {
+        "rss": 1180467200,
+        "heapTotal": 1308688384,
+        "heapUsed": 665367776,
+        "external": 62328914,
+        "arrayBuffers": 8321061
+      },
+      "endMemory": {
+        "rss": 1150910464,
+        "heapTotal": 1073201152,
+        "heapUsed": 768138512,
+        "external": 82184585,
+        "arrayBuffers": 79706650
+      },
+      "status": "end"
+    },
+    {
+      "name": "registerRepo",
+      "id": 23,
+      "start": 1793008400699,
+      "end": 1793008400715,
+      "wallMs": 16.328000000095926,
+      "parentCpuMs": 7.791,
+      "beginMemory": {
+        "rss": 1151139840,
+        "heapTotal": 1073201152,
+        "heapUsed": 768145136,
+        "external": 82184585,
+        "arrayBuffers": 79706650
+      },
+      "endMemory": {
+        "rss": 1152876544,
+        "heapTotal": 1073201152,
+        "heapUsed": 640443360,
+        "external": 57604896,
+        "arrayBuffers": 55126961
+      },
+      "status": "end"
+    },
+    {
+      "name": "closeLbugBeforeExit",
+      "id": 24,
+      "start": 1793008400727,
+      "end": 1793008400745,
+      "wallMs": 17.558124999981374,
+      "parentCpuMs": 3.321,
+      "beginMemory": {
+        "rss": 1154285568,
+        "heapTotal": 1073201152,
+        "heapUsed": 641191104,
+        "external": 57620927,
+        "arrayBuffers": 55142992
+      },
+      "endMemory": {
+        "rss": 1154662400,
+        "heapTotal": 1073201152,
+        "heapUsed": 641203624,
+        "external": 57620927,
+        "arrayBuffers": 55142992
+      },
+      "status": "end"
+    },
+    {
+      "name": "saveMeta",
+      "id": 25,
+      "start": 1793008400793,
+      "end": 1793008401009,
+      "wallMs": 216.7479170000879,
+      "parentCpuMs": 184.819,
+      "beginMemory": {
+        "rss": 1201373184,
+        "heapTotal": 1089011712,
+        "heapUsed": 657431008,
+        "external": 65447717,
+        "arrayBuffers": 62969782
+      },
+      "endMemory": {
+        "rss": 1362591744,
+        "heapTotal": 1139458048,
+        "heapUsed": 708030464,
+        "external": 113505339,
+        "arrayBuffers": 111027404
+      },
+      "status": "end"
+    },
+    {
+      "name": "runFullAnalysis",
+      "id": 9,
+      "start": 1793007626297,
+      "end": 1793008402276,
+      "wallMs": 775972.940958,
+      "parentCpuMs": 1082673.434,
+      "beginMemory": {
+        "rss": 915652608,
+        "heapTotal": 770621440,
+        "heapUsed": 519178832,
+        "external": 2553389,
+        "arrayBuffers": 79831
+      },
+      "endMemory": {
+        "rss": 1361510400,
+        "heapTotal": 1056423936,
+        "heapUsed": 633267640,
+        "external": 141204814,
+        "arrayBuffers": 138726879
+      },
+      "status": "end"
+    }
+  ],
+  "note": "Top-level bins use epoch milliseconds; detailed spans use monotonic time. Nested spans are not summed. Parent CPU excludes child CPU. Boundary memory is not peak memory."
+}

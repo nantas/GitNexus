@@ -1,0 +1,507 @@
+{
+  "schemaVersion": 4,
+  "id": "neonspark-lazy-content-lines-20261027",
+  "status": "frozen-working-tree-reference-target-not-met",
+  "purpose": "Accepted lazy symbol-line preparation; restored target input; two candidate observations plus two controls",
+  "acceptedProductCommit": "bbf05f4eeb9630fecd531010edab9f1e7f674500",
+  "repositoryHead": "1c9138747f2533b1a2463a6128f0736aa5660807",
+  "sourceTree": null,
+  "trackedProductSourceClean": false,
+  "acceptedChanges": [
+    "Decode complete lines directly from resource chunks",
+    "Await per chunk and iterate resource lines synchronously within each chunk",
+    "Bounded File content prefetch preserving CSV semantics",
+    "Lazily prepare symbol lines; File-only rows retain full text without unused line arrays"
+  ],
+  "sourceFilesSha256": {
+    "gitnexus/src/core/unity/resource-lines.ts": "514e66104374a6282461276d4cfd85e7c09e9779b7ba8cf6d8503b1951e81f7f",
+    "gitnexus/src/core/unity/resource-discovery.ts": "b2a61a0c0db34ad1ef297cb7ad789b8e37641cbce325efc04f39ec0f922c2773",
+    "gitnexus/src/core/unity/resolver.ts": "a5e2e1f8444dd424ba2869366cc9c5c5799d8d6a2dc6d90b03a8423dab9d95e9",
+    "gitnexus/src/core/lbug/csv-generator.ts": "233143ba5e2d916a07227c70e761a6f65299d383a27014ac9ee7ec90f6ff451c"
+  },
+  "distFilesSha256": {
+    "core/unity/resource-lines.js": "9290320c168e0324019306da7b4ab1f289fa35585dc87462d58b2de973d9e07b",
+    "core/unity/resource-discovery.js": "5f990531b7ae3b6efe0805ca5de3623d13da2c35d1eccced58caf2639b67c104",
+    "core/unity/resolver.js": "9996e7a62fd0ee8273731dbacea4fc80b2c1a201f5d84ecd5d883c693cdcd819",
+    "core/lbug/csv-generator.js": "d84b45aee66cc2ee1f019c83cdd747fd743170b65b7843eb8bb2a1363984b615",
+    "core/unity/analysis-input-snapshot.js": "b53effe304db9be9249907fc18e99b74bfa87696a0925fe084de4a912a12ebb4",
+    "core/run-analyze.js": "5ded43d69676370eb84f11807b8693e5748697322297cf41dc4572e3b1738458"
+  },
+  "referenceRun": ".scratch/neonspark-architecture-restored-20261027/lazy-b2",
+  "referenceRunDate": "2026-10-27T02:41:07.376Z",
+  "targetCommit": "bcbf1f2e6562b4f81bdf72b92a4e33efe5ebb551",
+  "inputReceipt": {
+    "version": 1,
+    "digest": "98f5aeb099b688b8e5446339ad654923738f927eefb179392560501d756f2283",
+    "fileCount": 164034
+  },
+  "selection": {
+    "name": "neonspark42-core",
+    "includeExtensions": [
+      ".cs",
+      ".meta"
+    ],
+    "scopeRules": [
+      "Assets/",
+      "Packages/"
+    ],
+    "csharpDefineCsproj": "Assembly-CSharp.csproj"
+  },
+  "node": "v24.15.0",
+  "uvThreadpoolSize": "default",
+  "contentRetention": "full",
+  "ftsProfile": "full",
+  "coldDefinition": "Empty index and parser cache; OS cache not cleared",
+  "measurements": {
+    "elapsedMs": 446985,
+    "cpu": 866.7800000000001,
+    "peakGiB": 10.93148210644722,
+    "firstSnapshotMs": 37717,
+    "finalSnapshotMs": 67027,
+    "phases": [
+      {
+        "name": "scan",
+        "ms": 11162
+      },
+      {
+        "name": "structure",
+        "ms": 593
+      },
+      {
+        "name": "springConfig",
+        "ms": 24
+      },
+      {
+        "name": "markdown",
+        "ms": 5
+      },
+      {
+        "name": "cobol",
+        "ms": 58
+      },
+      {
+        "name": "parse",
+        "ms": 48461
+      },
+      {
+        "name": "routes",
+        "ms": 59
+      },
+      {
+        "name": "tools",
+        "ms": 3
+      },
+      {
+        "name": "orm",
+        "ms": 1
+      },
+      {
+        "name": "crossFile",
+        "ms": 2
+      },
+      {
+        "name": "scopeResolution",
+        "ms": 41805
+      },
+      {
+        "name": "springAutoConfiguration",
+        "ms": 38
+      },
+      {
+        "name": "springAop",
+        "ms": 0
+      },
+      {
+        "name": "springDestinations",
+        "ms": 27
+      },
+      {
+        "name": "pruneLocalSymbols",
+        "ms": 203
+      },
+      {
+        "name": "mro",
+        "ms": 285
+      },
+      {
+        "name": "springAopInheritance",
+        "ms": 48
+      },
+      {
+        "name": "di",
+        "ms": 20
+      },
+      {
+        "name": "communities",
+        "ms": 996
+      },
+      {
+        "name": "unity-resources",
+        "ms": 88771
+      },
+      {
+        "name": "unity-lifecycle",
+        "ms": 285
+      },
+      {
+        "name": "processes",
+        "ms": 439
+      },
+      {
+        "name": "unity-processes",
+        "ms": 161
+      },
+      {
+        "name": "unity-process-subtype",
+        "ms": 132
+      }
+    ]
+  },
+  "wallLedgerMs": {
+    "startup_before_first_snapshot_inferred": 2801,
+    "first_snapshot": 37717,
+    "snapshot_to_pipeline": 3,
+    "pipeline": 193990,
+    "pipeline_end_to_fts_start": 40846,
+    "fts_log_window": 96447,
+    "fts_end_to_final_snapshot_inferred": 6343,
+    "final_snapshot": 67027,
+    "post_revalidation_to_exit": 1811
+  },
+  "wallLedgerMethod": "Timestamped output-chunk boundaries; inferred residuals are not function attribution; sums to current reference wall",
+  "graphStats": {
+    "files": 137321,
+    "nodes": 278547,
+    "edges": 841787,
+    "communities": 7707,
+    "processes": 2378,
+    "embeddings": 0
+  },
+  "verification": {
+    "fileNodes": 155816,
+    "allCodeRelations": 841787,
+    "relatedUnityFacts": 361793,
+    "ftsReady": 22,
+    "actualFtsRecall": [
+      {
+        "kind": "english",
+        "query": "ColoredObjectManager",
+        "offset": 390
+      },
+      {
+        "kind": "chinese",
+        "query": "跳舞机交互物",
+        "offset": 462
+      },
+      {
+        "kind": "tail",
+        "query": "OnResetMachine",
+        "offset": 10262
+      }
+    ],
+    "currentSuccessfulFullRuns": 4,
+    "currentSourceRegressionTests": 85,
+    "compiledSmokeTests": 2,
+    "typecheck": true,
+    "officialBuild": true,
+    "officialCsvMatchesTestedJsIgnoringComments": true
+  },
+  "evidenceSha256": {
+    "invocation.json": "67f462843a0ca4ce7888bd458c4f0e9e717f41369c1549282eafdf53ac2bdcc4",
+    "result.json": "50275b43a0a22f12db0c4ccc46d1ceffac14109567e4ec58ebd3432bc62fa4c6",
+    "verified.json": "76d65a4d3e2899ff64b714aa1f1c69aae4d179e5999ba359c947251f5e28e656",
+    "file-content-hashes.json": "5062e5991be042de310a25ab74e3787bc045e26536052814d0c21cd2fb8e8959",
+    "all-relation-hashes.json": "302b4b24f2d36b5d9560ba7ade8b8e6625301a35024c8f6a602cf5e453156761",
+    "unity-parity-seed.json.gz": "93db4b6ce2ba5006ee8085a2cfb01e1f87e974b178a95979db09ce050194a2f8",
+    "fts-recall.json": "2226563faf61976b0dd4a2eb27de093d407919b7ff69409180bc25a5973b342a",
+    "semantic-comparison.json": "b0b015caea9e805d6540fb1932baf36c85a2b84f09dc863cc1fe056b0765617f",
+    "cleanup.json": "c203996b66929d8dc8639d47f542bf727876ad8f8c0e002742a0c25c04ccf172"
+  },
+  "databaseRetained": false,
+  "targetMs": 180000,
+  "limitations": [
+    "Working-tree source and built dist are on disk; no new commit/tag/global installation/publication",
+    "Two candidate observations, not a stable SLA or three-run 180s acceptance",
+    "OS caches/background load uncontrolled; observed ~23% paired wall reduction is not wholly attributable to this code",
+    "Earlier temporary-checkout runs and changed-input/aborted runs excluded from this comparison",
+    "One SIGINT cancellation ended in Napi::Error/SIGABRT; no core and original index preserved",
+    "No new full-repository suite or cross-platform run",
+    "All experiment databases/caches removed after evidence collection"
+  ],
+  "invocation": {
+    "args": [
+      "-l",
+      "$NODE24",
+      "--max-old-space-size=18432",
+      "--max-semi-space-size=128",
+      "--stack-size=4096",
+      "$GITNEXUS_REPO/.scratch/neonspark-architecture-restored-20261027/lazy/dist/cli/index.js",
+      "analyze",
+      "--force",
+      "--index-only",
+      "--verbose",
+      "--name",
+      "neonspark-performance",
+      "--scope",
+      "Assets/,Packages/",
+      "--extensions",
+      ".cs,.meta",
+      "--csharp-define-csproj",
+      "Assembly-CSharp.csproj"
+    ],
+    "env": {
+      "NODE_ENV": "development",
+      "VALIDATE_SEMANTIC_MODEL": "0",
+      "PROF_LBUG_LOAD": "0",
+      "PROF_SCOPE_RESOLUTION": "0",
+      "GITNEXUS_STORAGE_PATH": "$GITNEXUS_REPO/.scratch/neonspark-architecture-restored-20261027/lazy-b2/index",
+      "GITNEXUS_HOME": "$GITNEXUS_REPO/.scratch/neonspark-architecture-restored-20261027/lazy-b2/home"
+    }
+  },
+  "analysisInputFingerprint": "ade0229b325356c192a32ad8c85f900b85d4b8cdde20d5f80a912026ba6a8c82",
+  "indexCoverageSelection": {
+    "maxFileSizeBytes": 524288,
+    "scopeRules": [
+      "Assets/",
+      "Packages/"
+    ],
+    "includeExtensions": [
+      ".cs",
+      ".meta"
+    ],
+    "dirtyPaths": [
+      "Assets/NEON/Code/Framework/Login/DevLoginConfig.asset"
+    ]
+  },
+  "previousBaseline": "baseline-pre-architecture-20261027.json",
+  "repeatedDefaultRuns": [
+    {
+      "id": "lazy-b1",
+      "wallMs": 715251,
+      "cpuSec": 778.84,
+      "peakBytes": 13451873896,
+      "phases": {
+        "scan": 11105,
+        "structure": 551,
+        "springConfig": 23,
+        "markdown": 6,
+        "cobol": 50,
+        "parse": 37313,
+        "routes": 44,
+        "tools": 2,
+        "orm": 0,
+        "crossFile": 1,
+        "scopeResolution": 32573,
+        "springAutoConfiguration": 32,
+        "springAop": 1,
+        "springDestinations": 23,
+        "pruneLocalSymbols": 159,
+        "mro": 251,
+        "springAopInheritance": 40,
+        "di": 17,
+        "communities": 852,
+        "unity-resources": 265060,
+        "unity-lifecycle": 315,
+        "processes": 440,
+        "unity-processes": 136,
+        "unity-process-subtype": 122
+      },
+      "headAtVerification": "bcbf1f2e6562b4f81bdf72b92a4e33efe5ebb551",
+      "fullRelations": true,
+      "fullContents": true,
+      "fts": true,
+      "originalIndexPreserved": true
+    },
+    {
+      "id": "lazy-b2",
+      "wallMs": 446985,
+      "cpuSec": 866.7800000000001,
+      "peakBytes": 11737589536,
+      "phases": {
+        "scan": 11162,
+        "structure": 593,
+        "springConfig": 24,
+        "markdown": 5,
+        "cobol": 58,
+        "parse": 48461,
+        "routes": 59,
+        "tools": 3,
+        "orm": 1,
+        "crossFile": 2,
+        "scopeResolution": 41805,
+        "springAutoConfiguration": 38,
+        "springAop": 0,
+        "springDestinations": 27,
+        "pruneLocalSymbols": 203,
+        "mro": 285,
+        "springAopInheritance": 48,
+        "di": 20,
+        "communities": 996,
+        "unity-resources": 88771,
+        "unity-lifecycle": 285,
+        "processes": 439,
+        "unity-processes": 161,
+        "unity-process-subtype": 132
+      },
+      "headAtVerification": "bcbf1f2e6562b4f81bdf72b92a4e33efe5ebb551",
+      "fullRelations": true,
+      "fullContents": true,
+      "fts": true,
+      "originalIndexPreserved": true
+    }
+  ],
+  "defaultRunSummary": {
+    "count": 2,
+    "medianMs": 581118,
+    "minMs": 446985,
+    "maxMs": 715251,
+    "allWithinTarget": false,
+    "stableSla": false
+  },
+  "candidateDecisions": {
+    "lazyLines": {
+      "accepted": true,
+      "pairs": [
+        {
+          "control": "control-a1",
+          "candidate": "lazy-b1",
+          "wall": 0.7764382134075847,
+          "cpu": 0.9713038598241568,
+          "peak": 1.023203713915136,
+          "csv": 0.18190604317436754
+        },
+        {
+          "control": "control-a2",
+          "candidate": "lazy-b2",
+          "wall": 0.7705083629681598,
+          "cpu": 0.9708122395950004,
+          "peak": 0.9199950013225944,
+          "csv": 0.9036325826290872
+        }
+      ],
+      "meanWallRatio": 0.7734732881878723,
+      "meanCpuRatio": 0.9710580497095787,
+      "intervals": {
+        "control-a1": {
+          "firstSnapshotMs": 32161,
+          "finalSnapshotMs": 133267,
+          "csvAndInitMs": 258672,
+          "ftsMs": 57461
+        },
+        "lazy-b1": {
+          "firstSnapshotMs": 118445,
+          "finalSnapshotMs": 47421,
+          "csvAndInitMs": 47054,
+          "ftsMs": 97329
+        },
+        "lazy-b2": {
+          "firstSnapshotMs": 37717,
+          "finalSnapshotMs": 67027,
+          "csvAndInitMs": 40846,
+          "ftsMs": 96447
+        },
+        "control-a2": {
+          "firstSnapshotMs": 48132,
+          "finalSnapshotMs": 75325,
+          "csvAndInitMs": 45202,
+          "ftsMs": 145286
+        }
+      },
+      "notes": "CSV interval includes post-pipeline initialization and DB load; log-boundary timing, not isolated content preparation. All full semantic checks and 22 FTS ready passed."
+    },
+    "byteBudget": {
+      "accepted": false,
+      "reason": "Frozen sample reduced retained heap but added no throughput benefit; screening only"
+    },
+    "csharpStructureReuse": {
+      "accepted": false,
+      "reason": "Isolated 9218-file scanner cost ~1.06s; no justification for cross-stage protocol change"
+    }
+  },
+  "bufferPoolOverride": null,
+  "sourceTreeAtHead": "07b2d5ad8324f7fb5545f4494e3e61ff24584c95",
+  "acceptedUncommittedChanges": [
+    {
+      "file": "gitnexus/src/core/lbug/csv-generator.ts",
+      "description": "Prepare and cache lines only when exporting a symbol snippet",
+      "patch": "lazy-content-lines.patch",
+      "sha256": "6bb7af1d094b4f45416740a0a7080dbc6cad696cd09b0a9b252887f812d59bfd"
+    }
+  ],
+  "controlRuns": [
+    {
+      "id": "control-a1",
+      "wallMs": 921195,
+      "cpuSec": 801.8499999999999,
+      "peakBytes": 13146818872,
+      "phases": {
+        "scan": 11242,
+        "structure": 581,
+        "springConfig": 17,
+        "markdown": 3,
+        "cobol": 23,
+        "parse": 38728,
+        "routes": 51,
+        "tools": 2,
+        "orm": 1,
+        "crossFile": 2,
+        "scopeResolution": 39157,
+        "springAutoConfiguration": 51,
+        "springAop": 0,
+        "springDestinations": 34,
+        "pruneLocalSymbols": 372,
+        "mro": 598,
+        "springAopInheritance": 75,
+        "di": 28,
+        "communities": 2053,
+        "unity-resources": 294810,
+        "unity-lifecycle": 252,
+        "processes": 433,
+        "unity-processes": 154,
+        "unity-process-subtype": 135
+      },
+      "headAtVerification": "bcbf1f2e6562b4f81bdf72b92a4e33efe5ebb551",
+      "fullRelations": true,
+      "fullContents": true,
+      "fts": true,
+      "originalIndexPreserved": true
+    },
+    {
+      "id": "control-a2",
+      "wallMs": 580117,
+      "cpuSec": 892.8399999999999,
+      "peakBytes": 12758318816,
+      "phases": {
+        "scan": 12648,
+        "structure": 782,
+        "springConfig": 59,
+        "markdown": 8,
+        "cobol": 27,
+        "parse": 72324,
+        "routes": 47,
+        "tools": 2,
+        "orm": 0,
+        "crossFile": 6,
+        "scopeResolution": 52706,
+        "springAutoConfiguration": 29,
+        "springAop": 0,
+        "springDestinations": 26,
+        "pruneLocalSymbols": 161,
+        "mro": 353,
+        "springAopInheritance": 79,
+        "di": 27,
+        "communities": 1118,
+        "unity-resources": 109049,
+        "unity-lifecycle": 440,
+        "processes": 467,
+        "unity-processes": 170,
+        "unity-process-subtype": 156
+      },
+      "headAtVerification": "bcbf1f2e6562b4f81bdf72b92a4e33efe5ebb551",
+      "fullRelations": true,
+      "fullContents": true,
+      "fts": true,
+      "originalIndexPreserved": true
+    }
+  ]
+}

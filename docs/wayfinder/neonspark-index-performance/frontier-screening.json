@@ -1,0 +1,322 @@
+{
+  "budget": {
+    "files": 3059,
+    "total": {
+      "bytes": 4812344180,
+      "lines": 165369831,
+      "kept": 3394224,
+      "projectedBytes": 164370864
+    },
+    "elapsedMs": 22924.160959
+  },
+  "equivalence": {
+    "files": 3059,
+    "totals": {
+      "sourceBytes": 4812344180,
+      "projectionRows": 3394224,
+      "originalMs": 20729.123226999898,
+      "projectedMs": 1139.6632000002246,
+      "bindings": 60023,
+      "projectionBuildMs": 20062.064791
+    },
+    "metrics": {
+      "peakMemoryBytes": 1035498,
+      "writtenBytes": 165161877,
+      "readBytes": 165161877,
+      "writeMs": 261.6290090000058,
+      "readMs": 23.304553000354645
+    },
+    "originalHash": "432b70b0a2844c8a52ffadd3bf98d58d3a73b5fa0d616affa1fd163c237464ed",
+    "projectedHash": "432b70b0a2844c8a52ffadd3bf98d58d3a73b5fa0d616affa1fd163c237464ed",
+    "elapsedMs": 42099.250332999996,
+    "note": "Full selected-large-resource binding/evidence equality; ordered projection spool <=1MiB retained record budget plus <=one 256KiB line/chunk. Timing is screening, not full-build A/B."
+  },
+  "poolSix": {
+    "id": "fts-pool-6a",
+    "poolBytes": 6442450944,
+    "openMs": 520.3935829999999,
+    "ftsMs": 61976.413417,
+    "cpu": {
+      "user": 91671420,
+      "system": 15747794
+    },
+    "before": [
+      {
+        "rows": 155808,
+        "chars": "979237670"
+      }
+    ],
+    "smokeCounts": {
+      "MonoBehaviour": 20,
+      "guid": 20,
+      "按钮": 12
+    },
+    "events": [
+      {
+        "event": "start",
+        "table": "File",
+        "indexName": "file_fts",
+        "ms": 0.2575000000001637
+      },
+      {
+        "event": "ready",
+        "table": "File",
+        "indexName": "file_fts",
+        "ms": 47335.610292
+      },
+      {
+        "event": "start",
+        "table": "Function",
+        "indexName": "function_fts",
+        "ms": 47335.632542
+      },
+      {
+        "event": "ready",
+        "table": "Function",
+        "indexName": "function_fts",
+        "ms": 47841.968667
+      },
+      {
+        "event": "start",
+        "table": "Class",
+        "indexName": "class_fts",
+        "ms": 47841.97525
+      },
+      {
+        "event": "ready",
+        "table": "Class",
+        "indexName": "class_fts",
+        "ms": 50683.183459
+      },
+      {
+        "event": "start",
+        "table": "Protocol",
+        "indexName": "protocol_fts",
+        "ms": 50683.198292
+      },
+      {
+        "event": "ready",
+        "table": "Protocol",
+        "indexName": "protocol_fts",
+        "ms": 51069.976292
+      },
+      {
+        "event": "start",
+        "table": "Category",
+        "indexName": "category_fts",
+        "ms": 51069.979209
+      },
+      {
+        "event": "ready",
+        "table": "Category",
+        "indexName": "category_fts",
+        "ms": 51369.852542
+      },
+      {
+        "event": "start",
+        "table": "Method",
+        "indexName": "method_fts",
+        "ms": 51369.856667
+      },
+      {
+        "event": "ready",
+        "table": "Method",
+        "indexName": "method_fts",
+        "ms": 55379.53875
+      },
+      {
+        "event": "start",
+        "table": "Interface",
+        "indexName": "interface_fts",
+        "ms": 55379.547375
+      },
+      {
+        "event": "ready",
+        "table": "Interface",
+        "indexName": "interface_fts",
+        "ms": 55705.293834
+      },
+      {
+        "event": "start",
+        "table": "Constructor",
+        "indexName": "constructor_fts",
+        "ms": 55705.297042
+      },
+      {
+        "event": "ready",
+        "table": "Constructor",
+        "indexName": "constructor_fts",
+        "ms": 56125.172375
+      },
+      {
+        "event": "start",
+        "table": "Struct",
+        "indexName": "struct_fts",
+        "ms": 56125.175125
+      },
+      {
+        "event": "ready",
+        "table": "Struct",
+        "indexName": "struct_fts",
+        "ms": 56605.29775
+      },
+      {
+        "event": "start",
+        "table": "Enum",
+        "indexName": "enum_fts",
+        "ms": 56605.327292
+      },
+      {
+        "event": "ready",
+        "table": "Enum",
+        "indexName": "enum_fts",
+        "ms": 57090.947084
+      },
+      {
+        "event": "start",
+        "table": "Trait",
+        "indexName": "trait_fts",
+        "ms": 57090.95125
+      },
+      {
+        "event": "ready",
+        "table": "Trait",
+        "indexName": "trait_fts",
+        "ms": 57348.556
+      },
+      {
+        "event": "start",
+        "table": "Impl",
+        "indexName": "impl_fts",
+        "ms": 57348.55825
+      },
+      {
+        "event": "ready",
+        "table": "Impl",
+        "indexName": "impl_fts",
+        "ms": 57588.022709
+      },
+      {
+        "event": "start",
+        "table": "Macro",
+        "indexName": "macro_fts",
+        "ms": 57588.036709
+      },
+      {
+        "event": "ready",
+        "table": "Macro",
+        "indexName": "macro_fts",
+        "ms": 57819.427959
+      },
+      {
+        "event": "start",
+        "table": "Namespace",
+        "indexName": "namespace_fts",
+        "ms": 57819.433
+      },
+      {
+        "event": "ready",
+        "table": "Namespace",
+        "indexName": "namespace_fts",
+        "ms": 59781.236750000004
+      },
+      {
+        "event": "start",
+        "table": "TypeAlias",
+        "indexName": "type_alias_fts",
+        "ms": 59781.238417
+      },
+      {
+        "event": "ready",
+        "table": "TypeAlias",
+        "indexName": "type_alias_fts",
+        "ms": 60011.341042
+      },
+      {
+        "event": "start",
+        "table": "Typedef",
+        "indexName": "typedef_fts",
+        "ms": 60011.342875
+      },
+      {
+        "event": "ready",
+        "table": "Typedef",
+        "indexName": "typedef_fts",
+        "ms": 60232.987042
+      },
+      {
+        "event": "start",
+        "table": "Const",
+        "indexName": "const_fts",
+        "ms": 60232.989125
+      },
+      {
+        "event": "ready",
+        "table": "Const",
+        "indexName": "const_fts",
+        "ms": 60440.513209
+      },
+      {
+        "event": "start",
+        "table": "Property",
+        "indexName": "property_fts",
+        "ms": 60440.515625
+      },
+      {
+        "event": "ready",
+        "table": "Property",
+        "indexName": "property_fts",
+        "ms": 60964.74125
+      },
+      {
+        "event": "start",
+        "table": "Record",
+        "indexName": "record_fts",
+        "ms": 60964.743917
+      },
+      {
+        "event": "ready",
+        "table": "Record",
+        "indexName": "record_fts",
+        "ms": 61232.956
+      },
+      {
+        "event": "start",
+        "table": "Union",
+        "indexName": "union_fts",
+        "ms": 61232.957875
+      },
+      {
+        "event": "ready",
+        "table": "Union",
+        "indexName": "union_fts",
+        "ms": 61461.331292
+      },
+      {
+        "event": "start",
+        "table": "Static",
+        "indexName": "static_fts",
+        "ms": 61461.333
+      },
+      {
+        "event": "ready",
+        "table": "Static",
+        "indexName": "static_fts",
+        "ms": 61683.280375
+      },
+      {
+        "event": "start",
+        "table": "Variable",
+        "indexName": "variable_fts",
+        "ms": 61683.282209
+      },
+      {
+        "event": "ready",
+        "table": "Variable",
+        "indexName": "variable_fts",
+        "ms": 61976.400917
+      }
+    ]
+  },
+  "sourceRoot": ".scratch/neonspark-accounting-20261026"
+}

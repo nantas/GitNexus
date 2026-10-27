@@ -1,0 +1,282 @@
+{
+  "schemaVersion": 1,
+  "id": "neonspark-code-resource-split-20261027",
+  "status": "diagnostic-capability-baseline-not-optimization",
+  "targetHead": "bcbf1f2e6562b4f81bdf72b92a4e33efe5ebb551",
+  "node": "v24.15.0",
+  "sourceBaseline": "baseline-current.json",
+  "sourceBaselineSha256": "8bfaf813c2a706e2109154aec0af959c417ae6e971399d3be951a5d04153d076",
+  "coldDefinition": "Empty index and parser cache; OS caches not cleared",
+  "capabilities": {
+    "code": "C# scoped sources plus project/namespace dependencies, full code content/FTS, MRO/community/process and code-derived Unity lifecycle; no Unity resource or meta ingestion",
+    "full": "Current baseline .cs,.meta plus Unity resource analysis and resource File content/FTS"
+  },
+  "codeBaseline": {
+    "runs": [
+      {
+        "wallMs": 532036,
+        "cpuSec": 489.32,
+        "peakBytes": 5520290600,
+        "firstSnapshotMs": 79599,
+        "finalSnapshotMs": 93969,
+        "phases": {
+          "scan": 16304,
+          "structure": 30,
+          "springConfig": 3,
+          "markdown": 0,
+          "cobol": 2,
+          "parse": 64374,
+          "routes": 5,
+          "tools": 0,
+          "orm": 0,
+          "crossFile": 3,
+          "scopeResolution": 122874,
+          "springAutoConfiguration": 1,
+          "springAop": 0,
+          "springDestinations": 2,
+          "pruneLocalSymbols": 192,
+          "mro": 316,
+          "springAopInheritance": 64,
+          "di": 21,
+          "communities": 1047,
+          "unity-resources": 0,
+          "unity-lifecycle": 220,
+          "processes": 443,
+          "unity-processes": 190,
+          "unity-process-subtype": 161
+        },
+        "stats": {
+          "files": 9281,
+          "nodes": 129649,
+          "edges": 362723,
+          "communities": 7707,
+          "processes": 2378,
+          "embeddings": 0
+        },
+        "receipt": {
+          "version": 1,
+          "digest": "bdfdd0fa109add71edd98f5870f4793bd25368a81218b7fc194ec543da85e68e",
+          "fileCount": 16384
+        },
+        "fileCount": 9281,
+        "relationCount": 362723,
+        "codeSymbols": {
+          "count": 109638,
+          "sha256": "131e6363eb7f87110af2939683769ffe3ea11ad397ca493bcd4248ff42e1d705"
+        },
+        "ioApiCalls": {},
+        "ftsReady": 22,
+        "id": "code-a1",
+        "ledger": {
+          "startupBeforeSnapshot": 48929,
+          "firstSnapshot": 79599,
+          "snapshotToPipeline": 3,
+          "pipeline": 208206,
+          "csvInitCopy": 23943,
+          "fts": 16847,
+          "afterFtsBeforeFinalSnapshot": 59457,
+          "finalSnapshot": 93969,
+          "afterFinalSnapshotToExit": 1083
+        }
+      },
+      {
+        "wallMs": 154657,
+        "cpuSec": 409.85,
+        "peakBytes": 5258742680,
+        "firstSnapshotMs": 14221,
+        "finalSnapshotMs": 14746,
+        "phases": {
+          "scan": 12093,
+          "structure": 24,
+          "springConfig": 2,
+          "markdown": 0,
+          "cobol": 1,
+          "parse": 39420,
+          "routes": 12,
+          "tools": 0,
+          "orm": 0,
+          "crossFile": 2,
+          "scopeResolution": 35696,
+          "springAutoConfiguration": 2,
+          "springAop": 0,
+          "springDestinations": 2,
+          "pruneLocalSymbols": 177,
+          "mro": 251,
+          "springAopInheritance": 51,
+          "di": 19,
+          "communities": 966,
+          "unity-resources": 0,
+          "unity-lifecycle": 199,
+          "processes": 397,
+          "unity-processes": 149,
+          "unity-process-subtype": 135
+        },
+        "stats": {
+          "files": 9281,
+          "nodes": 129649,
+          "edges": 362723,
+          "communities": 7707,
+          "processes": 2378,
+          "embeddings": 0
+        },
+        "receipt": {
+          "version": 1,
+          "digest": "bdfdd0fa109add71edd98f5870f4793bd25368a81218b7fc194ec543da85e68e",
+          "fileCount": 16384
+        },
+        "fileCount": 9281,
+        "relationCount": 362723,
+        "codeSymbols": {
+          "count": 109638,
+          "sha256": "131e6363eb7f87110af2939683769ffe3ea11ad397ca493bcd4248ff42e1d705"
+        },
+        "ioApiCalls": {
+          "": 27,
+          ".csproj": 1531,
+          ".cs": 133068,
+          ".json": 1
+        },
+        "ftsReady": 22,
+        "id": "code-a2",
+        "ledger": {
+          "startupBeforeSnapshot": 2793,
+          "firstSnapshot": 14221,
+          "snapshotToPipeline": 11,
+          "pipeline": 90457,
+          "csvInitCopy": 9942,
+          "fts": 17928,
+          "afterFtsBeforeFinalSnapshot": 3626,
+          "finalSnapshot": 14746,
+          "afterFinalSnapshotToExit": 933
+        }
+      }
+    ],
+    "wallRangeMs": [
+      154657,
+      532036
+    ],
+    "medianWallMs": 343346.5,
+    "referenceRun": "code-a2",
+    "receipt": {
+      "version": 1,
+      "digest": "bdfdd0fa109add71edd98f5870f4793bd25368a81218b7fc194ec543da85e68e",
+      "fileCount": 16384
+    },
+    "repeatInputsAndGraphAndContentEqual": true
+  },
+  "fullBaseline": {
+    "wallMs": 879226,
+    "cpuSec": 799.52,
+    "peakBytes": 12863878048,
+    "firstSnapshotMs": 469993,
+    "finalSnapshotMs": 49083,
+    "phases": {
+      "scan": 23531,
+      "structure": 546,
+      "springConfig": 17,
+      "markdown": 3,
+      "cobol": 25,
+      "parse": 47503,
+      "routes": 100,
+      "tools": 5,
+      "orm": 0,
+      "crossFile": 4,
+      "scopeResolution": 37040,
+      "springAutoConfiguration": 33,
+      "springAop": 1,
+      "springDestinations": 24,
+      "pruneLocalSymbols": 174,
+      "mro": 247,
+      "springAopInheritance": 37,
+      "di": 18,
+      "communities": 865,
+      "unity-resources": 76576,
+      "unity-lifecycle": 214,
+      "processes": 466,
+      "unity-processes": 149,
+      "unity-process-subtype": 151
+    },
+    "stats": {
+      "files": 137321,
+      "nodes": 278547,
+      "edges": 841787,
+      "communities": 7707,
+      "processes": 2378,
+      "embeddings": 0
+    },
+    "receipt": {
+      "version": 1,
+      "digest": "98f5aeb099b688b8e5446339ad654923738f927eefb179392560501d756f2283",
+      "fileCount": 164034
+    },
+    "fileCount": 155816,
+    "relationCount": 841787,
+    "codeSymbols": {
+      "count": 109638,
+      "sha256": "131e6363eb7f87110af2939683769ffe3ea11ad397ca493bcd4248ff42e1d705"
+    },
+    "ioApiCalls": {
+      "": 27,
+      ".csproj": 1531,
+      ".cs": 150895,
+      ".meta": 668764,
+      ".asset": 98015,
+      ".prefab": 67109,
+      ".unity": 678,
+      ".json": 2
+    },
+    "ftsReady": 22,
+    "ledger": {
+      "startupBeforeSnapshot": 51370,
+      "firstSnapshot": 469993,
+      "snapshotToPipeline": 3,
+      "pipeline": 188071,
+      "csvInitCopy": 31002,
+      "fts": 53490,
+      "afterFtsBeforeFinalSnapshot": 34622,
+      "finalSnapshot": 49083,
+      "afterFinalSnapshotToExit": 1592
+    },
+    "historicalInputContentAndAllRelationsEqual": true
+  },
+  "commonCode": {
+    "fileContentEqual": true,
+    "selectedSymbolRowsEqual": true
+  },
+  "evidenceRoot": ".scratch/neonspark-code-resource-20261027",
+  "artifacts": {
+    "code-a1": {
+      "verified.json": "634bae309d53e54634876afed758ab30c79623cd885e47073b85a1a3112fe490",
+      "ledger.json": "23453230a51f7084b3935e5626e96fda8b29550962040c6fe07d568becbdba1f",
+      "invocation.json": "a835e6f5465021a82620d06b9b59fc240d8650c1e10c34a3383d8031683f632d",
+      "cleanup.json": "e646278fa3655caaa9be30887bb9f4748f7b573f9700570f55d3befb4af43d57",
+      "code-symbols.json": "76fd7ead834a24cbe7a87657abebe05b25e9c66cf9bab17ff314d94f2459d2ab",
+      "input-hashes.json": "27e42783762f514ad443c1c890631d00ccf93bda5b1e54453a02ff61ff2246f7"
+    },
+    "full-b1": {
+      "verified.json": "928a5715514657cc6a4c98d3df84fb85f9dbfe4488ae9785738eba9a713c9bd2",
+      "ledger.json": "a6b274583e6fb835e5c78fbfdd76fd522d8cb570944189cd1cc2515feb79ebde",
+      "invocation.json": "258ce9304c1139513ec71e70e5f132bf4b810607c03e9ce6cdd56aff03b9a439",
+      "cleanup.json": "e69ade3a4ad82e809681daa4ac14eac18902a83f6d4b61d07ac326ecd555d046",
+      "code-symbols.json": "76fd7ead834a24cbe7a87657abebe05b25e9c66cf9bab17ff314d94f2459d2ab",
+      "input-hashes.json": "57d6d7cb68b8a7aa8915194eeae23d22aa588067782425802cabba39958a3510"
+    },
+    "code-a2": {
+      "verified.json": "8326b1d3a5222a85f2dc100eff575d02fb73540c2fc27f33325dfbb43f238b1d",
+      "ledger.json": "a08a8de5016dc256142c046dda8130351fb0ff4787628a73079a8f1214e1101d",
+      "invocation.json": "824614d72107cd02d91fe260fdde5836a0ffb7cac8fe7bcf4811d26983456b69",
+      "cleanup.json": "70397fe76ebc938f8c57cbb34bf7090d1ae244ec22ace9136f04943aa1b70b42",
+      "code-symbols.json": "76fd7ead834a24cbe7a87657abebe05b25e9c66cf9bab17ff314d94f2459d2ab",
+      "input-hashes.json": "27e42783762f514ad443c1c890631d00ccf93bda5b1e54453a02ff61ff2246f7"
+    }
+  },
+  "limitations": [
+    "Two code runs and one full run; no stable SLA or causal speedup estimate",
+    "Capability sets differ; total wall subtraction is not isolated resource parsing time",
+    "Code-a1 I/O guard did not cover canonical filesystem path; code-a2 and full-b1 do; diagnostic hook overhead differs",
+    "Phase boundaries from logged output chunks; residuals not attributed to individual functions",
+    "Existing namespace and process truncation semantics retained",
+    "No product implementation changed; experiments include temporary isolated dist patches",
+    "Initial missing vendor startup failure retained separately; not a benchmark sample"
+  ]
+}

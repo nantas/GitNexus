@@ -1,0 +1,69 @@
+diff --git a/gitnexus/src/core/lbug/csv-generator.ts b/gitnexus/src/core/lbug/csv-generator.ts
+index c8c3b07c..2e1b27ab 100644
+--- a/gitnexus/src/core/lbug/csv-generator.ts
++++ b/gitnexus/src/core/lbug/csv-generator.ts
+@@ -192,7 +192,7 @@ export const isBinaryContent = (content: string): boolean => {
+ 
+ interface PreparedFileContent {
+   readonly content: string;
+-  readonly lines: string[];
++  lines?: string[];
+   readonly isBinary: boolean;
+ }
+ 
+@@ -236,7 +236,6 @@ export class FileContentCache {
+       const content = await fs.readFile(fullPath, 'utf-8');
+       const prepared: PreparedFileContent = {
+         content,
+-        lines: content.split('\n'),
+         isBinary: isBinaryContent(content),
+       };
+       this.set(relativePath, prepared);
+@@ -248,7 +247,7 @@ export class FileContentCache {
+   }
+ 
+   setForTest(key: string, content: string): void {
+-    this.set(key, { content, lines: content.split('\n'), isBinary: isBinaryContent(content) });
++    this.set(key, { content, isBinary: isBinaryContent(content) });
+   }
+   hasForTest(key: string): boolean {
+     return this.cache.has(key);
+@@ -343,7 +342,7 @@ const extractContent = async (
+   const endLine = node.properties.endLine;
+   if (startLine === undefined || endLine === undefined) return '';
+ 
+-  const lines = prepared.lines;
++  const lines = prepared.lines ??= content.split('\n');
+   const exactSymbolContent = EXACT_SYMBOL_CONTENT_LABELS.has(node.label);
+   const start = Math.max(0, exactSymbolContent ? startLine : startLine - 2);
+   const end = Math.min(lines.length - 1, exactSymbolContent ? endLine : endLine + 2);
+diff --git a/gitnexus/test/integration/csv-resource-content-budget.test.ts b/gitnexus/test/integration/csv-resource-content-budget.test.ts
+index ef50acf5..7e88ac59 100644
+--- a/gitnexus/test/integration/csv-resource-content-budget.test.ts
++++ b/gitnexus/test/integration/csv-resource-content-budget.test.ts
+@@ -14,6 +14,25 @@ afterEach(async () => {
+ });
+ 
+ describe('resource File content respects the scan size budget', () => {
++  it('exports full File text without preparing unused symbol lines', async () => {
++    root = await fs.mkdtemp(path.join(os.tmpdir(), 'gn-content-lazy-lines-'));
++    const content = '资源内容\r\n'.repeat(2000) + 'tail-marker';
++    await fs.writeFile(path.join(root, 'resource.asset'), content);
++    const originalSplit = String.prototype.split;
++    let sourceSplits = 0;
++    const spy = vi.spyOn(String.prototype, 'split').mockImplementation(function (separator: any, limit?: number) {
++      if (String(this) === content && separator === '\n') sourceSplits++;
++      return originalSplit.call(this, separator, limit);
++    });
++    const result = await streamAllCSVsToDisk(buildTestGraph([
++      { id: 'File:resource.asset', label: 'File', name: 'resource.asset', filePath: 'resource.asset' },
++    ]), root, path.join(root, 'csv'));
++    spy.mockRestore();
++    expect(sourceSplits).toBe(0);
++    const csv = await fs.readFile(result.nodeFiles.get('File')!.csvPath, 'utf8');
++    expect(csv).toContain(content.replace(/[\r\n\t]+/g, ' '));
++  });
++
+   it('overlaps bounded file reads while preserving CSV row order and content', async () => {
+     vi.stubEnv('GITNEXUS_MAX_FILE_SIZE', '512');
+     root = await fs.mkdtemp(path.join(os.tmpdir(), 'gn-content-prefetch-'));

@@ -1,0 +1,108 @@
+{
+  "version": "1.6.13",
+  "status": "locally-validated-not-published",
+  "performanceReference": "../wayfinder/neonspark-index-performance/baseline-current.json",
+  "performanceRemeasured": false,
+  "sourceFilesSha256": {
+    "gitnexus/src/core/unity/resource-lines.ts": "514e66104374a6282461276d4cfd85e7c09e9779b7ba8cf6d8503b1951e81f7f",
+    "gitnexus/src/core/unity/resource-discovery.ts": "b2a61a0c0db34ad1ef297cb7ad789b8e37641cbce325efc04f39ec0f922c2773",
+    "gitnexus/src/core/unity/resolver.ts": "a5e2e1f8444dd424ba2869366cc9c5c5799d8d6a2dc6d90b03a8423dab9d95e9",
+    "gitnexus/src/core/lbug/csv-generator.ts": "9d04546a2451a4f9fff7b6e17c039e822b6c9fa76b8d493dd2d022935f7294c6",
+    "gitnexus/src/core/ingestion/language-config.ts": "ba080eb8e8b40c2577b9a3a0b6b898cd141752e8709810733e49365412fe2704",
+    "gitnexus/src/core/ingestion/languages/csharp.ts": "0aa24a939a1a0f5946c745d7c2fb5c1b74f093bdcc2f4a3ad3b14992ae202678",
+    "gitnexus/src/core/ingestion/languages/csharp/captures.ts": "1b115b5f8634fd24776405b9facb6a4d87a3e829424e7b086a03f8bd681f4cd3",
+    "gitnexus/src/core/ingestion/languages/csharp/import-target.ts": "356657a151e452486dd49050000cfebeb390e131a43e47a691d4d73ea416f594",
+    "gitnexus/src/core/ingestion/languages/csharp/import-declarations.ts": "b964c7dc9030f737c45b21aa8237db038e3c61370e459b11e615ea05b4d18963",
+    "gitnexus/src/core/ingestion/languages/csharp/resolution-config.ts": "62ad4f58fa11e5e5ff00086ab4893971225c2d5d2080914c81f7f66e062860a4",
+    "gitnexus/src/core/ingestion/languages/csharp/scope-resolver.ts": "4d302479ec18a8c233ec3c424a583eeb252300e06ae071caeec49fbac7fc8387",
+    "gitnexus/src/core/unity/analysis-input-snapshot.ts": "d76787dbaa8a899e653aef5c12bd35170015699bec20617b10f53877314707ad",
+    "gitnexus/src/storage/parse-cache.ts": "d27ca8281950bc3981927d73d5cc55da4fdc6c5a21bde3c248a9fc6713a2fe72"
+  },
+  "distFilesSha256": {
+    "core/unity/resource-lines.js": "9290320c168e0324019306da7b4ab1f289fa35585dc87462d58b2de973d9e07b",
+    "core/unity/resource-discovery.js": "5f990531b7ae3b6efe0805ca5de3623d13da2c35d1eccced58caf2639b67c104",
+    "core/unity/resolver.js": "9996e7a62fd0ee8273731dbacea4fc80b2c1a201f5d84ecd5d883c693cdcd819",
+    "core/lbug/csv-generator.js": "e8d54c0bf87fe02aec95f70677885466eabc9780860fe0745ebd8128542e2ea3",
+    "core/unity/analysis-input-snapshot.js": "a3e7a7684ddfac864719089137023ecbfc77c23da590df11a7ea748b4907b33f",
+    "core/run-analyze.js": "5ded43d69676370eb84f11807b8693e5748697322297cf41dc4572e3b1738458",
+    "core/ingestion/language-config.js": "bad65ea5c336fb576723931d34eeaf99f71f2b6ffdedaeef72797f6982ac0882",
+    "core/ingestion/languages/csharp.js": "9835235301dd9ea9c536a2ca4b043dc5c03cdf74b742137b9347583c4dd54acb",
+    "core/ingestion/languages/csharp/captures.js": "96475e1e6eebfd71c8ed49d59bc97586117853631bddff0ea73649be8895a950",
+    "core/ingestion/languages/csharp/import-target.js": "bf0464b8ffb2670482406463071acdbd2d76d27ab14c0275b4b3478942dc8d28",
+    "core/ingestion/languages/csharp/import-declarations.js": "90aebe76e8186f761f1c3c6c88662910171c2dfb931ec8f444b99b73eff66649",
+    "core/ingestion/languages/csharp/resolution-config.js": "349d6fefab36a467f71e5c78cf06d3108df2f32060f5b8fc2cd40c37c9ec1506",
+    "core/ingestion/languages/csharp/scope-resolver.js": "c32ab8a271de434efcfe9b8304093bcdfe31781f36c53b06b8518a25860babea",
+    "storage/parse-cache.js": "2f2bffd0c0b6f01b99e05e9a0db8c716eae7cabbc0e7239cd089ca15c8fe8b20"
+  },
+  "package": {
+    "filename": "veewo-gitnexus-1.6.13.tgz",
+    "size": 21416965,
+    "unpackedSize": 236128410,
+    "entryCount": 2880,
+    "integrity": "sha512-hdjzDWeJaxMrW9808gV9FGfPJc7cEKqKUVCyiv3m3y9AXBhHAGYVnsquc9r5CRGkdgFpNfYN5s9m8j7fTQ8S9w==",
+    "shasum": "4a1ad090733b426f6786c8287dcf06d31676b99a"
+  },
+  "packageSha256": "0764f743c44cdf801f2ac72a619bdb10d8aee228ad5ac71d7e439312a06af557",
+  "checks": {
+    "node": "24.15.0",
+    "compiledTests": {
+      "passed": 209,
+      "failed": 0
+    },
+    "packedSmoke": {
+      "version": "1.6.13",
+      "cold": true,
+      "ignoredSourceNoop": true,
+      "warm": true,
+      "scopedImports": true,
+      "fts": true,
+      "imports": [
+        {
+          "source": "Assets/Consumer.cs",
+          "target": "Assets/Vendor/Logging/Logger.cs"
+        }
+      ]
+    },
+    "fullSuite": {
+      "command": "GITNEXUS_E2E_CLI=dist npm test",
+      "passed": 22080,
+      "skipped": 83,
+      "failed": 0,
+      "filesPassed": 1116,
+      "filesSkipped": 13,
+      "durationSeconds": 1008.52,
+      "exitCode": 0
+    },
+    "typecheck": "passed",
+    "webBuild": "passed",
+    "grammarCoverage": 8,
+    "webAssetReferences": 24,
+    "packageContent": {
+      "verifiedPackageFiles": 2880,
+      "allMatchBuild": true,
+      "removed": [
+        "unpacked",
+        "smoke-index"
+      ],
+      "reclaimedLogicalBytes": 244251095,
+      "tarballRetained": true
+    },
+    "format": "passed",
+    "pluginVersionSync": "passed",
+    "releasePathHygiene": "passed",
+    "graphChangeAnalysis": "unresolved-stale-index",
+    "logsSha256": {
+      "npm-test-final.log": "4c1bd60b1bce67f43defd1523a2fc0fa57b056ffff476ffb401a107938e8f4dc",
+      "node-tests.log": "26061e204b84c0e1548b495bb5ab9dc795987a47c384c85ec274e0fe6cbeafad",
+      "final-build.log": "dce7ed4e81b7b9304ddd3db1c1b6b014cba3aecb7063b27442890905302cafd7",
+      "packed-smoke.json": "40ab6ff1870cfc9c4478fdb889cf4cefd9100c5e74a1d960cda3db4bac62774b",
+      "package-content-cleanup.json": "6abc9b609717e1483f58253e0dc814c6ac2ddbdbe1ac05110084084f0a821197"
+    }
+  },
+  "limitations": [
+    "Automatic publish workflow still uses Node 20; package requires ^22.18.0 || >=24.11.0.",
+    "Repository graph is stale; detect-changes did not cover edited symbols.",
+    "No new full neonspark performance measurement for the version bump."
+  ],
+  "sourceCommit": "5c9adf9d1bb5474eac5d8fa99de386f72f2fd3b2"
+}

@@ -1,0 +1,373 @@
+{
+  "date": "2026-10-27",
+  "runs": {
+    "code-a1": {
+      "accepted": true,
+      "wallMs": 152257,
+      "cpuSec": 407.43,
+      "peakBytes": 5484033696,
+      "firstSnapshotMs": 14306,
+      "finalSnapshotMs": 14329,
+      "phases": {
+        "scan": 15114,
+        "structure": 28,
+        "springConfig": 2,
+        "markdown": 0,
+        "cobol": 2,
+        "parse": 44472,
+        "routes": 5,
+        "tools": 0,
+        "orm": 0,
+        "crossFile": 2,
+        "scopeResolution": 32047,
+        "springAutoConfiguration": 1,
+        "springAop": 0,
+        "springDestinations": 2,
+        "pruneLocalSymbols": 137,
+        "mro": 231,
+        "springAopInheritance": 39,
+        "di": 15,
+        "communities": 812,
+        "unity-resources": 0,
+        "unity-lifecycle": 216,
+        "processes": 837,
+        "unity-processes": 228,
+        "unity-process-subtype": 107
+      },
+      "stats": {
+        "files": 9281,
+        "nodes": 129649,
+        "edges": 362723,
+        "communities": 7707,
+        "processes": 2378,
+        "embeddings": 0
+      },
+      "receipt": {
+        "version": 1,
+        "digest": "bdfdd0fa109add71edd98f5870f4793bd25368a81218b7fc194ec543da85e68e",
+        "fileCount": 16384
+      },
+      "ioApiCalls": {
+        "": 27,
+        ".csproj": 1531,
+        ".cs": 133068,
+        ".json": 1
+      },
+      "ftsReady": 22,
+      "cleanup": {
+        "bytes": 1788048809,
+        "reason": "facts and FTS verified, original index untouched"
+      }
+    },
+    "code-b1": {
+      "accepted": false,
+      "wallMs": 145528,
+      "cpuSec": 377.17,
+      "peakBytes": 5247549288,
+      "firstSnapshotMs": 12318,
+      "finalSnapshotMs": 13181,
+      "phases": {
+        "scan": 10233,
+        "structure": 25,
+        "springConfig": 1,
+        "markdown": 0,
+        "cobol": 2,
+        "parse": 45214,
+        "routes": 4,
+        "tools": 1,
+        "orm": 0,
+        "crossFile": 1,
+        "scopeResolution": 31357,
+        "springAutoConfiguration": 2,
+        "springAop": 0,
+        "springDestinations": 2,
+        "pruneLocalSymbols": 143,
+        "mro": 236,
+        "springAopInheritance": 42,
+        "di": 14,
+        "communities": 703,
+        "unity-resources": 0,
+        "unity-lifecycle": 174,
+        "processes": 457,
+        "unity-processes": 126,
+        "unity-process-subtype": 112
+      },
+      "stats": {
+        "files": 9281,
+        "nodes": 129652,
+        "edges": 390376,
+        "communities": 7710,
+        "processes": 2379,
+        "embeddings": 0
+      },
+      "receipt": {
+        "version": 1,
+        "digest": "1f924eba546fb4a85c2733544aa4c543b9d25a864dd8b083b30b16d71aaf86b5",
+        "fileCount": 9539
+      },
+      "ioApiCalls": {
+        "": 27,
+        ".csproj": 1531,
+        ".cs": 73436,
+        ".json": 1
+      },
+      "ftsReady": 22,
+      "cleanup": {
+        "bytes": 1794273890,
+        "reason": "Rejected expansion candidate; relations, content and FTS evidence retained"
+      }
+    },
+    "code-b2": {
+      "accepted": true,
+      "wallMs": 133875,
+      "cpuSec": 364.73,
+      "peakBytes": 5384120920,
+      "firstSnapshotMs": 12717,
+      "finalSnapshotMs": 13457,
+      "phases": {
+        "scan": 12015,
+        "structure": 27,
+        "springConfig": 1,
+        "markdown": 0,
+        "cobol": 2,
+        "parse": 36052,
+        "routes": 5,
+        "tools": 1,
+        "orm": 0,
+        "crossFile": 2,
+        "scopeResolution": 28276,
+        "springAutoConfiguration": 1,
+        "springAop": 0,
+        "springDestinations": 1,
+        "pruneLocalSymbols": 146,
+        "mro": 247,
+        "springAopInheritance": 50,
+        "di": 17,
+        "communities": 814,
+        "unity-resources": 0,
+        "unity-lifecycle": 176,
+        "processes": 368,
+        "unity-processes": 150,
+        "unity-process-subtype": 171
+      },
+      "stats": {
+        "files": 9281,
+        "nodes": 129639,
+        "edges": 360959,
+        "communities": 7697,
+        "processes": 2378,
+        "embeddings": 0
+      },
+      "receipt": {
+        "version": 1,
+        "digest": "1f924eba546fb4a85c2733544aa4c543b9d25a864dd8b083b30b16d71aaf86b5",
+        "fileCount": 9539
+      },
+      "ioApiCalls": {
+        "": 27,
+        ".csproj": 1531,
+        ".cs": 73436,
+        ".json": 1
+      },
+      "ftsReady": 22,
+      "cleanup": {
+        "bytes": 1788076342,
+        "reason": "Content, declaration oracle, semantic deltas and FTS verified"
+      }
+    },
+    "full-b1": {
+      "accepted": true,
+      "wallMs": 464535,
+      "cpuSec": 727.79,
+      "peakBytes": 13828542160,
+      "firstSnapshotMs": 31938,
+      "finalSnapshotMs": 68135,
+      "phases": {
+        "scan": 10867,
+        "structure": 535,
+        "springConfig": 46,
+        "markdown": 5,
+        "cobol": 23,
+        "parse": 35893,
+        "routes": 47,
+        "tools": 3,
+        "orm": 0,
+        "crossFile": 2,
+        "scopeResolution": 30002,
+        "springAutoConfiguration": 4,
+        "springAop": 0,
+        "springDestinations": 25,
+        "pruneLocalSymbols": 144,
+        "mro": 259,
+        "springAopInheritance": 36,
+        "di": 17,
+        "communities": 844,
+        "unity-resources": 150170,
+        "unity-lifecycle": 202,
+        "processes": 435,
+        "unity-processes": 132,
+        "unity-process-subtype": 130
+      },
+      "stats": {
+        "files": 137321,
+        "nodes": 278537,
+        "edges": 840023,
+        "communities": 7697,
+        "processes": 2378,
+        "embeddings": 0
+      },
+      "receipt": {
+        "version": 1,
+        "digest": "815e37670ed4eea769d0bc64f9077410d5dc252c8f43da641a653281be92a280",
+        "fileCount": 157189
+      },
+      "ioApiCalls": {
+        "": 27,
+        ".csproj": 1531,
+        ".meta": 668764,
+        ".asset": 98015,
+        ".prefab": 67109,
+        ".cs": 91263,
+        ".unity": 678,
+        ".json": 2
+      },
+      "ftsReady": 22,
+      "cleanup": {
+        "bytes": 6962413219,
+        "time": "2026-10-27T07:13:52.381314+00:00",
+        "reason": "Full resources, content, code deltas, FTS and original index protection verified"
+      }
+    }
+  },
+  "comparison": {
+    "before": {
+      "CONTAINS": 10357,
+      "ACCESSES": 35094,
+      "CALLS": 102970,
+      "USES": 4043,
+      "MEMBER_OF": 39732,
+      "STEP_IN_PROCESS": 12876,
+      "HAS_METHOD": 74917,
+      "IMPLEMENTS": 1083,
+      "HAS_PROPERTY": 10205,
+      "DEFINES": 24789,
+      "IMPORTS": 2307,
+      "METHOD_OVERRIDES": 37587,
+      "EXTENDS": 4098,
+      "METHOD_IMPLEMENTS": 2665
+    },
+    "after": {
+      "CONTAINS": 10357,
+      "CALLS": 102970,
+      "ACCESSES": 35095,
+      "USES": 4043,
+      "MEMBER_OF": 39733,
+      "STEP_IN_PROCESS": 12876,
+      "HAS_METHOD": 74917,
+      "IMPLEMENTS": 1083,
+      "HAS_PROPERTY": 10205,
+      "DEFINES": 24789,
+      "IMPORTS": 543,
+      "METHOD_OVERRIDES": 37586,
+      "EXTENDS": 4097,
+      "METHOD_IMPLEMENTS": 2665
+    },
+    "removed": {
+      "MEMBER_OF": 33495,
+      "IMPORTS": 1764,
+      "METHOD_OVERRIDES": 1,
+      "EXTENDS": 1,
+      "CALLS": 4,
+      "ACCESSES": 1
+    },
+    "added": {
+      "MEMBER_OF": 33496,
+      "CALLS": 4,
+      "ACCESSES": 2
+    },
+    "inputRemoved": 6845,
+    "inputBefore": 16384,
+    "inputAfter": 9539,
+    "unsupportedImports": 0
+  },
+  "importOracle": {
+    "oldReplayPairs": 2307,
+    "oldPersistedPairs": 2307,
+    "oldReplayOnly": 0,
+    "oldPersistedOnly": 0,
+    "newReplayPairs": 543,
+    "newPersistedPairs": 543,
+    "newReplayOnly": 0,
+    "newPersistedOnly": 0,
+    "removedUsingOccurrences": 1781
+  },
+  "fullVerification": {
+    "fullContentsAndInventoryEqual": true,
+    "codeSymbolsEqual": true,
+    "commonInputHashesEqual": true,
+    "removedInputs": 6845,
+    "remainingInputs": 157189,
+    "unityFactsUnchanged": true,
+    "unityFactCount": 348917,
+    "codeCallsImportsHeritageAccessesUsesAndProcessStepsEqual": true,
+    "originalIndexProtected": true
+  },
+  "sourcePins": {
+    "source": {
+      "core/ingestion/language-config.ts": "d189bded5853d0725ef75a5a9c9684d4f3d0473afda6ba84bdeb85fe162c644e",
+      "core/ingestion/languages/csharp.ts": "0aa24a939a1a0f5946c745d7c2fb5c1b74f093bdcc2f4a3ad3b14992ae202678",
+      "core/ingestion/languages/csharp/captures.ts": "1b115b5f8634fd24776405b9facb6a4d87a3e829424e7b086a03f8bd681f4cd3",
+      "core/ingestion/languages/csharp/import-target.ts": "af6b101033ac46b72654af8c10e83208cc0833a42d602dca6a44798b3d005a76",
+      "core/ingestion/languages/csharp/import-declarations.ts": "75d79909d219019c35526dd42f927fcfa6cc573222f17b0706ceae85d28e1dd5",
+      "core/ingestion/languages/csharp/resolution-config.ts": "62ad4f58fa11e5e5ff00086ab4893971225c2d5d2080914c81f7f66e062860a4",
+      "core/ingestion/languages/csharp/scope-resolver.ts": "4d302479ec18a8c233ec3c424a583eeb252300e06ae071caeec49fbac7fc8387",
+      "core/unity/analysis-input-snapshot.ts": "d76787dbaa8a899e653aef5c12bd35170015699bec20617b10f53877314707ad",
+      "storage/parse-cache.ts": "d27ca8281950bc3981927d73d5cc55da4fdc6c5a21bde3c248a9fc6713a2fe72",
+      "core/lbug/csv-generator.ts": "233143ba5e2d916a07227c70e761a6f65299d383a27014ac9ee7ec90f6ff451c"
+    },
+    "dist": {
+      "core/ingestion/language-config.js": "bad65ea5c336fb576723931d34eeaf99f71f2b6ffdedaeef72797f6982ac0882",
+      "core/ingestion/languages/csharp.js": "9835235301dd9ea9c536a2ca4b043dc5c03cdf74b742137b9347583c4dd54acb",
+      "core/ingestion/languages/csharp/captures.js": "96475e1e6eebfd71c8ed49d59bc97586117853631bddff0ea73649be8895a950",
+      "core/ingestion/languages/csharp/import-target.js": "4e96e924b9f7dab8643a2e301354505d187d39476b422a3d54320706c69fecac",
+      "core/ingestion/languages/csharp/import-declarations.js": "3c26629d1970550235da2525d007e9c05332726394be070b3294cf51e178509f",
+      "core/ingestion/languages/csharp/resolution-config.js": "349d6fefab36a467f71e5c78cf06d3108df2f32060f5b8fc2cd40c37c9ec1506",
+      "core/ingestion/languages/csharp/scope-resolver.js": "c32ab8a271de434efcfe9b8304093bcdfe31781f36c53b06b8518a25860babea",
+      "core/unity/analysis-input-snapshot.js": "a3e7a7684ddfac864719089137023ecbfc77c23da590df11a7ea748b4907b33f",
+      "storage/parse-cache.js": "2f2bffd0c0b6f01b99e05e9a0db8c716eae7cabbc0e7239cd089ca15c8fe8b20",
+      "core/lbug/csv-generator.js": "d84b45aee66cc2ee1f019c83cdd747fd743170b65b7843eb8bb2a1363984b615"
+    },
+    "diagnostic": {
+      "code/core/ingestion/language-config.js": "bad65ea5c336fb576723931d34eeaf99f71f2b6ffdedaeef72797f6982ac0882",
+      "full/core/ingestion/language-config.js": "bad65ea5c336fb576723931d34eeaf99f71f2b6ffdedaeef72797f6982ac0882",
+      "code/core/ingestion/languages/csharp.js": "9835235301dd9ea9c536a2ca4b043dc5c03cdf74b742137b9347583c4dd54acb",
+      "full/core/ingestion/languages/csharp.js": "9835235301dd9ea9c536a2ca4b043dc5c03cdf74b742137b9347583c4dd54acb",
+      "code/core/ingestion/languages/csharp/captures.js": "96475e1e6eebfd71c8ed49d59bc97586117853631bddff0ea73649be8895a950",
+      "full/core/ingestion/languages/csharp/captures.js": "96475e1e6eebfd71c8ed49d59bc97586117853631bddff0ea73649be8895a950",
+      "code/core/ingestion/languages/csharp/import-target.js": "4e96e924b9f7dab8643a2e301354505d187d39476b422a3d54320706c69fecac",
+      "full/core/ingestion/languages/csharp/import-target.js": "4e96e924b9f7dab8643a2e301354505d187d39476b422a3d54320706c69fecac",
+      "code/core/ingestion/languages/csharp/import-declarations.js": "3c26629d1970550235da2525d007e9c05332726394be070b3294cf51e178509f",
+      "full/core/ingestion/languages/csharp/import-declarations.js": "3c26629d1970550235da2525d007e9c05332726394be070b3294cf51e178509f",
+      "code/core/ingestion/languages/csharp/resolution-config.js": "349d6fefab36a467f71e5c78cf06d3108df2f32060f5b8fc2cd40c37c9ec1506",
+      "full/core/ingestion/languages/csharp/resolution-config.js": "349d6fefab36a467f71e5c78cf06d3108df2f32060f5b8fc2cd40c37c9ec1506",
+      "code/core/ingestion/languages/csharp/scope-resolver.js": "c32ab8a271de434efcfe9b8304093bcdfe31781f36c53b06b8518a25860babea",
+      "full/core/ingestion/languages/csharp/scope-resolver.js": "c32ab8a271de434efcfe9b8304093bcdfe31781f36c53b06b8518a25860babea",
+      "code/core/unity/analysis-input-snapshot.js": "84d051db9178edf74849cd5d8afbfa2e4d63a36e7d1bb1efec929479f721b7e9",
+      "full/core/unity/analysis-input-snapshot.js": "3c4b8a5ecf2c27f3b3c1e6fb70ac6b61dcaf8e8397cccca98919d9f48aed026e",
+      "code/storage/parse-cache.js": "2f2bffd0c0b6f01b99e05e9a0db8c716eae7cabbc0e7239cd089ca15c8fe8b20",
+      "full/storage/parse-cache.js": "2f2bffd0c0b6f01b99e05e9a0db8c716eae7cabbc0e7239cd089ca15c8fe8b20",
+      "code/core/lbug/csv-generator.js": "d84b45aee66cc2ee1f019c83cdd747fd743170b65b7843eb8bb2a1363984b615",
+      "full/core/lbug/csv-generator.js": "d84b45aee66cc2ee1f019c83cdd747fd743170b65b7843eb8bb2a1363984b615"
+    }
+  },
+  "tests": 302,
+  "typecheck": true,
+  "build": true,
+  "reclaimedBytes": 12332812260,
+  "limitations": [
+    "Single final code comparison and one full validation; not a stable performance estimate",
+    "Full run had small semantic-replay and fixture validation work alongside it; it is validation evidence, not an isolated performance comparison",
+    "Candidate discovery expansion rejected; receiver container/element type distinction remains separate work",
+    "No full-repository suite, cross-platform run, commit or global CLI installation"
+  ]
+}

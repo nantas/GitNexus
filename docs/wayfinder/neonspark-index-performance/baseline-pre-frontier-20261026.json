@@ -1,0 +1,249 @@
+{
+  "schemaVersion": 2,
+  "id": "neonspark-accepted-source-current-input-20261026",
+  "status": "frozen-reference-target-not-met",
+  "purpose": "Active source/input/evidence baseline; one observed default run, not stable SLA or a newly rerun benchmark",
+  "acceptedProductCommit": "bbf05f4eeb9630fecd531010edab9f1e7f674500",
+  "repositoryHead": "1c9138747f2533b1a2463a6128f0736aa5660807",
+  "sourceTree": "07b2d5ad8324f7fb5545f4494e3e61ff24584c95",
+  "trackedProductSourceClean": true,
+  "acceptedChanges": [
+    "Decode complete lines directly from resource chunks",
+    "Await per chunk and iterate resource lines synchronously within each chunk",
+    "Bounded File content prefetch preserving CSV semantics"
+  ],
+  "sourceFilesSha256": {
+    "gitnexus/src/core/unity/resource-lines.ts": "514e66104374a6282461276d4cfd85e7c09e9779b7ba8cf6d8503b1951e81f7f",
+    "gitnexus/src/core/unity/resource-discovery.ts": "b2a61a0c0db34ad1ef297cb7ad789b8e37641cbce325efc04f39ec0f922c2773",
+    "gitnexus/src/core/unity/resolver.ts": "a5e2e1f8444dd424ba2869366cc9c5c5799d8d6a2dc6d90b03a8423dab9d95e9",
+    "gitnexus/src/core/lbug/csv-generator.ts": "0eec5a40e40f837d4373d6a9019abc6bf939e4833cddb4f334ebbdf57127c8c3"
+  },
+  "distFilesSha256": {
+    "core/unity/resource-lines.js": "9290320c168e0324019306da7b4ab1f289fa35585dc87462d58b2de973d9e07b",
+    "core/unity/resource-discovery.js": "5f990531b7ae3b6efe0805ca5de3623d13da2c35d1eccced58caf2639b67c104",
+    "core/unity/resolver.js": "9996e7a62fd0ee8273731dbacea4fc80b2c1a201f5d84ecd5d883c693cdcd819",
+    "core/lbug/csv-generator.js": "e3a8d31db6d9bde970000b5a12de5f232baf92b19ffd4db57079090e646074b7",
+    "core/unity/analysis-input-snapshot.js": "b53effe304db9be9249907fc18e99b74bfa87696a0925fe084de4a912a12ebb4",
+    "core/run-analyze.js": "5ded43d69676370eb84f11807b8693e5748697322297cf41dc4572e3b1738458"
+  },
+  "referenceRun": ".scratch/neonspark-pending-20261026/plain-a1",
+  "referenceRunDate": "2026-10-26T07:35:18.666Z",
+  "targetCommit": "2f935a041d43626eb32e0cb164e8b41194afee2a",
+  "inputReceipt": {
+    "version": 1,
+    "digest": "fca2212ac78e9879e5f93624259c77830f2dc1020f5c75c3079bff61caf9df7f",
+    "fileCount": 164026
+  },
+  "selection": {
+    "name": "neonspark42-core",
+    "includeExtensions": [
+      ".cs",
+      ".meta"
+    ],
+    "scopeRules": [
+      "Assets/",
+      "Packages/"
+    ],
+    "csharpDefineCsproj": "Assembly-CSharp.csproj"
+  },
+  "node": "v24.15.0",
+  "uvThreadpoolSize": "default",
+  "contentRetention": "full",
+  "ftsProfile": "full",
+  "coldDefinition": "Empty index and parser cache; OS cache not cleared",
+  "measurements": {
+    "elapsedMs": 567162,
+    "cpu": 859.31,
+    "peakGiB": 14.470739096403122,
+    "firstSnapshotMs": 117548,
+    "finalSnapshotMs": 48340,
+    "phases": [
+      {
+        "name": "scan",
+        "ms": 18085
+      },
+      {
+        "name": "structure",
+        "ms": 1042
+      },
+      {
+        "name": "springConfig",
+        "ms": 28
+      },
+      {
+        "name": "markdown",
+        "ms": 4
+      },
+      {
+        "name": "cobol",
+        "ms": 28
+      },
+      {
+        "name": "parse",
+        "ms": 76194
+      },
+      {
+        "name": "routes",
+        "ms": 56
+      },
+      {
+        "name": "tools",
+        "ms": 3
+      },
+      {
+        "name": "orm",
+        "ms": 0
+      },
+      {
+        "name": "crossFile",
+        "ms": 2
+      },
+      {
+        "name": "scopeResolution",
+        "ms": 39346
+      },
+      {
+        "name": "springAutoConfiguration",
+        "ms": 30
+      },
+      {
+        "name": "springAop",
+        "ms": 0
+      },
+      {
+        "name": "springDestinations",
+        "ms": 34
+      },
+      {
+        "name": "pruneLocalSymbols",
+        "ms": 189
+      },
+      {
+        "name": "mro",
+        "ms": 291
+      },
+      {
+        "name": "springAopInheritance",
+        "ms": 49
+      },
+      {
+        "name": "di",
+        "ms": 19
+      },
+      {
+        "name": "communities",
+        "ms": 956
+      },
+      {
+        "name": "unity-resources",
+        "ms": 80703
+      },
+      {
+        "name": "unity-lifecycle",
+        "ms": 247
+      },
+      {
+        "name": "processes",
+        "ms": 427
+      },
+      {
+        "name": "unity-processes",
+        "ms": 148
+      },
+      {
+        "name": "unity-process-subtype",
+        "ms": 138
+      }
+    ]
+  },
+  "wallLedgerMs": {
+    "startup_before_first_snapshot_inferred": 77780.0,
+    "first_snapshot": 117548,
+    "snapshot_to_pipeline": 4.0,
+    "pipeline": 218344.0,
+    "pipeline_end_to_fts_start": 35996.0,
+    "fts_log_window": 64973.0,
+    "fts_end_to_final_snapshot_inferred": 2566.0,
+    "final_snapshot": 48340,
+    "post_revalidation_to_exit": 1611.0
+  },
+  "wallLedgerMethod": "Timestamped output-chunk boundaries; inferred residuals are not function attribution; pipeline includes minor phases",
+  "graphStats": {
+    "files": 137315,
+    "nodes": 278539,
+    "edges": 841653,
+    "communities": 7707,
+    "processes": 2378,
+    "embeddings": 0
+  },
+  "verification": {
+    "fileNodes": 155808,
+    "allCodeRelations": 841653,
+    "relatedUnityFacts": 361665,
+    "ftsReady": 22,
+    "actualFtsRecall": [
+      "English",
+      "Chinese",
+      "token at stored content offset 37870"
+    ],
+    "testsPerEnvironment": 140,
+    "testedThreadpools": [
+      "default",
+      "16"
+    ]
+  },
+  "evidenceSha256": {
+    "summary.json": "775c3106a0e09eaef33ea0b3ff7cba8b5ae3049715ecd540ba92e2be51b347cf",
+    "invocation.json": "d753ab8ecf298257aba6e164a71ed1bbc339644fbadaac62037c0ab09443ccf5",
+    "file-content-hashes.json": "057f3856d7eddf5a50d40bc558361f762c0b4ea11f2b35116c62b763e70eddd2",
+    "all-relation-hashes.json": "04af3240f2dc139c391c24e068457ee41f80da5a20dbb7c81f1fb3c8796dcd12",
+    "unity-parity-seed.json.gz": "2067c3a410c67973ad93a1c792e092897f44ce99ec8fb507abf39c5ec4345870",
+    "fts-recall.json": "53f3991ef8757f76760398b8249e9e946ac5f4c829519010a2fe86edbc83254a",
+    "semantic-comparison.json": "7b37dc32193e73d14ca51e357526b17fc3ba8622549a3b7f8f525fae3d82ec20"
+  },
+  "databaseRetained": false,
+  "targetMs": 180000,
+  "limitations": [
+    "Single uninstrumented default sample; background load/OS cache uncontrolled",
+    "No new index build in this baseline-freeze step",
+    "Historical input baseline retained separately in baseline.json",
+    "Rejecting threadpool16 is a non-adoption decision, not proof of causation for all slowdowns",
+    "No new git commit/tag/global CLI publication in this step"
+  ],
+  "invocation": {
+    "args": [
+      "-l",
+      "$NODE24",
+      "--max-old-space-size=18432",
+      "--max-semi-space-size=128",
+      "--stack-size=4096",
+      "$GITNEXUS_REPO/gitnexus/dist/cli/index.js",
+      "analyze",
+      "--force",
+      "--index-only",
+      "--verbose",
+      "--name",
+      "neonspark-performance"
+    ],
+    "env": {
+      "NODE_ENV": "development",
+      "VALIDATE_SEMANTIC_MODEL": "0",
+      "PROF_LBUG_LOAD": "0",
+      "PROF_SCOPE_RESOLUTION": "0",
+      "GITNEXUS_STORAGE_PATH": "$GITNEXUS_REPO/.scratch/neonspark-pending-20261026/plain-a1/index",
+      "GITNEXUS_HOME": "$GITNEXUS_REPO/.scratch/neonspark-pending-20261026/plain-a1/home"
+    }
+  },
+  "analysisInputFingerprint": "ade0229b325356c192a32ad8c85f900b85d4b8cdde20d5f80a912026ba6a8c82",
+  "indexCoverageSelection": {
+    "maxFileSizeBytes": 524288,
+    "scopeRules": [
+      "Assets/",
+      "Packages/"
+    ],
+    "includeExtensions": [
+      ".cs",
+      ".meta"
+    ]
+  }
+}

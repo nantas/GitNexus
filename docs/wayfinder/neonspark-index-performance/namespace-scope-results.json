@@ -1,0 +1,199 @@
+{
+  "status": "research-complete-no-product-change",
+  "reproduction": {
+    "records": [
+      {
+        "project": false,
+        "withoutOutside": null,
+        "withOutside": "Assets/Logging.cs",
+        "narrowed": null,
+        "truncated": "Assets/Logging.cs",
+        "expected": null
+      },
+      {
+        "project": true,
+        "withoutOutside": null,
+        "withOutside": "Assets/Logging.cs",
+        "narrowed": null,
+        "truncated": "Assets/Logging.cs",
+        "expected": null
+      }
+    ],
+    "inScopeCandidateMismatch": {
+      "selected": "Assets/Logging.cs",
+      "actualDeclarationFile": "Assets/RealLogger.cs"
+    },
+    "conclusion": "Outside declarations and truncated fail-open can enable an unrelated in-scope target; a global in-scope namespace gate alone still does not validate the chosen candidate."
+  },
+  "replay": {
+    "scopeFiles": 9281,
+    "sourceBytes": 62404548,
+    "imports": 44828,
+    "uniqueImports": 668,
+    "productionScanMs": null,
+    "elapsedMs": 28685.8635,
+    "production": {
+      "namespaceCount": 1366,
+      "configCount": 255,
+      "truncated": true
+    },
+    "scopedScanner": {
+      "namespaceCount": 699,
+      "incompleteFiles": []
+    },
+    "scopedNormalizedAst": {
+      "namespaceCount": 692,
+      "parseErrorFiles": [
+        "Assets/Editor/AutoBuilderExitDiagnostics.cs",
+        "Assets/Editor/Build/ReusableBundleCache.cs",
+        "Assets/NEON/Code/Framework/InGameConsole_ScriptRegister.cs",
+        "Assets/Plugins/Sirenix/Odin Inspector/Modules/Unity.Addressables/Validators/AssetLabelReferenceValidator.cs"
+      ]
+    },
+    "counts": {
+      "production": {
+        "resolved": 2329,
+        "changed": 0,
+        "lost": 0,
+        "gained": 0,
+        "retargeted": 0
+      },
+      "productionCompleteDiagnostic": {
+        "resolved": 2326,
+        "changed": 3,
+        "lost": 3,
+        "gained": 0,
+        "retargeted": 0
+      },
+      "scopedWithProductionTruncation": {
+        "resolved": 2329,
+        "changed": 0,
+        "lost": 0,
+        "gained": 0,
+        "retargeted": 0
+      },
+      "scopedScanner": {
+        "resolved": 2310,
+        "changed": 19,
+        "lost": 19,
+        "gained": 0,
+        "retargeted": 0
+      },
+      "scopedScannerCompleteDiagnostic": {
+        "resolved": 2310,
+        "changed": 19,
+        "lost": 19,
+        "gained": 0,
+        "retargeted": 0
+      },
+      "scopedNormalizedAst": {
+        "resolved": 2329,
+        "changed": 0,
+        "lost": 0,
+        "gained": 0,
+        "retargeted": 0
+      },
+      "scopedAstCompleteDiagnostic": {
+        "resolved": 2310,
+        "changed": 19,
+        "lost": 19,
+        "gained": 0,
+        "retargeted": 0
+      }
+    },
+    "candidateWithoutDeclarationAlignment": 1781,
+    "limitations": [
+      "Read-only import-target replay, not complete graph or compiler verification",
+      "Candidate order fixed to sorted exported File inventory; not a reproduction of historical glob insertion order or proof of already-persisted edges",
+      "AST declarations use current defines; production disk namespace scanner reads raw text",
+      "Scoped scanner complete variant is diagnostic only, not a safe proposed implementation",
+      "Suspicious candidate alignment is a permissive heuristic, not proof every listed edge is incorrect",
+      "No resource files read; original index not opened or modified"
+    ]
+  },
+  "changedImportGroups": {
+    "UnityEditor.AddressableAssets.Settings": {
+      "occurrences": 8,
+      "target": "Assets/Plugins/FMOD/src/Settings.cs",
+      "targetNamespaces": [
+        "FMODUnity"
+      ],
+      "removedByCompleteBroadEvidence": false
+    },
+    "Notion.Client": {
+      "occurrences": 2,
+      "target": "Assets/Plugins/Mirror/Runtime/Transports/Telepathy/Telepathy/Client.cs",
+      "targetNamespaces": [
+        "Telepathy"
+      ],
+      "removedByCompleteBroadEvidence": true
+    },
+    "UnityEngine.UIElements.ProgressBar": {
+      "occurrences": 2,
+      "target": "Assets/Plugins/Utmo Inspector/Editor/CustomDrawers/ProgressBar.cs",
+      "targetNamespaces": [
+        "Astrokoala.Utmo.CustomDrawers"
+      ],
+      "removedByCompleteBroadEvidence": false
+    },
+    "UnityEngine.Localization.LocalizedString": {
+      "occurrences": 2,
+      "target": "Assets/Plugins/I2/Localization/Scripts/Utils/LocalizedString.cs",
+      "targetNamespaces": [
+        "I2.Loc"
+      ],
+      "removedByCompleteBroadEvidence": false
+    },
+    "UnityEngine.Localization.Settings": {
+      "occurrences": 3,
+      "target": "Assets/Plugins/FMOD/src/Settings.cs",
+      "targetNamespaces": [
+        "FMODUnity"
+      ],
+      "removedByCompleteBroadEvidence": false
+    },
+    "UnityEngine.Localization.SmartFormat.Core.Settings": {
+      "occurrences": 1,
+      "target": "Assets/Plugins/FMOD/src/Settings.cs",
+      "targetNamespaces": [
+        "FMODUnity"
+      ],
+      "removedByCompleteBroadEvidence": false
+    },
+    "UnityEditor.PackageManager.Client": {
+      "occurrences": 1,
+      "target": "Assets/Plugins/Mirror/Runtime/Transports/Telepathy/Telepathy/Client.cs",
+      "targetNamespaces": [
+        "Telepathy"
+      ],
+      "removedByCompleteBroadEvidence": true
+    }
+  },
+  "productionScannerObservation": {
+    "elapsedMs": 8806.323,
+    "note": "One observational run, not a repeated performance benchmark; evidence reused after harness setup failure"
+  },
+  "validation": {
+    "existingTargetedTests": 64,
+    "testFiles": [
+      "test/unit/scope-resolution/csharp/csharp-imports.test.ts",
+      "test/unit/import-resolvers/csharp-csproj-parity.test.ts"
+    ],
+    "reproExpectedCorrectnessAssertion": "fails on current implementation as intended",
+    "all9281SourceHashesMatchPriorCodeBaseline": true
+  },
+  "evidenceSha256": {
+    "repro.mjs": "1da471fdf9abbaf61ba945b57e562d056dcb13512fb391a8d8f0478c23578cbd",
+    "replay.mjs": "d3c3e2e4470789ed2bb9071ed66dbd70c3ba178a6b2b4095458c55d515cf928b",
+    "production-evidence.json": "ecf36138e0e6c6e4e15c1e5f7640b41023a8e3ca178d279b27df2fa6e814f3ea",
+    "replay-summary.json": "0ee67ac65d0b5e4ef7c66e5251dac04593eab2e56ebebae99f052e85f7f5d3a3",
+    "import-changes.json": "436def2729195bc422728940e52ffa4f0831bd0835aebc2d4b0fc1006960bac8",
+    "candidate-mismatches.json": "a84ac640f97909c5b3ab4b9788edd3fb6e478e84baf8d7adff8a35fbfc062fe1"
+  },
+  "limitations": [
+    "Not proof of already-persisted bad edges: replay uses fixed exported inventory order, historical glob order not reproduced",
+    "No full graph rebuild, downstream CALLS/alias propagation parity, or production fix",
+    "1781 automated candidate-alignment flags are triage signals, not a verified bug count",
+    "Initial replay harness used unsupported Tree.delete; fixed optional disposal, retained failed log, reused captured production evidence"
+  ]
+}
