@@ -35,6 +35,8 @@
  * that opens, because a resolver quietly starting to answer `null` for the
  * paired positive case is a regression wearing the fix's clothes.
  */
+import { extractParsedFile } from '../../../src/core/ingestion/scope-extractor-bridge.js';
+import { csharpProvider } from '../../../src/core/ingestion/languages/csharp.js';
 import { describe, expect, it } from 'vitest';
 import type { ParsedFile, ParsedImport, ScopeId, SymbolDefinition } from 'gitnexus-shared';
 import { SupportedLanguages } from 'gitnexus-shared';
@@ -64,15 +66,6 @@ const RUBY_GEMS = {
       },
     ],
   ]),
-};
-/** What `scanCSharpProject` would report for the C# workspace below — the
- *  in-repo namespace evidence the #1881 suffix-fallback gate reads. */
-const CSHARP_NAMESPACES = {
-  namespaces: {
-    declaredNamespaces: new Set(['App', 'App.Models']),
-    rootNamespaces: new Set(['App']),
-    truncated: false,
-  },
 };
 
 interface ConformanceCase {
@@ -214,9 +207,21 @@ const CASES: ReadonlyMap<SupportedLanguages, ConformanceCase> = new Map([
       // #1881's shape: a BCL using beside a same-named local file.
       files: ['App/Tasks.cs', 'App/Models/User.cs', 'App/Program.cs'],
       fromFile: 'App/Program.cs',
-      // The #1881 gate is evidence-driven and fails OPEN without any, so a
-      // `undefined` config here would record a gap C# does not have.
-      resolutionConfig: CSHARP_NAMESPACES,
+      // Match the production workspace: scoped AST evidence, no global namespace scan.
+      resolutionConfig: undefined,
+      parsedFile: (filePath) => {
+        const parts = filePath.replace(/\.cs$/, '').split('/');
+        const name = parts.pop()!;
+        const parsed = extractParsedFile(
+          csharpProvider,
+          `namespace ${parts.join('.')}; class ${name} {}`,
+          filePath,
+        )!;
+        return {
+          ...parsed,
+          captureSideChannel: csharpProvider.collectCaptureSideChannel?.(filePath),
+        };
+      },
       external: 'System.Threading.Tasks',
       decoy: 'App/Tasks.cs',
       reachesDecoy: 'App.Tasks',
@@ -443,7 +448,8 @@ const KNOWN_GAPS: ReadonlyMap<SupportedLanguages, string> = new Map<SupportedLan
  *   - TypeScript / JavaScript / Vue resolve against declared config only and
  *     have no suffix fallback at all (#2953). This is the shape the ten above
  *     need.
- *   - Python (#898) and C# (#1881) kept the fallback and put a gate in front of
+ *   - C# validates fallback candidates against indexed declaration ownership.
+ *   - Python (#898) kept the fallback and put a gate in front of
  *     it, keyed on whether the specifier's leading segment names anything
  *     in-repo. Cheaper, and it holds — but it is a filter on a guess rather
  *     than a resolution rule, so it answers "probably not external" instead of
@@ -469,7 +475,7 @@ function resolveWith(
   // ParsedFile fields (PHP's `filesByDirectory`), which would silently resolve
   // differently against stubs than against real parsed files.
   const parsedFiles =
-    testCase.declare === undefined
+    testCase.declare === undefined && testCase.parsedFile === undefined
       ? []
       : testCase.files.map(
           testCase.parsedFile ?? ((filePath) => ({ filePath }) as unknown as ParsedFile),

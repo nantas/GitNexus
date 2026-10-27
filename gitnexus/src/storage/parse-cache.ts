@@ -767,7 +767,8 @@ import { copyV8CacheIfPresent, tryLoadV8Cache, writeV8CacheFile } from './v8-sid
 // discard cached phantom methods produced by damaged comment delimiters.
 // v102: interpolation-aware C# lexical states mask disabled branches reliably.
 // v103: non-conditional directive text cannot contaminate C# lexical state.
-const SCHEMA_BUMP = 103;
+// v104: indexed declaration evidence for import targeting crosses worker/cache boundaries.
+const SCHEMA_BUMP = 104;
 const GITNEXUS_PKG_VERSION = (() => {
   try {
     // package.json sits at gitnexus/package.json — two levels up from

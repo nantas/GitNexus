@@ -19,7 +19,8 @@
  * `linkStatus: 'unresolved'`.
  */
 
-import type { ParsedImport, WorkspaceIndex } from 'gitnexus-shared';
+import type { ParsedFile, ParsedImport, WorkspaceIndex } from 'gitnexus-shared';
+import { csharpDeclaredImportTargets } from './import-declarations.js';
 import type { CSharpProjectConfig, CSharpNamespaceEvidence } from '../../language-config.js';
 import { resolveCSharpImportInternal } from '../../import-resolvers/csharp.js';
 import {
@@ -39,6 +40,7 @@ export interface CsharpResolveContext {
   readonly allFilePaths: ReadonlySet<string>;
   readonly csharpConfigs?: readonly CSharpProjectConfig[];
   readonly namespaces?: CSharpNamespaceEvidence;
+  readonly parsedFiles?: readonly ParsedFile[];
 }
 
 /**
@@ -62,6 +64,20 @@ export function resolveCsharpImportTarget(
   if (parsedImport.targetRaw === null || parsedImport.targetRaw === '') return null;
   const targetRaw = parsedImport.targetRaw;
   const evidence = ctx.namespaces;
+  const candidates =
+    ctx.parsedFiles === undefined
+      ? undefined
+      : csharpDeclaredImportTargets(ctx.parsedFiles, targetRaw).filter((file) =>
+          ctx.allFilePaths.has(file),
+        );
+  if (candidates?.length === 0) return null;
+  // shortcut: validate existing targets only; expand discovery after container receiver resolution is corrected.
+  const choose = (preferred: string | null): string | null =>
+    candidates === undefined
+      ? preferred
+      : preferred !== null && candidates.includes(preferred)
+        ? preferred
+        : null;
 
   const csharpConfigs = ctx.csharpConfigs ?? [];
   if (csharpConfigs.length > 0) {
@@ -73,12 +89,12 @@ export function resolveCsharpImportTarget(
       index,
       evidence,
     );
-    if (fromCsproj.length > 0) return fromCsproj[0]!;
+    if (fromCsproj.length > 0) return choose(fromCsproj[0]!);
     // csproj configs are authoritative: mirror legacy `configs/csharp.ts`,
     // which returns an empty result to STOP the chain. Falling through to the
     // ungated `resolveDirectMatch` would re-introduce the BCL→local match the
     // internal resolver's gate just suppressed (#1881 parity, #2).
-    return null;
+    return choose(null);
   }
 
   // Namespace path: `System.Collections.Generic` → `System/Collections/Generic`.
@@ -93,7 +109,7 @@ export function resolveCsharpImportTarget(
   // (#1881 parity, Codex F2). The gate keeps its fail-open for
   // undefined/truncated evidence, so legitimate edges in unscanned repos are
   // unaffected.
-  if (!csharpSuffixFallbackAllowed(targetRaw, evidence)) {
+  if (candidates === undefined && !csharpSuffixFallbackAllowed(targetRaw, evidence)) {
     return null;
   }
 
@@ -106,11 +122,11 @@ export function resolveCsharpImportTarget(
   const ws = getWorkspaceFileIndex(ctx.allFilePaths);
   const dirs = getCsharpDirIndex(ctx.allFilePaths);
   const direct = resolveDirectMatch(ws, dirs, pathLike);
-  if (direct !== null) return direct;
+  if (direct !== null) return choose(direct);
 
   // Progressive prefix stripping — mirrors csproj's root-namespace mapping
   // without the csproj.
-  return resolveByProgressiveStripping(ws, dirs, pathLike);
+  return choose(resolveByProgressiveStripping(ws, dirs, pathLike));
 }
 
 /**

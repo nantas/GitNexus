@@ -407,7 +407,10 @@ function getCsharpStructureScannerFactory(): Promise<() => CsharpStructureLineSc
  * work this scan introduces. Reads within a directory are issued in bounded
  * windows (see below); directories are still visited breadth-first.
  */
-export async function scanCSharpProject(repoRoot: string): Promise<CSharpProjectScan> {
+export async function scanCSharpProject(
+  repoRoot: string,
+  collectNamespaces = true,
+): Promise<CSharpProjectScan> {
   const configs: CSharpProjectConfig[] = [];
   const declaredNamespaces = new Set<string>();
   const rootNamespaces = new Set<string>();
@@ -453,7 +456,7 @@ export async function scanCSharpProject(repoRoot: string): Promise<CSharpProject
       if (!entry.isFile()) continue;
       if (entry.name.endsWith('.csproj')) {
         csprojNames.push(entry.name);
-      } else if (entry.name.endsWith('.cs')) {
+      } else if (collectNamespaces && entry.name.endsWith('.cs')) {
         csNames.push(entry.name);
       }
     }
@@ -491,7 +494,9 @@ export async function scanCSharpProject(repoRoot: string): Promise<CSharpProject
     // unreadable directory or `.cs` file) silently disabling the #1881 gate
     // repo-wide is observable (#4) rather than a mystery edge regression.
     logger.warn(
-      `[csharp] namespace scan of ${repoRoot} truncated (dir cap ${CSHARP_SCAN_MAX_DIRS}, depth cap ${CSHARP_SCAN_MAX_DEPTH}, an unreadable directory, or an unreadable .cs file); the #1881 suffix-fallback gate fails open for unmatched usings`,
+      collectNamespaces
+        ? `[csharp] namespace scan of ${repoRoot} truncated (dir cap ${CSHARP_SCAN_MAX_DIRS}, depth cap ${CSHARP_SCAN_MAX_DEPTH}, an unreadable directory, or an unreadable .cs file); the #1881 suffix-fallback gate fails open for unmatched usings`
+        : `[csharp] project configuration scan of ${repoRoot} truncated (dir cap ${CSHARP_SCAN_MAX_DIRS}, depth cap ${CSHARP_SCAN_MAX_DEPTH}, or an unreadable directory); indexed declaration evidence remains authoritative`,
     );
   }
   return { configs, declaredNamespaces, rootNamespaces, truncated };

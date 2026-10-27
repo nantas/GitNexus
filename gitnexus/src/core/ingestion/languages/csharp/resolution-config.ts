@@ -27,14 +27,15 @@ export interface CsharpResolutionConfig {
 
 export async function loadCsharpResolutionConfig(
   repoRoot: string,
+  collectNamespaces = true,
 ): Promise<CsharpResolutionConfig> {
   const [scan, razorViewComponents] = await Promise.all([
-    scanCSharpProject(repoRoot),
+    scanCSharpProject(repoRoot, collectNamespaces),
     loadRazorViewComponentConfig(repoRoot),
   ]);
   return {
     csharpConfigs: scan.configs,
-    namespaces: csharpScanToEvidence(scan),
+    namespaces: collectNamespaces ? csharpScanToEvidence(scan) : undefined,
     razorViewComponents,
   };
 }

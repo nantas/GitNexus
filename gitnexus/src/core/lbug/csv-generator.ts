@@ -192,7 +192,7 @@ export const isBinaryContent = (content: string): boolean => {
 
 interface PreparedFileContent {
   readonly content: string;
-  readonly lines: string[];
+  lines?: string[];
   readonly isBinary: boolean;
 }
 
@@ -236,7 +236,6 @@ export class FileContentCache {
       const content = await fs.readFile(fullPath, 'utf-8');
       const prepared: PreparedFileContent = {
         content,
-        lines: content.split('\n'),
         isBinary: isBinaryContent(content),
       };
       this.set(relativePath, prepared);
@@ -248,7 +247,7 @@ export class FileContentCache {
   }
 
   setForTest(key: string, content: string): void {
-    this.set(key, { content, lines: content.split('\n'), isBinary: isBinaryContent(content) });
+    this.set(key, { content, isBinary: isBinaryContent(content) });
   }
   hasForTest(key: string): boolean {
     return this.cache.has(key);
@@ -343,7 +342,7 @@ const extractContent = async (
   const endLine = node.properties.endLine;
   if (startLine === undefined || endLine === undefined) return '';
 
-  const lines = prepared.lines;
+  const lines = (prepared.lines ??= content.split('\n'));
   const exactSymbolContent = EXACT_SYMBOL_CONTENT_LABELS.has(node.label);
   const start = Math.max(0, exactSymbolContent ? startLine : startLine - 2);
   const end = Math.min(lines.length - 1, exactSymbolContent ? endLine : endLine + 2);

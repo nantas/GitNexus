@@ -2,6 +2,24 @@
 
 All notable changes to GitNexus will be documented in this file.
 
+## [1.6.13] - Unreleased
+
+### Fixed
+- Require indexed C# declaration evidence before linking an import candidate. External namespaces and incomplete repository scans no longer authorize links to unrelated same-name files.
+- Rebuild C# parser caches with the declaration evidence needed for worker and cache replay (parse cache schema 104).
+- Validate Unity analysis inputs before and after indexing, reject publication when inputs change, and safely reuse unchanged indexes.
+- Preserve installed skills when Claude's skill directory aliases the shared agent directory; report orphaned full-text index collisions instead of hiding them.
+
+### Changed
+- `setup` migrates repository analysis settings to `.gitnexusrc`, with explicit CLI flags retaining precedence.
+- Load C# project configuration without scanning out-of-scope C# source bodies for namespace evidence; retain project configuration and effective conditional-compilation defines.
+- Resolve Unity resource bindings once per resource and reduce resource-line decoding and CSV content preparation overhead while retaining full content and FTS coverage.
+
+### Upgrade notes
+- The changed analyzer identity and parser cache version require index regeneration on the next analysis; embeddings retain the existing preservation behavior.
+- Import validation rejects unsupported candidates but does not add declaration-driven candidate discovery. Broader discovery remains deferred pending collection-receiver type fixes.
+- Performance measurements are workload-dependent: one pure-code comparison improved from 152.257 s to 133.875 s; the complete Unity validation took 464.535 s. This release does not claim a stable full-build speedup or a 180-second full-index guarantee.
+
 ## [1.6.12] - 2026-09-25
 
 > Stable release notes comparing `v1.5.9` → `v1.6.12`. Synced [upstream v1.6.12](https://github.com/abhigyanpatwari/GitNexus/releases/tag/v1.6.12) while retaining the fork's Unity, C#, GDScript, and agent workflow support.

@@ -63,7 +63,6 @@ describe('complete Unity input snapshots', () => {
     let previous = (await captureUnityInputSnapshot(root, opts))!.receipt.digest;
     for (const [file, content] of [
       ['Assets/Main.cs.meta', 'guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
-      ['Library/Ignored.cs', 'namespace Ignored {}'],
       ['Library/Ignored.csproj', '<Project><RootNamespace>Ignored</RootNamespace></Project>'],
       ['.gitnexus/config.json', '{"unity":{"maxSyntheticEdgesTotal":1}}'],
       [project, '<Project><DefineConstants>DEBUG</DefineConstants></Project>'],
@@ -73,6 +72,10 @@ describe('complete Unity input snapshots', () => {
       expect(current).not.toBe(previous);
       previous = current;
     }
+    await fs.writeFile(path.join(root, 'Library/Ignored.cs'), 'namespace Ignored {}');
+    const snapshot = (await captureUnityInputSnapshot(root, opts))!;
+    expect(snapshot.hashes.has('Library/Ignored.cs')).toBe(false);
+    expect(snapshot.receipt.digest).toBe(previous);
   });
 
   it('tracks the prefab-source switch and invocation-cwd payload configuration', async () => {

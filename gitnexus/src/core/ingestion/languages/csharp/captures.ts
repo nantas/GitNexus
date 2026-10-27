@@ -28,6 +28,7 @@ import { computeCsharpArityMetadata } from './arity-metadata.js';
 import { synthesizeCsharpReceiverBinding } from './receiver-binding.js';
 import { getCsharpParser, getCsharpScopeQuery } from './query.js';
 import { recordCacheHit, recordCacheMiss } from './cache-stats.js';
+import { recordCsharpImportDeclarations } from './import-declarations.js';
 import { getTreeSitterBufferSize } from '../../constants.js';
 import { parseSourceSafe } from '../../../tree-sitter/safe-parse.js';
 import { synthesizeCallableFlowCaptures } from '../../utils/callable-flow-captures.js';
@@ -125,6 +126,7 @@ export function emitCsharpScopeCaptures(
     recordCacheHit();
   }
 
+  recordCsharpImportDeclarations(_filePath, tree.rootNode);
   const rawMatches = getCsharpScopeQuery().matches(tree.rootNode);
   const out: CaptureMatch[] = [];
 

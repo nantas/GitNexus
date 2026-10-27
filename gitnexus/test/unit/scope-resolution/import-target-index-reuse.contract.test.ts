@@ -112,6 +112,8 @@
  * `test/integration/javascript-import-index-reuse.test.ts` and
  * `test/unit/scope-resolution/javascript-import-target-parity.test.ts`.
  */
+import { extractParsedFile } from '../../../src/core/ingestion/scope-extractor-bridge.js';
+import { csharpProvider } from '../../../src/core/ingestion/languages/csharp.js';
 import { describe, expect, it } from 'vitest';
 import { SupportedLanguages } from 'gitnexus-shared';
 import type { ParsedFile, ParsedImport, ScopeId, SymbolDefinition } from 'gitnexus-shared';
@@ -335,7 +337,20 @@ const FIXTURES: ReadonlyMap<SupportedLanguages, ImportTargetFixture> = new Map<
       hitTarget: 'App.Models.User',
       parsedImport: IGNORES_CONTEXT,
       minimumScans: 1,
-      minimumParsedFileReads: 0,
+      minimumParsedFileReads: 1,
+      parsedFile: (filePath) => {
+        const parts = filePath.replace(/\.cs$/, '').split('/');
+        const name = parts.pop()!;
+        const parsed = extractParsedFile(
+          csharpProvider,
+          `namespace ${parts.join('.')}; class ${name} {}`,
+          filePath,
+        )!;
+        return {
+          ...parsed,
+          captureSideChannel: csharpProvider.collectCaptureSideChannel?.(filePath),
+        };
+      },
     },
   ],
   [

@@ -157,9 +157,9 @@ export async function captureUnityInputSnapshot(
     inputs.add(resource);
     if (await optionalFile(path.join(repo, `${resource}.meta`))) inputs.add(`${resource}.meta`);
   }
-  // scanCSharpProject's namespace/config reader uses these directory exclusions,
-  // includes dot directories, and ignores neither source scope nor gitignore.
-  const projectInputs = await strictGlob(repo, ['**/*.cs', '**/*.csproj'], {
+  // Project configuration discovery remains repository-wide; namespace evidence
+  // now comes from the indexed parse results, not out-of-scope source reads.
+  const projectInputs = await strictGlob(repo, '**/*.csproj', {
     dot: true,
     ignore: ['**/node_modules/**', '**/.git/**', '**/bin/**', '**/obj/**'],
   });

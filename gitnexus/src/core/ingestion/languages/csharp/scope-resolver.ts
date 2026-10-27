@@ -23,6 +23,7 @@ import { populateCsharpNamespaceSiblings } from './namespace-siblings.js';
 import { loadCsharpResolutionConfig, type CsharpResolutionConfig } from './resolution-config.js';
 import { unwrapCsharpElementType } from './accessor-unwrap.js';
 import { emitRazorViewComponentEdges } from './razor-view-components.js';
+import { rememberCsharpImportDeclarations } from './import-declarations.js';
 
 const csharpScopeResolver: ScopeResolver = {
   // Construction is keyword-prefixed: `new Service(db).doWork()` (#2708).
@@ -31,20 +32,21 @@ const csharpScopeResolver: ScopeResolver = {
   languageProvider: csharpProvider,
   importEdgeReason: 'csharp-scope: using',
 
-  loadResolutionConfig: (repoPath) => loadCsharpResolutionConfig(repoPath),
+  loadResolutionConfig: (repoPath) => loadCsharpResolutionConfig(repoPath, false),
 
-  resolveImportTarget: (targetRaw, fromFile, allFilePaths, resolutionConfig) => {
+  resolveImportTarget: (targetRaw, fromFile, allFilePaths, resolutionConfig, context) => {
     const config = resolutionConfig as CsharpResolutionConfig | undefined;
     const ws: CsharpResolveContext = {
       fromFile,
       allFilePaths,
       csharpConfigs: config?.csharpConfigs,
       namespaces: config?.namespaces,
+      parsedFiles: context?.parsedFiles,
     };
     // `WorkspaceIndex` is an opaque `unknown` placeholder in the
     // shared contract, so `ws` passes structurally without a cast.
     return resolveCsharpImportTarget(
-      { kind: 'namespace', localName: '_', importedName: '_', targetRaw },
+      context?.parsedImport ?? { kind: 'namespace', localName: '_', importedName: '_', targetRaw },
       ws,
     );
   },
@@ -62,6 +64,7 @@ const csharpScopeResolver: ScopeResolver = {
     buildMro(graph, parsedFiles, nodeLookup, defaultLinearize),
 
   populateOwners: (parsed: ParsedFile) => {
+    rememberCsharpImportDeclarations(parsed);
     populateClassOwnedMembers(parsed);
     // Sidecar-only namespace tagging (does NOT touch qualifiedName) so the
     // qualified constructor resolver can break same-tail collisions like

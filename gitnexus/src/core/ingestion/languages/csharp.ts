@@ -7,6 +7,7 @@
  */
 
 import { preprocessCSharpSource } from '../../tree-sitter/csharp-preproc-normalizer.js';
+import { collectCsharpImportDeclarations } from './csharp/import-declarations.js';
 import { SupportedLanguages } from 'gitnexus-shared';
 import { createClassExtractor } from '../class-extractors/generic.js';
 import { csharpClassConfig } from '../class-extractors/configs/csharp.js';
@@ -206,6 +207,7 @@ export const csharpProvider = defineLanguage({
   // the full per-hook rationale and the canonical capture vocabulary
   // in ./csharp/query.ts (CSHARP_SCOPE_QUERY constant).
   emitScopeCaptures: emitCsharpScopeCaptures,
+  collectCaptureSideChannel: collectCsharpImportDeclarations,
   cfgVisitor: createCsharpCfgVisitor(),
   interpretImport: interpretCsharpImport,
   interpretTypeBinding: interpretCsharpTypeBinding,

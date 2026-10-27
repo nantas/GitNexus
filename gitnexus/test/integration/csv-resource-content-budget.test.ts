@@ -14,6 +14,37 @@ afterEach(async () => {
 });
 
 describe('resource File content respects the scan size budget', () => {
+  it('exports full File text without preparing unused symbol lines', async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'gn-content-lazy-lines-'));
+    const content = '资源内容\r\n'.repeat(2000) + 'tail-marker';
+    await fs.writeFile(path.join(root, 'resource.asset'), content);
+    const originalSplit = String.prototype.split;
+    let sourceSplits = 0;
+    const spy = vi.spyOn(String.prototype, 'split').mockImplementation(function (
+      separator: any,
+      limit?: number,
+    ) {
+      if (String(this) === content && separator === '\n') sourceSplits++;
+      return originalSplit.call(this, separator, limit);
+    });
+    const result = await streamAllCSVsToDisk(
+      buildTestGraph([
+        {
+          id: 'File:resource.asset',
+          label: 'File',
+          name: 'resource.asset',
+          filePath: 'resource.asset',
+        },
+      ]),
+      root,
+      path.join(root, 'csv'),
+    );
+    spy.mockRestore();
+    expect(sourceSplits).toBe(0);
+    const csv = await fs.readFile(result.nodeFiles.get('File')!.csvPath, 'utf8');
+    expect(csv).toContain(content.replace(/[\r\n\t]+/g, ' '));
+  });
+
   it('overlaps bounded file reads while preserving CSV row order and content', async () => {
     vi.stubEnv('GITNEXUS_MAX_FILE_SIZE', '512');
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'gn-content-prefetch-'));
