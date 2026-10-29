@@ -36,8 +36,8 @@ neonspark 冷启动全量建图降耗的持续优化 loop。agent 按本 spec �
 1. **候选选取**：按 roadmap"当前方向"表顺序取下一候选（当前顺序：资源输入降本杠杆 → FTS 区段日志标记 → 声明驱动 namespace 候选发现重评）。实现/测量中发现的杠杆可派生新候选，但必须先写入 roadmap 再执行。**已否决候选不得重跑**。
 2. **前置分析**：对即将编辑的符号跑 `impact`（MCP 或 `node .gitnexus/run.cjs impact <symbol> --direction upstream --repo .`）。`risk: UNKNOWN` 视为未决，必须文本检索确认后才可继续。
 3. **实现**：遵循 TDD——语义一致性测试场景先行。实验索引、诊断脚本、粗日志一律进 `.scratch/`，不进 Git。
-4. **安静窗口 preflight**：测量前跑仓库既有的噪声探针流程（参照 [../measurement.md](../measurement.md) / preflight-probe）。探针不通过：每 10 分钟重试，最多 1 小时；仍不安静则挂起测量，转做本轮内不依赖测量的工作（如埋点、测试、文档）；无事可做才停下出 brief。**噪声样本永不做判定依据**。
-5. **测量**：先 1 次带 preflight 的冷构建粗筛；再 3 次正式判定冷构建，取区段中位数。粗筛信号不明确（变化 <5s 或带噪声标记）仍需补满 3 次。
+4. **安静窗口 preflight**：测量前跑 `node tools/perf/preflight-probe.mjs`，exit 0 才算安静。不通过：每 10 分钟重试，最多 1 小时；仍不安静则挂起测量，转做本轮内不依赖测量的工作（如埋点、测试、文档）；无事可做才停下出 brief。**噪声样本永不做判定依据**。
+5. **测量**：用 `node tools/perf/run-cold-build.mjs --label <标签> --dist gitnexus/dist --target <neonnew 路径> --mode full` 跑冷构建（自动产出 `segments.json`）。先 1 次粗筛；再 3 次正式判定，取区段中位数。粗筛信号不明确（变化 <5s）或标记缺失（exit 2）的样本作废，需补满 3 次有效样本。每次 exit 0 且输入 receipt 一致才有效。
 6. **判定**：
    - **采纳** → 过提交门槛 → 立即提交当前分支 → 判定是否达标。
    - **否决** → 全量还原源码，roadmap 记录否决原因与证据哈希。

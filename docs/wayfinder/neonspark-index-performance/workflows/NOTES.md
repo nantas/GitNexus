@@ -16,6 +16,8 @@
 
 ## 工具与命令
 
+- `node tools/perf/preflight-probe.mjs` — 安静窗口判定，exit 0 才可测量。
+- `node tools/perf/run-cold-build.mjs --label <名> --dist gitnexus/dist --target <neonnew> --mode full` — 冷构建测量，自动产出 segments.json。详见 `tools/perf/README.md`。
 - `node .gitnexus/run.cjs impact <symbol> --direction upstream --repo .` — 编辑前影响分析。
 - `node .gitnexus/run.cjs detect-changes --scope all --repo .` — 提交前图变化分析。
 - 索引新鲜度：`node .gitnexus/run.cjs analyze --index-only`（索引过期时先问再重建）。
