@@ -11,6 +11,14 @@ status: open
 
 ## Notes
 
+- 2026-10-28 续：[容器成员接收者修复](receiver-container-fix.md)已实现并验证，产品改动已提交 `3989db52`（fix(scope-resolution): ground collection receiver members on the container）：Case 4 门控 + provider 钩子 + `TypeRef.boundAs` 所有权判据 + `elementErasedTypeApplication` 形态函数；全量 22,096 通过，neonnew A/B 消除 -103 CALLS/-123 ACCESSES 假边与 9 条幻影 process 步骤，硬锚点（符号/清单/内容哈希/UNITY 资源事实/FTS）全一致，元素传播与 repo 容器落地保留。声明驱动候选发现重评已解锁。注：集成测试依赖 dist，源码改动后须先 npm run build。
+
+- 2026-10-28 续：[集合接收者与元素类型混淆调查](receiver-element-type.md)完成——绑定期无条件拍平坐实，现网 441 条 import-resolved 容器方法边存在系统性误配（验证例 `List<UnlockContent>` 的 `.Add` → `AssetRefValueDict.Clear`）；修复设计已移交[实现票](receiver-container-fix.md)，实现前置 impact 与语料 A/B。声明驱动候选发现的重评依赖该修复。
+
+- 2026-10-28 最新：用户选定**阶段锚定判据**（[决议](acceptance-noise.md)）：≥3 次安静窗口冷构建的区段中位数之和 ≤180s，端到端 wall 降为参考。同窗口补测的 full-b4 安静参考 **308.5s**（CPU 727.9s ≈ 旧参考；receipt/语义产物与 full-b1 逐字节一致；unity-resources 69.8s——旧 464.5s 参考含外置 HFS+ 源盘惩罚 150.2s）。当前缺口 ~126s；FTS+发布段（94.5s）成为第二大区段且无内部标记，若成为主项需先加区段日志。
+
+- 2026-10-27 最新：基准输入仓已切换。neonspark 工作区转入活跃开发（Unity Editor 常驻），按用户指示不再作为测量输入；改用 `/Users/nantasmac/projects/neonnew`。[neonnew 重立基线](neonnew-rebaseline.md)完成：同产品语义全对齐、阶段锚点复现，但端到端完整 wall 被环境噪声支配（1310-1503s，旧参考 464.5s 不可复现）。验收噪声策略已立新票；neonnew 既有 `.gitnexus` 索引受保护未触碰。
+
 - 2026-10-27 最新：[namespace 范围修复与对照](namespace-scope-fix.md)完成，纯代码 152.257→133.875 秒，完整参考 464.535 秒。代码内容/符号、资源事实、FTS 与 302 项回归通过；已更新 baseline-current，清理约 12.33 GB 实验索引。180 秒未达。扩大声明候选方案不采纳，后续先区分集合接收者与元素类型。
 
 - 2026-10-27 最新方向：[拆分纯代码与 Unity 资源分析基线](code-resource-baseline.md)，先建立代码基线，再从资源需求审查全范围分析；允许隔离测量，不将删减能力计作完整构建达标。
@@ -43,11 +51,19 @@ status: open
 - 2026-10-23 用户确认：冷启动全量为主验收口径；覆盖 wayfinder 默认 planning-only，建图后继续测量、实现和验收。
 - 本地 Markdown tracker：front matter 的 parent/assignee/status 表示父子关系、认领及状态，blocked_by 表示依赖；resolution 单独文件记录答案。查询同目录 tickets 的 open、无未关闭 blocker、无 assignee 项得 frontier。
 - 冷启动：独立空索引与解析缓存；不声称清空 OS 文件缓存。计时包含 CLI 启动、输入核验、完整 pipeline、DB/FTS、发布和退出。缓存全量重建与无变化重跑另记。
-- 原 neonspark 工作区仅只读，使用独立 storage/GITNEXUS_HOME，不改变原索引、业务文件、全局 CLI。
+- 测量输入仓为 neonnew（原 neonspark 工作区仅只读且现已转入开发）；两者均为同仓克隆，使用独立 storage/GITNEXUS_HOME，不改变目标仓索引、业务文件、全局 CLI。
 - 遵循 diagnosing-bugs、gitnexus-debugging、gitnexus-cli、ponytail；Unity 真理源为 docs/unity-runtime-process-source-of-truth.md。
 - 保留 scope、C# defines、资源与 process 事实、full content/FTS、输入一致性检查；不得通过减少分析能力达标。
 
 ## Decisions so far
+
+- [区分容器成员的接收者解析修复](receiver-container-fix.md) — 实现+验证完成：集合接收者的直接成员解析落到容器（repo 容器 MRO/BCL 判 unresolved），切断元素同名误配的假边；A/B 证据齐全，残留（同值别名）已界定；声明驱动 namespace 候选发现重评解锁。
+
+- [区分 C# 集合接收者与元素类型](receiver-element-type.md) — 混淆坐实：单参集合绑定无条件拍平为元素类型，容器成员落全库名字兜底产生错误边（441 条 import-resolved，116→NetworkWriter.ToArray、52→RoomRecorder.Add 等）；修复设计移交实现票，完成后重评声明驱动候选发现。
+
+- [定验收噪声策略](acceptance-noise.md) — 用户选定阶段锚定判据；安静窗口参考 full-b4 308.5s（区段：快照 30.4/scan 13.4/parse 40.7/scope 26.1/unity-resources 69.8/导入 29.5/FTS+发布 94.5），旧 464.5s 参考含外置盘读惩罚，实际缺口 ~126s。
+
+- [neonnew 重立基线](neonnew-rebaseline.md) — 同一产品在新输入仓上语义全对齐（receipt/符号/Unity 事实/九类关系/FTS 全部一致），阶段锚点复现；端到端完整 wall 被环境噪声支配（1310-1503s，各含一个落点不定的 ~1000s 慢区），连旧 464.5s 参考都不可复现，180 秒判定需先定验收噪声策略。
 
 - [验证 namespace 证据范围与引用目标是否一致](namespace-scope-research.md) — 复现范围外 namespace 放行内部错误目标；真实源码 resolver 回放收窄后 19 处变未解析。后续[候选归属修复](namespace-scope-fix.md)已验证落盘；保留原候选生成，不扩展为 namespace 多目标重写。
 
@@ -68,9 +84,9 @@ status: open
 
 ## Not yet specified
 
-- 现有输入核验、FTS、资源 I/O、作用域候选已完成验证决策，详见[后续优化路线图](roadmap.md)。180 秒验收未通过，不能把当前环境的快慢差值当作确定收益。
+- 现有输入核验、FTS、资源 I/O、作用域候选已完成验证决策，详见[后续优化路线图](roadmap.md)。验收噪声口径已立新票；阶段锚点（热缓存阶段成本、纯代码整轮 ≤165s）作为当前可靠的测量锚。
 - 哪种存储/处理架构调整值得进入跨仓库设计与回归；可明确的跨阶段复用选择已转为新任务，不预设缓存方案。
-- 若测得机器/存储条件构成限制，如何建立可迁移的性能验收环境；不得直接降低完整性要求。
+- 环境慢区根因（SSD 长尾/内核回写节流/其他后台任务）未定罪；只有当候选优化需要引用它时才值得继续取证。
 
 ## Out of scope
 

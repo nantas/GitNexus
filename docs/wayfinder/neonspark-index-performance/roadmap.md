@@ -1,5 +1,27 @@
 # neonspark 后续性能优化路线图
 
+## 容器接收者修复落地（2026-10-28 下午）
+
+[容器成员接收者修复](receiver-container-fix.md)已实现并验证（源码已提交，见地图 Notes 的提交哈希）：Case 4 门控 + `isContainerMemberReceiver` provider 钩子 + `TypeRef.boundAs` 所有权判据 + `elementErasedTypeApplication` 形态函数；parse cache schema 105。neonnew A/B：**-103 假 CALLS / -123 假 ACCESSES / -9 幻影 process 步骤**，硬锚点（代码符号/文件清单/内容哈希/UNITY 资源事实/FTS）全一致，元素传播与 repo 容器落地保留；全量 22,096 通过。已知残留：同值别名（`var a = list; a.Add()`）保守豁免；Kotlin/Rust 同型拍平未接入。调试教训已入票：集成测试的 parse worker 从 `gitnexus/dist` 加载语言代码，源码改动后须先 `npm run build`。
+
+对路线图的影响：
+1. **声明驱动 namespace 候选发现的重评已解锁**（当初被否决的直接原因——容器成员误配产生错误 CALLS——已被本修复消除）；作为独立后续任务。
+2. FTS+发布段（安静参考 94.5s）成为主项前需先加区段日志标记（小改动，可随下次候选验证顺带）。
+3. [资源输入降本杠杆](resource-input-semantics.md)（HITL）与验收缺口（阶段锚定 ~126s）不变。
+
+## 验收口径与安静窗口参考（2026-10-28）
+
+用户选定**阶段锚定判据**（≥3 次安静窗口冷构建区段中位数之和 ≤180s，端到端 wall 降为参考）；详见[决议](acceptance-noise.md)。同窗口补测 full-b4 安静参考：**308.5s**（CPU 727.9s ≈ 旧参考 727.8s，receipt/产物与 full-b1 逐字节一致）。区段：启动+快照 30.4 / scan 13.4 / parse 40.7 / scopeResolution 26.1 / **unity-resources 69.8** / CSV+DB 导入 29.5 / **FTS+发布+退出 94.5**。两个新事实：旧 464.5s 参考带外置 HFS+ 源盘读惩罚（unity-resources 150.2s vs 内置 69.8s，同 CPU），180s 实际缺口 ~126s；FTS+发布段为第二大区段且内部无日志标记（含发布前 157k 文件再哈希 ~38s），成为主项前需先加区段标记。
+
+## 基准输入仓切换与噪声发现（2026-10-27 晚）
+
+neonspark 工作区转入活跃开发，基准输入仓改为 neonnew。[重立基线](neonnew-rebaseline.md)：同一 pinned 产品构建在新输入仓语义全对齐（receipt/符号/Unity 事实/九类关系/FTS），阶段锚点复现（scan/parse/scope/unity-resources 与旧基线同量级，纯代码整轮 138.8-163.5s）。但端到端完整 wall 被环境噪声支配：三次 1310.0-1502.6s，每次含一个落点不定的 ~1000s 慢区（冷缓存时在 unity-resources：668,699 次 .meta 读 ~1.6ms/次；热缓存后转移到导入段或 FTS 后静默段）；采样器被饿死表明系统级 I/O 饱和；非 swap 抖动/Spotlight/输入漂移。旧参考 464.5s 在当前环境（Unity 常驻 + 18GB swap + 内部 SSD 88% 满）不可复现。
+
+对路线图的影响：
+1. 验收前需先定[验收噪声策略](acceptance-noise.md)（安静窗口 / 阶段锚定 / 噪声容忍）。
+2. [资源输入降本杠杆](resource-input-semantics.md)获得新证据：unity-resources 阶段对读模式敏感（冷缓存 7 倍膨胀），与需求审查中“部分 .meta 正文缺乏必要消费者”的结论叠加。
+3. [集合接收者与元素类型混淆](receiver-element-type.md)调查完成：混淆坐实（绑定期拍平 + 兜底泄漏，441 条系统性误配边），[修复已实现并验证](receiver-container-fix.md)（A/B：-103 假 CALLS/-123 假 ACCESSES/-9 幻影 process 步骤，硬锚点全一致）；声明驱动候选发现的重评已解锁，作为独立后续。
+
 ## 发布整理（2026-10-27）
 
 当前已验收实现与 1.6.13 版本整理已提交 `5c9adf9d`；全量测试 22,080 passed / 83 skipped，编译后测试 209/209，实际安装包 smoke 通过。性能原始样本和发布产物分别固定，详见[发布准备](../../releases/1.6.13-preparation.md)。1.6.13 已通过本地 npm 流程发布，线上包与验收产物哈希一致；GitHub 页面见[发布记录](https://github.com/nantas/GitNexus/releases/tag/v1.6.13)，现有自动发布工作流不作为本次依赖。下文实验时的“未提交/未运行全仓测试”状态保留为历史记录，以本节发布状态为准。
