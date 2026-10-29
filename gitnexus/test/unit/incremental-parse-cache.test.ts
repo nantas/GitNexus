@@ -277,8 +277,10 @@ describe('PARSE_CACHE_VERSION', () => {
   // Moved 98 -> 99 for #3190: lexical import provenance and corrected export
   // evidence. origin/main took 98 for #3219; 99 is the next free value.
   // v104 stores scoped C# import declaration evidence in worker/cache payloads.
-  it('pins SCHEMA_BUMP to 104 so concurrent bumps cannot silently collide (#2766, #3015, #3088, #2885, #3128, #2865, #3130, #1432, #3161, #3179, #3219, #3190)', () => {
-    expect(Number(PARSE_CACHE_VERSION.split('+', 1)[0])).toBe(104);
+  // v105 captures the C# generic-construction container name so element-flattened
+  // bindings can rebuild their construction spelling.
+  it('pins SCHEMA_BUMP to 105 so concurrent bumps cannot silently collide (#2766, #3015, #3088, #2885, #3128, #2865, #3130, #1432, #3161, #3179, #3219, #3190)', () => {
+    expect(Number(PARSE_CACHE_VERSION.split('+', 1)[0])).toBe(105);
     expect(PARSE_CACHE_BUCKET_COUNT).toBe(128);
     // The PREVIOUS version must fail the reuse gate, not merely differ from the
     // current one — a hardcoded number outside the conflict hunk rebases cleanly
@@ -286,7 +288,7 @@ describe('PARSE_CACHE_VERSION', () => {
     // Every nearby historical or in-flight value is rejected.
     for (const taken of [
       59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81,
-      82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100,
+      82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 104,
     ]) {
       expect(Number(PARSE_CACHE_VERSION.split('+', 1)[0])).not.toBe(taken);
     }

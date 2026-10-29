@@ -640,6 +640,18 @@ export interface TypeRef {
    * evidence" and decline, never as "not a container".
    */
   readonly declaredSpelling?: string;
+  /**
+   * The name this TypeRef was CREATED for — the `boundName` of the
+   * `ParsedTypeBinding` the extractor stored it under. A binding COPIED to
+   * another name (a chain-fold alias, an iteration variable) carries the
+   * ORIGINAL name here, so a consumer asking "is THIS receiver the declared
+   * owner of this type evidence?" can compare `boundAs === receiverName`.
+   *
+   * Absent on TypeRefs synthesized outside the capture path (`this`
+   * receivers, propagated returns); consumers must treat absence as
+   * "no ownership evidence" and decide conservatively.
+   */
+  readonly boundAs?: string;
   /** Anchor for resolving `rawName` — the scope where the annotation/inference was written. */
   readonly declaredAtScope: ScopeId;
   readonly source:

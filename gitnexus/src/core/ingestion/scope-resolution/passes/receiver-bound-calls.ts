@@ -93,7 +93,7 @@ import {
   resolveCompoundReceiverClass,
   resolveCompoundReceiverTyped,
 } from '../passes/compound-receiver.js';
-import { erasedTypeApplication, typeApplicationArguments } from '../../utils/template-arguments.js';
+import { erasedTypeApplication, elementErasedTypeApplication, typeApplicationArguments } from '../../utils/template-arguments.js';
 import {
   heritageTypeArgumentsKey,
   stepHeritageInstantiation,
@@ -168,6 +168,7 @@ type ReceiverBoundProviderSubset = Pick<
   ScopeResolver,
   | 'isSuperReceiver'
   | 'isSuperReceiverInContext'
+  | 'isContainerMemberReceiver'
   | 'fieldFallbackOnMethodLookup'
   | 'collapseMemberCallsByCallerTarget'
   | 'elementTypeOf'
@@ -1976,7 +1977,30 @@ export function emitReceiverBoundCalls(
           // same-named class after this path declines it.
           handledSites.add(siteKey);
         }
-        const typeApplication = erasedTypeApplication(typeRef);
+        // The element-flattened twin restores `List<User>` from a binding
+        // the capture layer reduced to `User`. Whether that spelling makes
+        // the receiver a CONTAINER (member access = collection API) is
+        // language knowledge — the await/unwrap family flattens to the
+        // ELEMENT — so only a provider that says so gates member resolution
+        // onto the container application. Providers without the hook keep
+        // their existing element-typed behaviour unchanged.
+        const containerApplication = elementErasedTypeApplication(typeRef);
+        // `boundAs` ownership: the spelling names the container the ORIGINAL
+        // binding declared. A receiver reading COPIED evidence (a chain-fold
+        // alias, a foreach iteration variable) has a different name than the
+        // binding's own — for it the spelling means "derived FROM this
+        // container", and the element reading the fold already chose is the
+        // one to keep. Only the binding's declared owner may be gated as the
+        // container itself.
+        const gateEligible =
+          typeRef.boundAs === undefined || typeRef.boundAs === receiverName;
+        const typeApplication =
+          erasedTypeApplication(typeRef) ??
+          (containerApplication !== undefined &&
+          gateEligible &&
+          provider.isContainerMemberReceiver?.(containerApplication) === true
+            ? containerApplication
+            : undefined);
         let ownerDef = resolveClassBindingForName(
           site.inScope,
           unresolvedCalleeFallback ?? typeApplication ?? typeRef.rawName,

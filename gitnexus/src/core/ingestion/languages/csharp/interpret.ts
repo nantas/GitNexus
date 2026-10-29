@@ -89,18 +89,38 @@ export function interpretCsharpTypeBinding(captures: CaptureMatch): ParsedTypeBi
       if (depth < 0) return null;
     }
     if (!argument || depth !== 0) return null;
+    const element = stripQualifier(stripGeneric(stripNullable(argument)));
+    // The generic-arg grammar splits the written construction across two
+    // captures — the base name and the bare argument list — so the whole
+    // spelling (`List<User>`) exists nowhere unless rebuilt here. The
+    // container marker lets the direct-member receiver gate distinguish
+    // "member on the container" from "member on the element"; without it
+    // the binding is indistinguishable from a plain element-typed one.
+    const container = captures['@type-binding.container']?.text.trim();
+    const containerSpelling =
+      container !== undefined && /^[A-Za-z_][A-Za-z0-9_.]*$/.test(container)
+        ? `${container}${text}`
+        : undefined;
     return {
       boundName: nameCap.text,
-      rawTypeName: stripQualifier(stripGeneric(stripNullable(argument))),
+      rawTypeName: element,
       source: 'constructor-inferred',
       fallbackOnly: true,
+      ...(containerSpelling !== undefined && containerSpelling !== element
+        ? { declaredSpelling: containerSpelling }
+        : {}),
     };
   }
 
   // Strip nullable suffix (`User?` → `User`), single-arg generic wrapper
   // (`List<User>` → `User`), and qualifier (`System.User` → `User`) so
-  // receiver-typed resolution treats these identically.
-  const rawType = stripQualifier(stripGeneric(stripNullable(typeCap.text.trim())));
+  // receiver-typed resolution treats these identically. The WRITTEN form
+  // (minus the nullable suffix — a C# decoration the shared extractor must
+  // not know how to strip) survives as `declaredSpelling` whenever the
+  // reduction changed it, so container positions stay distinguishable from
+  // element positions downstream.
+  const written = stripNullable(typeCap.text.trim());
+  const rawType = stripQualifier(stripGeneric(written));
 
   // Anchor captures distinguish the source of the binding. Order
   // matters: more-specific anchors take precedence.
@@ -111,7 +131,12 @@ export function interpretCsharpTypeBinding(captures: CaptureMatch): ParsedTypeBi
   else if (captures['@type-binding.alias'] !== undefined) source = 'assignment-inferred';
   else if (captures['@type-binding.return'] !== undefined) source = 'return-annotation';
 
-  return { boundName: nameCap.text, rawTypeName: rawType, source };
+  return {
+    boundName: nameCap.text,
+    rawTypeName: rawType,
+    source,
+    ...(written !== rawType ? { declaredSpelling: written } : {}),
+  };
 }
 
 /** Member accesses we want to preserve through qualifier stripping.
@@ -119,6 +144,34 @@ export function interpretCsharpTypeBinding(captures: CaptureMatch): ParsedTypeBi
  *  so the compound-receiver pass can unwrap the receiver's generic
  *  type (Dictionary<K,V>) based on the suffix. */
 const COLLECTION_ACCESSOR_SUFFIXES = new Set(['Values', 'Keys']);
+
+/** Container bases whose flattened form puts the binding at the ELEMENT
+ *  position: `await`/unwrap families. A DIRECT member access on such a
+ *  receiver is still container access (`t.Wait()`), but the flattening
+ *  exists because await-like positions produce the element — so the
+ *  receiver gate must NOT treat the spelling as container evidence for
+ *  member suppression. Kept beside the collection family so the two halves
+ *  of `stripGeneric`'s list stay visible together. */
+export const CSHARP_UNWRAP_CONTAINER_BASES: readonly string[] = Object.freeze([
+  'Task',
+  'ValueTask',
+  'Nullable',
+]);
+
+/** Container bases whose DIRECT members belong to the container: a member
+ *  access through such a receiver is collection API (`list.Add`), never the
+ *  element's. The receiver gate consumes this via the provider hook. */
+export const CSHARP_COLLECTION_CONTAINER_BASES: readonly string[] = Object.freeze([
+  'List',
+  'IList',
+  'IEnumerable',
+  'ICollection',
+  'IReadOnlyList',
+  'IReadOnlyCollection',
+  'HashSet',
+  'ISet',
+  'IAsyncEnumerable',
+]);
 
 /** `User?` → `User`. */
 function stripNullable(text: string): string {
@@ -135,10 +188,18 @@ function stripNullable(text: string): string {
  * Multi-arg generics (`Dictionary<string, User>`, `Func<int, User>`)
  * are left alone — element semantics aren't unambiguous.
  */
-function stripGeneric(text: string): string {
-  const single = text.match(
-    /^(?:[A-Za-z_][A-Za-z0-9_.]*\.)?(?:List|IList|IEnumerable|ICollection|IReadOnlyList|IReadOnlyCollection|HashSet|ISet|Task|ValueTask|Nullable|IAsyncEnumerable)<([^,<>]+)>$/,
+const STRIP_GENERIC_CONTAINERS: RegExp = (() => {
+  const bases = [
+    ...CSHARP_COLLECTION_CONTAINER_BASES,
+    ...CSHARP_UNWRAP_CONTAINER_BASES,
+  ].sort((a, b) => b.length - a.length);
+  return new RegExp(
+    `^(?:[A-Za-z_][A-Za-z0-9_.]*\.)?(?:${bases.join('|')})<([^,<>]+)>$`,
   );
+})();
+
+function stripGeneric(text: string): string {
+  const single = text.match(STRIP_GENERIC_CONTAINERS);
   if (single !== null) return single[1].trim();
   return text;
 }

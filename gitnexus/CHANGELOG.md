@@ -2,6 +2,20 @@
 
 All notable changes to GitNexus will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Collection-typed receivers (`List<User> users; users.Add(...)`, `users.Count`) no longer attribute container members to same-name members of the ELEMENT type. Direct member access on a single-argument collection receiver now grounds the container: repo-declared containers resolve through their MRO, external (BCL) containers resolve as unresolved receivers instead of falling through to workspace-wide name matching. Removes the systematic `SyncList.Add`/`AssetRefList.Count`-style misattributed CALLS/ACCESSES observed on Unity corpora, and the phantom process steps built on those false call chains.
+- Element semantics are preserved unchanged: indexer access (`list[0].Member`), `foreach` iteration variables, and chain propagation keep resolving on the element type; copied container evidence (iteration aliases) is exempted from the gate via the new `boundAs` ownership field. `await`/unwrap families (`Task<T>`, `Promise<T>`) are excluded from the gate by the provider hook, so await-position inference is unchanged.
+
+### Added
+- `TypeRef.boundAs`: the binding name a type reference was created for, letting consumers distinguish a receiver that OWNS its type evidence from one reading a copied (alias/iteration) reference.
+- `elementErasedTypeApplication`: shape rule restoring `List<User>` from bindings the capture layer flattened to `User` (language-agnostic; used only at the receiver gate).
+- Optional `ScopeResolver.isContainerMemberReceiver` provider hook; C# implements it for its collection family, sharing the exported container constants with `stripGeneric`.
+
+### Changed
+- C# generic-construction captures now record the container base name (`@type-binding.container`), letting constructor-inferred bindings (`var users = new List<User>()`) rebuild their written spelling. Parse cache schema 104 → 105; indexes regenerate on the next analysis.
+
 ## [1.6.13] - 2026-10-27
 
 ### Fixed

@@ -234,17 +234,17 @@ const CSHARP_SCOPE_QUERY = `
 
 (assignment_expression left: (identifier) @type-binding.name right: (invocation_expression function: (member_access_expression name: (generic_name (identifier) @type-binding.type)))) @type-binding.alias
 
-(local_declaration_statement (variable_declaration type: (implicit_type) (variable_declarator name: (identifier) @type-binding.name (invocation_expression function: (generic_name (type_argument_list) @type-binding.type))))) @type-binding.generic-arg
+(local_declaration_statement (variable_declaration type: (implicit_type) (variable_declarator name: (identifier) @type-binding.name (invocation_expression function: (generic_name (identifier) @type-binding.container (type_argument_list) @type-binding.type))))) @type-binding.generic-arg
 
-(local_declaration_statement (variable_declaration type: (implicit_type) (variable_declarator name: (identifier) @type-binding.name (invocation_expression function: (member_access_expression name: (generic_name (type_argument_list) @type-binding.type)))))) @type-binding.generic-arg
+(local_declaration_statement (variable_declaration type: (implicit_type) (variable_declarator name: (identifier) @type-binding.name (invocation_expression function: (member_access_expression name: (generic_name (identifier) @type-binding.container (type_argument_list) @type-binding.type)))))) @type-binding.generic-arg
 
-(local_declaration_statement (variable_declaration type: (implicit_type) (variable_declarator name: (identifier) @type-binding.name (await_expression (invocation_expression function: (generic_name (type_argument_list) @type-binding.type)))))) @type-binding.generic-arg
+(local_declaration_statement (variable_declaration type: (implicit_type) (variable_declarator name: (identifier) @type-binding.name (await_expression (invocation_expression function: (generic_name (identifier) @type-binding.container (type_argument_list) @type-binding.type)))))) @type-binding.generic-arg
 
-(local_declaration_statement (variable_declaration type: (implicit_type) (variable_declarator name: (identifier) @type-binding.name (await_expression (invocation_expression function: (member_access_expression name: (generic_name (type_argument_list) @type-binding.type))))))) @type-binding.generic-arg
+(local_declaration_statement (variable_declaration type: (implicit_type) (variable_declarator name: (identifier) @type-binding.name (await_expression (invocation_expression function: (member_access_expression name: (generic_name (identifier) @type-binding.container (type_argument_list) @type-binding.type))))))) @type-binding.generic-arg
 
-(assignment_expression left: (identifier) @type-binding.name right: (invocation_expression function: (generic_name (type_argument_list) @type-binding.type))) @type-binding.generic-arg
+(assignment_expression left: (identifier) @type-binding.name right: (invocation_expression function: (generic_name (identifier) @type-binding.container (type_argument_list) @type-binding.type))) @type-binding.generic-arg
 
-(assignment_expression left: (identifier) @type-binding.name right: (invocation_expression function: (member_access_expression name: (generic_name (type_argument_list) @type-binding.type)))) @type-binding.generic-arg
+(assignment_expression left: (identifier) @type-binding.name right: (invocation_expression function: (member_access_expression name: (generic_name (identifier) @type-binding.container (type_argument_list) @type-binding.type)))) @type-binding.generic-arg
 
 ;; Type bindings — identifier-to-identifier alias: \`var alias = u;\`.
 ;; The resolver's chain-follow walks from \`alias\` → \`u\` → u's

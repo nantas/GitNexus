@@ -80,3 +80,59 @@ describe('interpretCsharpTypeBinding — type normalization (F41 analog #1928)',
     expect(raw('Outer.Inner')).toBe('Inner');
   });
 });
+
+/** Full binding (not just rawTypeName) so `declaredSpelling` is assertable. */
+function binding(typeText: string) {
+  const m: CaptureMatch = {
+    '@type-binding.name': cap('@type-binding.name', 'x'),
+    '@type-binding.type': cap('@type-binding.type', typeText),
+    '@type-binding.annotation': cap('@type-binding.annotation', typeText),
+  };
+  return interpretCsharpTypeBinding(m);
+}
+
+describe('interpretCsharpTypeBinding — declaredSpelling survives element reduction', () => {
+  it('keeps the written container spelling when a single-arg collection was flattened', () => {
+    expect(binding('List<User>')?.declaredSpelling).toBe('List<User>');
+    expect(binding('List<User>')?.rawTypeName).toBe('User');
+    expect(binding('HashSet<Ns.Item>')?.declaredSpelling).toBe('HashSet<Ns.Item>');
+  });
+
+  it('normalizes the nullable suffix away from the spelling (`List<User>?`)', () => {
+    expect(binding('List<User>?')?.declaredSpelling).toBe('List<User>');
+  });
+
+  it('sets no spelling when nothing was reduced', () => {
+    expect(binding('User')?.declaredSpelling).toBeUndefined();
+  });
+
+  it('keeps a plain qualifier as the spelling (`Ns.User`)', () => {
+    expect(binding('Ns.User')?.declaredSpelling).toBe('Ns.User');
+  });
+
+  it('keeps multi-arg generics intact (no container flattening happened)', () => {
+    expect(binding('Dictionary<string, User>')?.declaredSpelling).toBeUndefined();
+  });
+
+  it('rebuilds the construction spelling from the container capture (generic-arg path)', () => {
+    const m: CaptureMatch = {
+      '@type-binding.name': cap('@type-binding.name', 'users'),
+      '@type-binding.type': cap('@type-binding.type', '<User>'),
+      '@type-binding.container': cap('@type-binding.container', 'List'),
+      '@type-binding.generic-arg': cap('@type-binding.generic-arg', 'var users = new List<User>();'),
+    };
+    const parsed = interpretCsharpTypeBinding(m);
+    expect(parsed?.rawTypeName).toBe('User');
+    expect(parsed?.declaredSpelling).toBe('List<User>');
+    expect(parsed?.fallbackOnly).toBe(true);
+  });
+
+  it('omits the spelling when the grammar supplied no container name', () => {
+    const m: CaptureMatch = {
+      '@type-binding.name': cap('@type-binding.name', 'users'),
+      '@type-binding.type': cap('@type-binding.type', '<User>'),
+      '@type-binding.generic-arg': cap('@type-binding.generic-arg', 'var users = Make();'),
+    };
+    expect(interpretCsharpTypeBinding(m)?.declaredSpelling).toBeUndefined();
+  });
+});

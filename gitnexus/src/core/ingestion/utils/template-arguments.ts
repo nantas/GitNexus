@@ -279,3 +279,62 @@ export function erasedTypeApplication(typeRef: TypeRef): string | undefined {
   const inner = balancedTailList(spelling.slice(base.length).trimStart(), 0);
   return inner === undefined ? undefined : `${base}<${inner}>`;
 }
+
+/**
+ * The ELEMENT-argument twin of {@link erasedTypeApplication}, for providers
+ * whose capture layer reduces a container spelling to its element type.
+ *
+ * `erasedTypeApplication` assumes `rawName` is the BASE the spelling applies
+ * arguments to (`vector<Item>` → base `vector`) — the shape a provider that
+ * keeps the container produces. A provider that instead flattens a
+ * single-argument collection to its ELEMENT (`List<User>` → `User`, the
+ * documented capture-time normalization for several languages) sends that
+ * assumption the wrong shape: `spelling.startsWith(rawName)` is false, the
+ * application is never restored, and the reduced name resolves as if the
+ * source had written it — typing `list.Add(...)`'s receiver as the ELEMENT
+ * and attributing container members to element declarations.
+ *
+ * This twin recognizes exactly that shape and rebuilds the application the
+ * grounding lookup can use:
+ *
+ *   - The spelling is `Base<Arg>` — a dotted-identifier base, one angle
+ *     list closing on the last character, and a SINGLE top-level argument.
+ *   - That argument IS `rawName` (or ends `.${rawName}` — the capture layer
+ *     strips qualifiers from the element, the spelling keeps them).
+ *
+ * Everything else declines, and declining must keep the caller's existing
+ * behaviour — same discipline as `erasedTypeApplication`:
+ *
+ *   - `User[]` / `List[User]` — no angle list / bracket punctuation: an
+ *     element-flattening provider with bracket spellings is not this shape.
+ *   - `Dictionary<string, User>` — two top-level arguments: only the
+ *     single-argument element reduction is unambiguous.
+ *   - `Task<Func<User, int>>` / nested `List<List<User>>` — the sole argument
+ *     is not `rawName`.
+ *   - Trailing decoration (`List<User>?`) — the list does not close at the
+ *     end; providers that keep such spelling readable normalize it before it
+ *     reaches here.
+ *
+ * Consumed at the direct-member receiver gate (`receiver-bound-calls` Case
+ * 4): for a receiver the capture layer PROVES is a container application,
+ * member lookup must ground the CONTAINER (repo-declared → its members;
+ * external → unresolved), never the element. Element semantics — `recv[0]`,
+ * `foreach` propagation, chain folds — read the same TypeRef through the
+ * compound path, which this function is deliberately NOT part of.
+ */
+export function elementErasedTypeApplication(typeRef: TypeRef): string | undefined {
+  const spelling = typeRef.declaredSpelling?.trim();
+  if (spelling === undefined) return undefined;
+  const open = spelling.indexOf('<');
+  if (open <= 0) return undefined;
+  const base = spelling.slice(0, open);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(base)) return undefined;
+  const inner = balancedTailList(spelling, open);
+  if (inner === undefined) return undefined;
+  const args = splitTopLevelArguments(inner);
+  if (args.length !== 1) return undefined;
+  const element = typeRef.rawName.trim();
+  if (element.length === 0) return undefined;
+  if (args[0] !== element && !args[0]!.endsWith(`.${element}`)) return undefined;
+  return `${base}<${element}>`;
+}

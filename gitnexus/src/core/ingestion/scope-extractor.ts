@@ -96,6 +96,7 @@ import type {
   TypeRef,
 } from 'gitnexus-shared';
 import { buildPositionIndex, buildScopeTree, canParentScope, makeScopeId } from 'gitnexus-shared';
+
 import type { LanguageProvider } from './language-provider.js';
 import { isValidReceiverChain } from './utils/receiver-chain-codec.js';
 import {
@@ -1152,12 +1153,14 @@ function pass4CollectTypeBindings(
             rawName: parsed.rawTypeName,
             declaredAtScope: host.id,
             source: parsed.source,
+            boundAs: parsed.boundName,
           }
         : {
             rawName: parsed.rawTypeName,
             declaredSpelling,
             declaredAtScope: host.id,
             source: parsed.source,
+            boundAs: parsed.boundName,
           };
     if (parsed.fallbackOnly) {
       let bindings = fallbackBindings.get(host);
@@ -1245,6 +1248,7 @@ function followChainedRef(start: TypeRef, draftById: ReadonlyMap<ScopeId, ScopeD
   }
   return current;
 }
+
 
 /**
  * Priority ordering when multiple `TypeRef`s compete for the same bound

@@ -768,7 +768,7 @@ import { copyV8CacheIfPresent, tryLoadV8Cache, writeV8CacheFile } from './v8-sid
 // v102: interpolation-aware C# lexical states mask disabled branches reliably.
 // v103: non-conditional directive text cannot contaminate C# lexical state.
 // v104: indexed declaration evidence for import targeting crosses worker/cache boundaries.
-const SCHEMA_BUMP = 104;
+const SCHEMA_BUMP = 105;
 const GITNEXUS_PKG_VERSION = (() => {
   try {
     // package.json sits at gitnexus/package.json — two levels up from

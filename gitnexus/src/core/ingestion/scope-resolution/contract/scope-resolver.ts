@@ -756,6 +756,26 @@ export interface ScopeResolver {
     scopes: ScopeResolutionIndexes,
   ) => boolean;
 
+  /**
+   * Optional classifier for receivers whose capture-time reduction flattened
+   * a type application to its ELEMENT argument (`List<User>` → `User`).
+   *
+   * The shape alone cannot decide member ownership: for a COLLECTION
+   * container a direct member access (`list.Add(...)`) belongs to the
+   * CONTAINER, never the element; for an UNWRAP container (`Task<User>`, a
+   * language's `Promise<User>`) the flattened name IS the element an
+   * `await`-like position produces, and member access on it is element
+   * access. That distinction is language knowledge, so the receiver gate
+   * asks here before treating the spelling as container evidence.
+   *
+   * Receives the restored application spelling (`List<User>`, possibly
+   * container-qualified). Return `true` ONLY when direct member access on a
+   * receiver of that type reaches the CONTAINER's members. `false` or
+   * `undefined` keeps the binding's existing element-typed behaviour —
+   * languages that do not opt in are unchanged.
+   */
+  readonly isContainerMemberReceiver?: (application: string) => boolean;
+
   // ─── Optional toggles ──────────────────────────────────────────────────────
 
   /**

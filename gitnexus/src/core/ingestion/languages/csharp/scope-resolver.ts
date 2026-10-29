@@ -11,6 +11,7 @@ import { SupportedLanguages } from 'gitnexus-shared';
 import { buildMro, defaultLinearize } from '../../scope-resolution/passes/mro.js';
 import { populateClassOwnedMembers } from '../../scope-resolution/scope/walkers.js';
 import { populateCsharpNamespacePrefixes } from './qualified-type-names.js';
+import { CSHARP_COLLECTION_CONTAINER_BASES } from './interpret.js';
 import type { ScopeResolver } from '../../scope-resolution/contract/scope-resolver.js';
 import { csharpProvider } from '../csharp.js';
 import {
@@ -76,6 +77,18 @@ const csharpScopeResolver: ScopeResolver = {
   // plain identifier (no `()` call like Python's `super(...)`) — `base`
   // is a keyword-like receiver, not a callable.
   isSuperReceiver: (text) => text.trim() === 'base',
+
+  // Direct member access on a collection-typed receiver is collection
+  // API (`list.Add(...)`, `list.Count`) — never the element's members.
+  // The await/unwrap family (`Task<User>` etc.) flattens to the ELEMENT
+  // at await positions, so its spellings must NOT gate member
+  // resolution onto the container. Base names from the two exported
+  // families in `interpret.ts` keep this in lockstep with `stripGeneric`.
+  isContainerMemberReceiver: (application) => {
+    const base = application.slice(0, application.indexOf('<')).trim();
+    const lastSegment = base.includes('.') ? (base.split('.').pop() ?? '') : base;
+    return CSHARP_COLLECTION_CONTAINER_BASES.includes(lastSegment);
+  },
 
   // Same-namespace cross-file visibility — C# makes every type
   // declared in `namespace X` visible to other files declaring the
